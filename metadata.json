@@ -1,0 +1,6 @@
+{
+  "name": "BioSync",
+  "description": "Precision metabolic telemetry and autonomous macro intelligence tuned to your biology.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

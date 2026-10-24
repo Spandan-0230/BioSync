@@ -1,0 +1,21 @@
+<resources>
+    <string name="app_name">BioSync</string>
+    <string name="brand_name">BioSync</string>
+    <string name="hero_score">94</string>
+    <string name="hero_headline">FUEL SMARTER. LIVE BETTER.</string>
+    <string name="hero_subtitle">Precision metabolic telemetry and autonomous macro intelligence tuned to your biology.</string>
+    <string name="todays_energy_label">TODAY’S ENERGY</string>
+    <string name="energy_current">1,840</string>
+    <string name="energy_target">/ 2,200 kcal</string>
+    <string name="energy_badge">84% TARGET</string>
+    <string name="energy_remaining">360 kcal remaining</string>
+    <string name="macro_protein">Protein</string>
+    <string name="macro_carbs">Carbohydrates</string>
+    <string name="macro_fats">Fats</string>
+    <string name="macro_hydration">Hydration</string>
+    <string name="macro_steps">Steps</string>
+    <string name="cta_get_started">Get Started</string>
+    <string name="cd_brand_logo">BioSync Pulse Icon</string>
+    <string name="cd_biometric_dial">Precision Biometric Core Dial reading 94</string>
+    <string name="cd_arrow_forward">Proceed arrow</string>
+</resources>
