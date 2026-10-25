@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
@@ -14,9 +15,13 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -31,9 +36,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -50,8 +56,11 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -74,6 +83,7 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -123,6 +133,8 @@ import java.text.NumberFormat
 import java.util.Locale
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -134,8 +146,51 @@ class MainActivity : ComponentActivity() {
     )
     setContent {
       MyApplicationTheme {
-        BioSyncWelcomeScreen()
+        BioSyncApp()
       }
+    }
+  }
+}
+
+private fun safeBlurRadius(radius: Float): Float = radius.coerceAtLeast(0.5f)
+
+@Composable
+fun BioSyncApp() {
+  var showCalibration by rememberSaveable { mutableStateOf(false) }
+
+  AnimatedContent(
+    targetState = showCalibration,
+    transitionSpec = {
+      if (targetState) {
+        (slideInHorizontally(
+          animationSpec = tween(durationMillis = 360, easing = TelemetryEaseOut),
+          initialOffsetX = { fullWidth -> fullWidth / 4 },
+        ) + fadeIn(animationSpec = tween(durationMillis = 300))) togetherWith
+          (slideOutHorizontally(
+            animationSpec = tween(durationMillis = 320, easing = TelemetryEaseOut),
+            targetOffsetX = { fullWidth -> -fullWidth / 5 },
+          ) + fadeOut(animationSpec = tween(durationMillis = 240)))
+      } else {
+        (slideInHorizontally(
+          animationSpec = tween(durationMillis = 340, easing = TelemetryEaseOut),
+          initialOffsetX = { fullWidth -> -fullWidth / 5 },
+        ) + fadeIn(animationSpec = tween(durationMillis = 280))) togetherWith
+          (slideOutHorizontally(
+            animationSpec = tween(durationMillis = 320, easing = TelemetryEaseOut),
+            targetOffsetX = { fullWidth -> fullWidth / 4 },
+          ) + fadeOut(animationSpec = tween(durationMillis = 240)))
+      }
+    },
+    label = "biosync_screen_transition",
+  ) { isCalibrationScreen ->
+    if (isCalibrationScreen) {
+      ProfileCalibrationScreen(
+        onNavigateBack = { showCalibration = false },
+      )
+    } else {
+      BioSyncWelcomeScreen(
+        onNavigateToCalibration = { showCalibration = true },
+      )
     }
   }
 }
@@ -192,11 +247,14 @@ private data class BioSyncResponsiveMetrics(
   val ctaVerticalPadding: Dp,
   val ctaFontSize: TextUnit,
   val ctaIconSize: Dp,
+  val footerFontSize: TextUnit,
+  val ctaToFooterGap: Dp,
 )
 
 private fun computeResponsiveMetrics(
   maxWidth: Dp,
   maxHeight: Dp,
+  fontScale: Float,
 ): BioSyncResponsiveMetrics {
   val w = maxWidth.value.coerceAtLeast(280f)
   val h = maxHeight.value.coerceAtLeast(480f)
@@ -204,15 +262,34 @@ private fun computeResponsiveMetrics(
   val isSideBySide = (w >= 620f && w > h * 1.05f) || (w >= 840f && h >= 500f)
 
   val rawScale = if (isSideBySide) {
-    (min(w / 780f, h / 440f) * 1.06f).coerceIn(0.84f, 1.38f)
+    (min(w / 780f, h / 460f) * 1.04f).coerceIn(0.80f, 1.32f)
   } else {
-    (min(w / 375f, h / 770f) * 1.06f).coerceIn(0.78f, 1.40f)
+    (min(w / 380f, h / 800f) * 1.02f).coerceIn(0.75f, 1.32f)
+  }
+
+  // Normalize system fontScale so even extreme mobile font settings (e.g. 200%)
+  // scale text harmoniously without overflowing containers or forcing excessive scroll.
+  val safeFontScale = fontScale.coerceIn(0.5f, 3.0f)
+  val targetFontGrowth = if (safeFontScale >= 1f) {
+    1f + (safeFontScale - 1f).coerceAtMost(1.2f) * 0.14f
+  } else {
+    1f - (1f - safeFontScale).coerceAtMost(0.5f) * 0.20f
+  }
+  val fontCompensation = targetFontGrowth / safeFontScale
+
+  fun scaledSp(
+    base: Float,
+    minSp: Float,
+    maxSp: Float,
+    factor: Float = rawScale,
+  ): TextUnit {
+    return ((base * factor).coerceIn(minSp, maxSp) * fontCompensation).sp
   }
 
   val dialSizeDp = if (isSideBySide) {
-    min(w * 0.31f, h * 0.50f).coerceIn(152f, 295f).dp
+    min(w * 0.30f, h * 0.48f).coerceIn(145f, 280f).dp
   } else {
-    min(w * 0.59f, h * 0.272f).coerceIn(144f, 286f).dp
+    min(w * 0.54f, h * 0.245f).coerceIn(132f, 255f).dp
   }
 
   val contentMaxWidth = when {
@@ -221,48 +298,50 @@ private fun computeResponsiveMetrics(
     else -> w.dp
   }
 
-  val dialRatio = (dialSizeDp.value / 224f).coerceIn(0.70f, 1.42f)
+  val dialRatio = (dialSizeDp.value / 220f).coerceIn(0.68f, 1.35f)
 
-  val topBarToDialGap = (h * 0.017f).coerceIn(10f, 18f).dp
-  val dialToHeadlineGap = (h * 0.018f).coerceIn(11f, 20f).dp
-  val headlineToSubtitleGap = (5.5f * rawScale).coerceIn(4f, 9f).dp
-  val minSectionGap = (h * 0.020f).coerceIn(14f, 28f).dp
+  val topBarToDialGap = (h * 0.013f).coerceIn(7f, 15f).dp
+  val dialToHeadlineGap = (h * 0.014f).coerceIn(8f, 16f).dp
+  val headlineToSubtitleGap = (4.5f * rawScale).coerceIn(3f, 8f).dp
+  val minSectionGap = (h * 0.014f).coerceIn(9f, 20f).dp
 
   return BioSyncResponsiveMetrics(
     isSideBySide = isSideBySide,
     scale = rawScale,
     contentMaxWidth = contentMaxWidth,
-    horizontalPadding = (18f * rawScale).coerceIn(14f, 28f).dp,
-    topPadding = (10f * rawScale).coerceIn(8f, 16f).dp,
-    bottomPadding = (12f * rawScale).coerceIn(10f, 18f).dp,
+    horizontalPadding = (18f * rawScale).coerceIn(14f, 26f).dp,
+    topPadding = (8f * rawScale).coerceIn(6f, 14f).dp,
+    bottomPadding = (8f * rawScale).coerceIn(6f, 12f).dp,
     topBarToDialGap = topBarToDialGap,
     dialToHeadlineGap = dialToHeadlineGap,
     headlineToSubtitleGap = headlineToSubtitleGap,
     minSectionGap = minSectionGap,
     dialSize = dialSizeDp,
-    scoreFontSize = (49f * dialRatio).coerceIn(32f, 64f).sp,
-    headlineFontSize = (23f * rawScale).coerceIn(18.5f, 30f).sp,
-    headlineLineHeight = (28f * rawScale).coerceIn(23f, 36f).sp,
-    subtitleFontSize = (12.8f * rawScale).coerceIn(11f, 16f).sp,
-    subtitleLineHeight = (19f * rawScale).coerceIn(15.5f, 24f).sp,
+    scoreFontSize = scaledSp(48f, 29f, 60f, dialRatio),
+    headlineFontSize = scaledSp(22.5f, 17f, 28f),
+    headlineLineHeight = scaledSp(27.5f, 21f, 34f),
+    subtitleFontSize = scaledSp(12.5f, 10.5f, 15.5f),
+    subtitleLineHeight = scaledSp(18f, 14.5f, 22f),
     subtitleMaxWidth = (330f * rawScale).coerceIn(265f, 450f).dp,
-    brandIconSize = (21.5f * rawScale).coerceIn(18f, 27f).dp,
-    brandFontSize = (16f * rawScale).coerceIn(14f, 21f).sp,
-    cardPadding = (17f * rawScale).coerceIn(14f, 24f).dp,
+    brandIconSize = (21f * rawScale).coerceIn(17.5f, 26f).dp,
+    brandFontSize = scaledSp(15.5f, 13.5f, 20f),
+    cardPadding = (15.5f * rawScale).coerceIn(12.5f, 22f).dp,
     cardCornerRadius = (14f * rawScale).coerceIn(11f, 18f).dp,
-    energyLabelFontSize = (10.8f * rawScale).coerceIn(9.5f, 13.5f).sp,
-    energyValueFontSize = (25f * rawScale).coerceIn(20f, 32f).sp,
-    energyTargetFontSize = (12.5f * rawScale).coerceIn(10.5f, 15.5f).sp,
-    badgeFontSize = (11f * rawScale).coerceIn(9.5f, 14f).sp,
-    remainingFontSize = (10.5f * rawScale).coerceIn(9.5f, 13f).sp,
-    macroRowSpacing = (h * 0.015f).coerceIn(10f, 16.5f).dp,
-    macroFontSize = (12.8f * rawScale).coerceIn(11f, 15.5f).sp,
-    macroDotSize = (7.5f * rawScale).coerceIn(6f, 9.5f).dp,
-    macroBarHeight = (8.5f * rawScale).coerceIn(7f, 11f).dp,
-    caloriesBarHeight = (9.5f * rawScale).coerceIn(8f, 12f).dp,
-    ctaVerticalPadding = (15.5f * rawScale).coerceIn(13f, 19.5f).dp,
-    ctaFontSize = (15f * rawScale).coerceIn(13.5f, 18.5f).sp,
-    ctaIconSize = (17.5f * rawScale).coerceIn(15f, 21f).dp,
+    energyLabelFontSize = scaledSp(10.5f, 9f, 13f),
+    energyValueFontSize = scaledSp(24f, 18.5f, 30f),
+    energyTargetFontSize = scaledSp(12f, 10f, 15f),
+    badgeFontSize = scaledSp(10.5f, 9f, 13.5f),
+    remainingFontSize = scaledSp(10.2f, 8.8f, 12.5f),
+    macroRowSpacing = (h * 0.0125f).coerceIn(8.5f, 14.5f).dp,
+    macroFontSize = scaledSp(12.4f, 10.2f, 15f),
+    macroDotSize = (7.2f * rawScale).coerceIn(6f, 9f).dp,
+    macroBarHeight = (8f * rawScale).coerceIn(6.5f, 10.5f).dp,
+    caloriesBarHeight = (9f * rawScale).coerceIn(7.5f, 11.5f).dp,
+    ctaVerticalPadding = (14.5f * rawScale).coerceIn(12f, 18f).dp,
+    ctaFontSize = scaledSp(14.8f, 13f, 18f),
+    ctaIconSize = (17f * rawScale).coerceIn(14.5f, 20.5f).dp,
+    footerFontSize = scaledSp(10.8f, 9.5f, 12.5f),
+    ctaToFooterGap = (8.5f * rawScale).coerceIn(6f, 12f).dp,
   )
 }
 
@@ -291,6 +370,7 @@ private fun formatWithCommas(value: Int): String {
 
 @Composable
 fun BioSyncWelcomeScreen(
+  onNavigateToCalibration: () -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
   val coroutineScope = rememberCoroutineScope()
@@ -298,9 +378,13 @@ fun BioSyncWelcomeScreen(
   // 0f -> 1f on app launch (0 to current telemetry values)
   // -> 2f on Get Started click (reaches 100% max limit across all numbers, bars, and dial blocks)
   val telemetryPhase = remember { Animatable(0f) }
+  // One-time border flash & rear reflection wave animation on the progress bar block (0f -> 1f)
+  val borderFlashPhase = remember { Animatable(0f) }
+  var isTransitioning by remember { mutableStateOf(false) }
 
   LaunchedEffect(Unit) {
     telemetryPhase.snapTo(0f)
+    borderFlashPhase.snapTo(0f)
     telemetryPhase.animateTo(
       targetValue = 1f,
       animationSpec = tween(durationMillis = 820, easing = TelemetryEaseOut),
@@ -308,24 +392,40 @@ fun BioSyncWelcomeScreen(
   }
 
   val onGetStartedClick: () -> Unit = {
-    coroutineScope.launch {
-      // Sweep from 0 all the way to 100% max limit (phase 2f) with a fast, silky-smooth curve
-      val startPhase = if (telemetryPhase.value >= 1.95f || telemetryPhase.value < 0.95f) 0f else telemetryPhase.value
-      if (startPhase == 0f) {
-        telemetryPhase.snapTo(0f)
+    if (!isTransitioning) {
+      isTransitioning = true
+      coroutineScope.launch {
+        // Fire the one-time border flash reflection wave across the progress bar block
+        // while simultaneously bringing all Welcome screen telemetry to 100% max levels,
+        // then smoothly shift to the Profile Section.
+        launch {
+          borderFlashPhase.snapTo(0f)
+          borderFlashPhase.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(
+              durationMillis = 420,
+              easing = TelemetryEaseOut,
+            ),
+          )
+        }
+        launch {
+          telemetryPhase.animateTo(
+            targetValue = 2f,
+            animationSpec = tween(
+              durationMillis = 280,
+              easing = TelemetryEaseOut,
+            ),
+          )
+        }
+        delay(320)
+        onNavigateToCalibration()
+        isTransitioning = false
       }
-      // Interpolate directly from 0 -> 100% max limit if starting from 0, or current -> 100% max limit
-      telemetryPhase.animateTo(
-        targetValue = 2f,
-        animationSpec = tween(
-          durationMillis = if (startPhase == 0f) 860 else 680,
-          easing = TelemetryEaseOut,
-        ),
-      )
     }
   }
 
   val phaseProvider = remember(telemetryPhase) { { telemetryPhase.value } }
+  val borderFlashProvider = remember(borderFlashPhase) { { borderFlashPhase.value } }
 
   Scaffold(
     modifier = modifier
@@ -339,12 +439,17 @@ fun BioSyncWelcomeScreen(
         .fillMaxSize()
         .background(ObsidianBlack)
         .padding(innerPadding)
-        .windowInsetsPadding(WindowInsets.safeDrawing),
+        .windowInsetsPadding(WindowInsets.systemBars),
       contentAlignment = Alignment.TopCenter,
     ) {
       val viewportHeight = maxHeight
-      val metrics = remember(maxWidth, maxHeight) {
-        computeResponsiveMetrics(maxWidth = maxWidth, maxHeight = maxHeight)
+      val fontScale = LocalDensity.current.fontScale
+      val metrics = remember(maxWidth, maxHeight, fontScale) {
+        computeResponsiveMetrics(
+          maxWidth = maxWidth,
+          maxHeight = maxHeight,
+          fontScale = fontScale,
+        )
       }
       val scrollState = rememberScrollState()
 
@@ -353,8 +458,9 @@ fun BioSyncWelcomeScreen(
           modifier = Modifier
             .widthIn(max = metrics.contentMaxWidth)
             .fillMaxWidth()
-            .heightIn(min = viewportHeight)
+            .imePadding()
             .verticalScroll(scrollState)
+            .heightIn(min = viewportHeight)
             .padding(
               start = metrics.horizontalPadding,
               end = metrics.horizontalPadding,
@@ -390,28 +496,29 @@ fun BioSyncWelcomeScreen(
 
             Column(
               modifier = Modifier.weight(1.05f),
+              horizontalAlignment = Alignment.CenterHorizontally,
             ) {
               MetabolicTelemetryCard(
                 phaseProvider = phaseProvider,
+                borderFlashProvider = borderFlashProvider,
                 metrics = metrics,
               )
               Spacer(modifier = Modifier.height(metrics.minSectionGap))
-              GetStartedButton(
+              GetStartedSection(
                 onClick = onGetStartedClick,
                 metrics = metrics,
               )
             }
           }
-
-          Spacer(modifier = Modifier.height(2.dp))
         }
       } else {
         Column(
           modifier = Modifier
             .widthIn(max = metrics.contentMaxWidth)
             .fillMaxWidth()
-            .heightIn(min = viewportHeight)
+            .imePadding()
             .verticalScroll(scrollState)
+            .heightIn(min = viewportHeight)
             .padding(
               start = metrics.horizontalPadding,
               end = metrics.horizontalPadding,
@@ -420,6 +527,7 @@ fun BioSyncWelcomeScreen(
             )
             .testTag("mobile_screen_wrapper"),
           horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.SpaceBetween,
         ) {
           // TOP SECTION: Brand Header + Hexagon Dial + Headline/Subtitle
           Column(
@@ -441,28 +549,21 @@ fun BioSyncWelcomeScreen(
             )
           }
 
-          // AUTOMATIC GAP 1
-          Spacer(
+          // MIDDLE SECTION: Floating Progress Bar Card with One-Time Border Flash Reflection
+          Box(
             modifier = Modifier
-              .weight(1f)
-              .heightIn(min = metrics.minSectionGap),
-          )
+              .fillMaxWidth()
+              .padding(vertical = metrics.minSectionGap),
+          ) {
+            MetabolicTelemetryCard(
+              phaseProvider = phaseProvider,
+              borderFlashProvider = borderFlashProvider,
+              metrics = metrics,
+            )
+          }
 
-          // MIDDLE SECTION: Floating Progress Bar Card
-          MetabolicTelemetryCard(
-            phaseProvider = phaseProvider,
-            metrics = metrics,
-          )
-
-          // AUTOMATIC GAP 2
-          Spacer(
-            modifier = Modifier
-              .weight(1f)
-              .heightIn(min = metrics.minSectionGap),
-          )
-
-          // BOTTOM SECTION: Get Started Button
-          GetStartedButton(
+          // BOTTOM SECTION: Get Started Button + "Encrypted on-device • Private & Secure"
+          GetStartedSection(
             onClick = onGetStartedClick,
             metrics = metrics,
           )
@@ -670,12 +771,11 @@ private fun CyberneticTelemetryDial(
     label = "oct_counter_layer",
   )
 
-  // Pre-cache all static octagon & caliper paths once per size for zero per-frame allocations
   Spacer(
     modifier = modifier
       .graphicsLayer()
       .drawWithCache {
-        val scale = size.minDimension / 200f
+        val scale = (size.minDimension / 200f).coerceAtLeast(0.1f)
         val centerOffset = Offset(size.width / 2f, size.height / 2f)
         fun pt(x: Float, y: Float): Offset = Offset(
           x = centerOffset.x + (x - 100f) * scale,
@@ -744,8 +844,6 @@ private fun CyberneticTelemetryDial(
 
         onDrawBehind {
           val phase = phaseProvider()
-          // On launch (0 -> 1): sweep from 0 to current segment length.
-          // On Get Started (1 -> 2): expand dash segment until it fulfills 100% of the octagon perimeter!
           val launchFactor = phase.coerceIn(0f, 1f)
           val fullFillFactor = (phase - 1f).coerceIn(0f, 1f)
 
@@ -800,7 +898,7 @@ private fun CyberneticTelemetryDial(
           }
 
           // 5. Outer Crisp Segmented White Framing Caliper Arms (sweep in from 0 on launch)
-          val caliperTotalLen = 135f * scale
+          val caliperTotalLen = (135f * scale).coerceAtLeast(1f)
           val caliperDrawLen = (caliperTotalLen * launchFactor).coerceAtLeast(0.5f)
           val caliperEffect = if (launchFactor < 0.999f) {
             PathEffect.dashPathEffect(floatArrayOf(caliperDrawLen, caliperTotalLen), 0f)
@@ -844,7 +942,6 @@ private fun CyberneticTelemetryDial(
 
           if (launchFactor > 0.005f) {
             // 7. Kinetic Path Layer 1: High Velocity Neon-Cyan Perimeter Tracer
-            // Launch (0->1): dash grows 0 -> 140. Max Limit (1->2): dash grows 140 -> 500 (full closed octagon!)
             val primaryOn = interpolateTelemetry(phase, currentValue = 140f, maxValue = 500f).coerceAtLeast(1f) * scale
             val primaryOff = ((180f * (1f - fullFillFactor)).coerceAtLeast(0.1f)) * scale
             drawPath(
@@ -862,7 +959,6 @@ private fun CyberneticTelemetryDial(
             )
 
             // 8. Kinetic Path Layer 2: Intermediate Chamfer Electric-Blue Arc Tracer
-            // Launch (0->1): dash grows 0 -> 80. Max Limit (1->2): dash grows 80 -> 450 (full closed octagon!)
             val secondaryOn = interpolateTelemetry(phase, currentValue = 80f, maxValue = 450f).coerceAtLeast(1f) * scale
             val secondaryOff = ((120f * (1f - fullFillFactor)).coerceAtLeast(0.1f)) * scale
             drawPath(
@@ -880,7 +976,6 @@ private fun CyberneticTelemetryDial(
             )
 
             // 9. Kinetic Path Layer 3: Inner Micro Precision Dashed Sweeper
-            // Launch (0->1): dash grows 0 -> 20. Max Limit (1->2): dash grows 20 -> 380 (full closed inner octagon!)
             val microOn = interpolateTelemetry(phase, currentValue = 20f, maxValue = 380f).coerceAtLeast(1f) * scale
             val microOff = ((50f * (1f - fullFillFactor)).coerceAtLeast(0.1f)) * scale
             drawPath(
@@ -932,6 +1027,7 @@ private fun CyberneticTelemetryDial(
 @Composable
 private fun MetabolicTelemetryCard(
   phaseProvider: () -> Float,
+  borderFlashProvider: () -> Float,
   metrics: BioSyncResponsiveMetrics,
   modifier: Modifier = Modifier,
 ) {
@@ -1029,33 +1125,55 @@ private fun MetabolicTelemetryCard(
   Box(
     modifier = modifier
       .fillMaxWidth()
-      .padding(horizontal = 2.dp, vertical = 4.dp)
+      .padding(horizontal = 2.dp, vertical = 2.dp)
       .drawWithCache {
         val shadowCorner = metrics.cardCornerRadius.toPx()
-        // Pre-allocate Paint & BlurMaskFilter once per layout size for 120fps performance on low-end devices
+        val cornerRadius = CornerRadius(shadowCorner, shadowCorner)
         val ambientPaint = Paint().apply {
           isAntiAlias = true
           asFrameworkPaint().apply {
             color = android.graphics.Color.argb(72, 26, 42, 68)
-            maskFilter = BlurMaskFilter(26.dp.toPx(), BlurMaskFilter.Blur.NORMAL)
+            maskFilter = BlurMaskFilter(safeBlurRadius(24.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
           }
         }
         val rimShadowPaint = Paint().apply {
           isAntiAlias = true
           asFrameworkPaint().apply {
             color = android.graphics.Color.argb(36, 0, 210, 255)
-            maskFilter = BlurMaskFilter(18.dp.toPx(), BlurMaskFilter.Blur.NORMAL)
+            maskFilter = BlurMaskFilter(safeBlurRadius(16.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
           }
         }
         val contactPaint = Paint().apply {
           isAntiAlias = true
           asFrameworkPaint().apply {
             color = android.graphics.Color.argb(210, 0, 0, 0)
-            maskFilter = BlurMaskFilter(12.dp.toPx(), BlurMaskFilter.Blur.NORMAL)
+            maskFilter = BlurMaskFilter(safeBlurRadius(12.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
           }
         }
+        // Rear flash wave halo paint (for the one-time backlight flash animation on Get Started)
+        val rearFlashHaloPaint = Paint().apply {
+          isAntiAlias = true
+          asFrameworkPaint().apply {
+            color = android.graphics.Color.argb(0, 235, 248, 255)
+            maskFilter = BlurMaskFilter(safeBlurRadius(22.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
+          }
+        }
+        val baseBorderBrush = Brush.verticalGradient(
+          0.0f to PureWhite.copy(alpha = 0.24f),
+          0.25f to Color(0xFF282E3D),
+          0.80f to Color(0xFF181B24),
+          1.0f to Color(0xFF0F1117),
+        )
 
-        onDrawBehind {
+        onDrawWithContent {
+          val flashProgress = borderFlashProvider().coerceIn(0f, 1f)
+          val flashEnvelope = if (flashProgress > 0.001f && flashProgress < 0.999f) {
+            sin(flashProgress * Math.PI.toFloat()).coerceIn(0f, 1f)
+          } else {
+            0f
+          }
+
+          // 1. Behind-the-Card Floating Shadows + Traveling Rear Flash Wave
           drawIntoCanvas { canvas ->
             canvas.drawRoundRect(
               4.dp.toPx(),
@@ -1084,6 +1202,87 @@ private fun MetabolicTelemetryCard(
               shadowCorner,
               contactPaint,
             )
+
+            // One-time rear flash wave moving behind the border when triggered
+            if (flashEnvelope > 0.01f) {
+              rearFlashHaloPaint.asFrameworkPaint().alpha = (165f * flashEnvelope).roundToInt().coerceIn(0, 200)
+              val waveCx = size.width * flashProgress
+              val waveCy = size.height * flashProgress
+              val haloSpanX = size.width * 0.55f
+              val haloSpanY = size.height * 0.55f
+              canvas.drawRoundRect(
+                (waveCx - haloSpanX).coerceAtLeast(-6.dp.toPx()),
+                (waveCy - haloSpanY).coerceAtLeast(-6.dp.toPx()),
+                (waveCx + haloSpanX).coerceAtMost(size.width + 6.dp.toPx()),
+                (waveCy + haloSpanY).coerceAtMost(size.height + 6.dp.toPx()),
+                shadowCorner,
+                shadowCorner,
+                rearFlashHaloPaint,
+              )
+            }
+          }
+
+          // 2. Card Content
+          drawContent()
+
+          // 3. Base Architectural Border (momentarily dims slightly as the flash wave approaches for high contrast)
+          val baseBorderAlpha = (1f - 0.35f * flashEnvelope).coerceIn(0.45f, 1f)
+          drawRoundRect(
+            brush = baseBorderBrush,
+            topLeft = Offset.Zero,
+            size = size,
+            cornerRadius = cornerRadius,
+            alpha = baseBorderAlpha,
+            style = Stroke(width = 1.2.dp.toPx()),
+          )
+
+          // 4. One-Time Traveling Border Flash & Specular Reflection Wave
+          if (flashEnvelope > 0.01f) {
+            val diagW = size.width.coerceAtLeast(1f)
+            val diagH = size.height.coerceAtLeast(1f)
+            val bandSpanX = diagW * 0.42f
+            val bandSpanY = diagH * 0.42f
+            val centerX = -bandSpanX + (diagW + bandSpanX * 2f) * flashProgress
+            val centerY = -bandSpanY + (diagH + bandSpanY * 2f) * flashProgress
+
+            // Subtle surface reflection wave across the card face
+            drawRoundRect(
+              brush = Brush.linearGradient(
+                colors = listOf(
+                  Color.Transparent,
+                  CyberCyan.copy(alpha = 0.05f * flashEnvelope),
+                  PureWhite.copy(alpha = 0.11f * flashEnvelope),
+                  ElectricBlue.copy(alpha = 0.05f * flashEnvelope),
+                  Color.Transparent,
+                ),
+                start = Offset(centerX - bandSpanX, centerY - bandSpanY),
+                end = Offset(centerX + bandSpanX, centerY + bandSpanY),
+              ),
+              topLeft = Offset.Zero,
+              size = size,
+              cornerRadius = cornerRadius,
+            )
+
+            // Intense traveling border flash reflection all around the perimeter
+            drawRoundRect(
+              brush = Brush.linearGradient(
+                colors = listOf(
+                  Color.Transparent,
+                  Color(0xFF64748B).copy(alpha = 0.35f * flashEnvelope),
+                  CyberCyan.copy(alpha = 0.85f * flashEnvelope),
+                  PureWhite.copy(alpha = 1.0f * flashEnvelope),
+                  Color(0xFFE2E8F0).copy(alpha = 0.90f * flashEnvelope),
+                  ElectricBlue.copy(alpha = 0.70f * flashEnvelope),
+                  Color.Transparent,
+                ),
+                start = Offset(centerX - bandSpanX * 0.85f, centerY - bandSpanY * 0.85f),
+                end = Offset(centerX + bandSpanX * 0.85f, centerY + bandSpanY * 0.85f),
+              ),
+              topLeft = Offset.Zero,
+              size = size,
+              cornerRadius = cornerRadius,
+              style = Stroke(width = (1.9f + 0.8f * flashEnvelope).dp.toPx()),
+            )
           }
         }
       },
@@ -1099,16 +1298,6 @@ private fun MetabolicTelemetryCard(
             1.0f to Color(0xFF090A0E),
           ),
         )
-        .border(
-          width = 1.2.dp,
-          brush = Brush.verticalGradient(
-            0.0f to PureWhite.copy(alpha = 0.22f),
-            0.25f to Color(0xFF282E3D),
-            0.80f to Color(0xFF181B24),
-            1.0f to Color(0xFF0F1117),
-          ),
-          shape = cardShape,
-        )
         .padding(metrics.cardPadding)
         .testTag("daily_metabolism_card"),
     ) {
@@ -1116,7 +1305,7 @@ private fun MetabolicTelemetryCard(
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(bottom = (13f * metrics.scale).coerceIn(10f, 17f).dp),
+          .padding(bottom = (12f * metrics.scale).coerceIn(9f, 16f).dp),
       ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -1200,7 +1389,7 @@ private fun MetabolicTelemetryCard(
           }
         }
 
-        Spacer(modifier = Modifier.height((10f * metrics.scale).coerceIn(8f, 14f).dp))
+        Spacer(modifier = Modifier.height((9.5f * metrics.scale).coerceIn(7.5f, 13f).dp))
 
         // Multicolor Lit Calories Progress Bar (0 -> 84% on launch, -> 100% on Get Started)
         MulticolorLitProgressBar(
@@ -1228,7 +1417,7 @@ private fun MetabolicTelemetryCard(
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(top = (13f * metrics.scale).coerceIn(10f, 18f).dp),
+          .padding(top = (12f * metrics.scale).coerceIn(9f, 16f).dp),
         verticalArrangement = Arrangement.spacedBy(metrics.macroRowSpacing),
       ) {
         macroItems.forEach { item ->
@@ -1272,7 +1461,7 @@ private fun MacroMetricRow(
     modifier = Modifier
       .fillMaxWidth()
       .testTag("macro_row_${item.id}"),
-    verticalArrangement = Arrangement.spacedBy((5f * metrics.scale).coerceIn(4f, 7f).dp),
+    verticalArrangement = Arrangement.spacedBy((4.5f * metrics.scale).coerceIn(3.5f, 6.5f).dp),
   ) {
     Row(
       modifier = Modifier.fillMaxWidth(),
@@ -1287,7 +1476,7 @@ private fun MacroMetricRow(
           gradientColors = item.gradientColors,
           size = metrics.macroDotSize,
         )
-        Spacer(modifier = Modifier.width((8.5f * metrics.scale).coerceIn(6.5f, 12.5f).dp))
+        Spacer(modifier = Modifier.width((8f * metrics.scale).coerceIn(6f, 11.5f).dp))
         Text(
           text = stringResource(item.labelRes),
           color = Neutral200,
@@ -1362,7 +1551,7 @@ private fun MulticolorCategoryPip(
       brush = Brush.linearGradient(
         colors = gradientColors,
         start = Offset.Zero,
-        end = Offset(this.size.width, this.size.height),
+        end = Offset(this.size.width.coerceAtLeast(1f), this.size.height.coerceAtLeast(1f)),
       ),
       cornerRadius = CornerRadius(radius, radius),
     )
@@ -1381,7 +1570,7 @@ private fun MulticolorLitProgressBar(
       .height(barHeight)
       .graphicsLayer()
       .drawWithCache {
-        val trackHeight = size.height
+        val trackHeight = size.height.coerceAtLeast(1f)
         val radius = trackHeight / 2f
         val cornerRadius = CornerRadius(radius, radius)
         val trackBorderBrush = Brush.horizontalGradient(
@@ -1404,12 +1593,13 @@ private fun MulticolorLitProgressBar(
             Color.Transparent,
           ),
           startY = 0f,
-          endY = trackHeight * 0.65f,
+          endY = (trackHeight * 0.65f).coerceAtLeast(1f),
         )
         val fillPath = Path()
 
         onDrawBehind {
-          val progress = progressProvider()
+          if (size.width <= 1f || size.height <= 1f) return@onDrawBehind
+          val progress = progressProvider().coerceIn(0f, 1f)
 
           // 1. Subtle Recessed Capsule Track with Category-Tinted Hairline Rim
           drawRoundRect(
@@ -1427,7 +1617,8 @@ private fun MulticolorLitProgressBar(
           )
 
           if (progress > 0.002f) {
-            val fillWidth = (size.width * progress).coerceIn(trackHeight * 0.5f, size.width)
+            val minFill = (trackHeight * 0.5f).coerceAtMost(size.width)
+            val fillWidth = (size.width * progress).coerceIn(minFill, size.width)
             fillPath.rewind()
             fillPath.addRoundRect(
               RoundRect(
@@ -1486,6 +1677,36 @@ private fun MulticolorLitProgressBar(
 }
 
 @Composable
+private fun GetStartedSection(
+  onClick: () -> Unit,
+  metrics: BioSyncResponsiveMetrics,
+  modifier: Modifier = Modifier,
+) {
+  Column(
+    modifier = modifier.fillMaxWidth(),
+    horizontalAlignment = Alignment.CenterHorizontally,
+  ) {
+    GetStartedButton(
+      onClick = onClick,
+      metrics = metrics,
+    )
+
+    Spacer(modifier = Modifier.height(metrics.ctaToFooterGap))
+
+    Text(
+      text = stringResource(R.string.calib_footer_encrypted),
+      color = Color(0xFF71717A),
+      fontFamily = InterFontFamily,
+      fontWeight = FontWeight.Normal,
+      fontSize = metrics.footerFontSize,
+      letterSpacing = 0.2.sp,
+      textAlign = TextAlign.Center,
+      modifier = Modifier.testTag("welcome_footer_encrypted"),
+    )
+  }
+}
+
+@Composable
 private fun GetStartedButton(
   onClick: () -> Unit,
   metrics: BioSyncResponsiveMetrics,
@@ -1493,17 +1714,127 @@ private fun GetStartedButton(
 ) {
   val interactionSource = remember { MutableInteractionSource() }
   val isPressed by interactionSource.collectIsPressedAsState()
-  val bgColor = if (isPressed) Color(0xFFD4D4D4) else PureWhite
   val arrowDesc = stringResource(R.string.cd_arrow_forward)
   val buttonShape = RoundedCornerShape(metrics.cardCornerRadius)
+
+  val infiniteTransition = rememberInfiniteTransition(label = "get_started_glow_transition")
+  val glowPulse by infiniteTransition.animateFloat(
+    initialValue = 0f,
+    targetValue = 1f,
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 2200, easing = LinearEasing),
+      repeatMode = RepeatMode.Restart,
+    ),
+    label = "get_started_shimmer_phase",
+  )
+  val pulseProvider = remember { { glowPulse } }
 
   Box(
     modifier = modifier
       .fillMaxWidth()
       .minimumInteractiveComponentSize()
+      .drawWithCache {
+        val cornerPx = metrics.cardCornerRadius.toPx()
+        val cornerRadius = CornerRadius(cornerPx, cornerPx)
+        val buttonClipPath = Path().apply {
+          addRoundRect(
+            RoundRect(
+              rect = Rect(0f, 0f, size.width, size.height),
+              cornerRadius = cornerRadius,
+            ),
+          )
+        }
+        val outerAuraPaint = Paint().apply {
+          isAntiAlias = true
+          asFrameworkPaint().apply {
+            color = android.graphics.Color.argb(95, 255, 255, 255)
+            maskFilter = BlurMaskFilter(safeBlurRadius(18.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
+          }
+        }
+        val innerRimGlowPaint = Paint().apply {
+          isAntiAlias = true
+          asFrameworkPaint().apply {
+            color = android.graphics.Color.argb(135, 225, 238, 255)
+            maskFilter = BlurMaskFilter(safeBlurRadius(7.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
+          }
+        }
+        val baseMetallicBrush = Brush.verticalGradient(
+          0.0f to PureWhite,
+          0.55f to Color(0xFFF3F5F8),
+          1.0f to Color(0xFFE2E7F0),
+        )
+        val pressedBrush = Brush.verticalGradient(
+          0.0f to Color(0xFFDCE1EA),
+          1.0f to Color(0xFFC8D0DC),
+        )
+
+        onDrawBehind {
+          if (size.width <= 1f || size.height <= 1f) return@onDrawBehind
+          val phase = pulseProvider()
+          val breath = sin(phase * Math.PI.toFloat())
+          outerAuraPaint.asFrameworkPaint().alpha = (60 + (55 * breath).roundToInt()).coerceIn(40, 130)
+
+          // 1. Soft Luminous White Outer Glow Aura
+          drawIntoCanvas { canvas ->
+            canvas.drawRoundRect(
+              2.dp.toPx(),
+              2.dp.toPx(),
+              size.width - 2.dp.toPx(),
+              size.height + 3.dp.toPx(),
+              cornerPx,
+              cornerPx,
+              outerAuraPaint,
+            )
+            canvas.drawRoundRect(
+              0f,
+              0f,
+              size.width,
+              size.height,
+              cornerPx,
+              cornerPx,
+              innerRimGlowPaint,
+            )
+          }
+
+          // 2. Crisp Metallic White Button Surface
+          drawRoundRect(
+            brush = if (isPressed) pressedBrush else baseMetallicBrush,
+            topLeft = Offset.Zero,
+            size = size,
+            cornerRadius = cornerRadius,
+          )
+
+          // 3. Sweeping Specular Liquid-Silver Shimmer Band
+          clipPath(buttonClipPath) {
+            val sweepSpan = (size.width * 0.38f).coerceAtLeast(1f)
+            val sweepCenter = -sweepSpan + (size.width + sweepSpan * 2f) * phase
+            drawRect(
+              brush = Brush.linearGradient(
+                colors = listOf(
+                  Color.Transparent,
+                  PureWhite.copy(alpha = 0.75f),
+                  Color(0xFFD8E4F8).copy(alpha = 0.35f),
+                  Color.Transparent,
+                ),
+                start = Offset(sweepCenter - sweepSpan * 0.6f, 0f),
+                end = Offset(sweepCenter + sweepSpan * 0.6f, size.height.coerceAtLeast(1f)),
+              ),
+              topLeft = Offset.Zero,
+              size = size,
+            )
+          }
+
+          // 4. Luminous Specular Rim Border
+          drawRoundRect(
+            color = PureWhite,
+            topLeft = Offset.Zero,
+            size = size,
+            cornerRadius = cornerRadius,
+            style = Stroke(width = 1.2.dp.toPx()),
+          )
+        }
+      }
       .clip(buttonShape)
-      .background(bgColor)
-      .border(width = 1.dp, color = PureWhite, shape = buttonShape)
       .clickable(
         interactionSource = interactionSource,
         indication = ripple(color = ObsidianBlack),

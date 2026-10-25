@@ -18,4 +18,34 @@
     <string name="cd_brand_logo">BioSync Pulse Icon</string>
     <string name="cd_biometric_dial">Precision Biometric Core Dial reading 94</string>
     <string name="cd_arrow_forward">Proceed arrow</string>
+
+    <!-- Profile Calibration Screen (Step 01 of 03) -->
+    <string name="calib_header_title">BioSync</string>
+    <string name="calib_header_step">STEP 01 OF 03</string>
+    <string name="calib_eyebrow">IDENTIFICATION</string>
+    <string name="calib_title">Profile Section</string>
+    <string name="calib_subtitle">Your identity and vitals. Keeping this info updated ensures your daily nutritional targets remain accurate as you age.</string>
+    <string name="calib_field_name_label">Full Name</string>
+    <string name="calib_field_name_tag"></string>
+    <string name="calib_field_name_placeholder">Legal Name</string>
+    <string name="calib_field_sex_label">Biological Sex</string>
+    <string name="calib_field_sex_tag"></string>
+    <string name="calib_sex_male">Male</string>
+    <string name="calib_sex_female">Female</string>
+    <string name="calib_field_dob_label">Date of Birth</string>
+    <string name="calib_field_dob_tag"></string>
+    <string name="calib_dob_day">DAY</string>
+    <string name="calib_dob_month">MONTH</string>
+    <string name="calib_dob_year">YEAR</string>
+    <string name="calib_chrono_status">CHRONOMETRIC STATUS</string>
+    <string name="calib_active_index">ACTIVE INDEX</string>
+    <string name="calib_calculated_age">CALCULATED AGE</string>
+    <string name="calib_unit_years">years</string>
+    <string name="calib_unit_months">mos</string>
+    <string name="calib_unit_days">days</string>
+    <string name="calib_total_duration">TOTAL DURATION</string>
+    <string name="calib_next_anniversary">NEXT BIRTHDAY</string>
+    <string name="calib_cta_continue">Continue</string>
+    <string name="calib_footer_encrypted">Encrypted on device • Private &amp; secure</string>
+    <string name="cd_back_button">Return to Welcome screen</string>
 </resources>

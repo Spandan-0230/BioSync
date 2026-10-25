@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/>
+<meta content="mobile_stack" name="shell-type"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ["Geist", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
+            mono: ["JetBrains Mono", "monospace"],
+            display: ["Space Grotesk", "sans-serif"],
+          },
+          colors: {
+            black: "#000000",
+            surface: "#09090b",
+            card: "#0d0d10",
+            zinc: {
+              850: "#1f1f23",
+              900: "#18181b",
+              950: "#09090b",
+            }
+          }
+        }
+      }
+    };
+  </script>
+<style>
+    @layer base {
+      html, body {
+        width: 100vw;
+        min-height: 100vh;
+        margin: 0;
+        padding: 0;
+        background-color: #000000;
+        color: #f4f4f5;
+        font-family: 'Geist', -apple-system, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      .pb-safe {
+        padding-bottom: env(safe-area-inset-bottom, 16px);
+      }
+      .pt-safe {
+        padding-top: env(safe-area-inset-top, 0px);
+      }
+    }
+    ::-webkit-scrollbar {
+      display: none;
+    }
+    select {
+      background-image: none !important;
+    }
+  </style>
+</head>
+<body class="bg-black text-zinc-100 min-h-screen flex flex-col justify-between select-none">
+<!-- Header -->
+<header class="w-full pt-safe border-b border-zinc-900 bg-black sticky top-0 z-40">
+<div class="h-14 px-6 flex items-center justify-between">
+<button aria-label="Return" class="w-9 h-9 -ml-2 rounded-full flex items-center justify-center text-zinc-400 hover:text-white transition-colors" onclick="history.back()" type="button">
+<span class="material-symbols-outlined text-[20px] font-light">arrow_back_ios_new</span>
+</button>
+<div class="flex flex-col items-center">
+<h1 class="text-sm font-medium tracking-tight text-zinc-100">Profile Calibration</h1>
+<span class="text-[11px] font-mono tracking-wider text-zinc-500 uppercase">Step 01 of 03</span>
+</div>
+<div class="w-9 h-9 flex items-center justify-end">
+<div class="w-2 h-2 rounded-full bg-zinc-600"></div>
+</div>
+</div>
+</header>
+<!-- Main Content Form Area -->
+<main class="flex-1 px-6 pt-7 pb-10 flex flex-col max-w-md mx-auto w-full">
+<!-- Title & Description -->
+<div class="mb-8">
+<span class="text-[11px] font-mono text-zinc-500 uppercase tracking-widest block mb-1">Baseline Calibration</span>
+<h2 class="text-2xl font-light tracking-tight text-white">Subject Parameters</h2>
+<p class="text-xs text-zinc-400 mt-1.5 leading-relaxed font-light">Provide precise personal metrics to calibrate biological chronometry and timeline indices.</p>
+</div>
+<!-- Form Section -->
+<div class="space-y-6 flex-1">
+<!-- Field 01: Full Name -->
+<div class="space-y-2">
+<div class="flex justify-between items-center text-xs">
+<label class="text-zinc-400 font-medium" for="profile-name">01  Full Name</label>
+<span class="text-[10px] text-zinc-600 font-mono uppercase tracking-wider">Required</span>
+</div>
+<div class="relative">
+<input class="w-full h-12 bg-black border border-zinc-800 focus:border-zinc-400 text-sm text-zinc-100 px-3.5 rounded-lg outline-none transition-colors duration-150 font-normal placeholder-zinc-700" id="profile-name" placeholder="Legal Name" type="text" value="Elena Rostova"/>
+<div class="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-600">
+<span class="material-symbols-outlined text-[18px]">badge</span>
+</div>
+</div>
+</div>
+<!-- Field 02: Biological Gender -->
+<div class="space-y-2">
+<div class="flex justify-between items-center text-xs">
+<label class="text-zinc-400 font-medium">02  Biological Sex</label>
+<span class="text-[10px] text-zinc-600 font-mono uppercase tracking-wider">Metabolic Basis</span>
+</div>
+<div class="grid grid-cols-2 p-1 bg-zinc-950 border border-zinc-850 rounded-lg gap-1">
+<button class="h-10 text-xs font-medium rounded-md transition-all text-zinc-400 hover:text-zinc-200" id="gender-male" onclick="selectGender('MALE')" type="button">
+            Male
+          </button>
+<button class="h-10 text-xs font-medium rounded-md transition-all bg-white text-black shadow-sm" id="gender-female" onclick="selectGender('FEMALE')" type="button">
+            Female
+          </button>
+</div>
+</div>
+<!-- Field 03: Date of Birth -->
+<div class="space-y-2">
+<div class="flex justify-between items-center text-xs">
+<label class="text-zinc-400 font-medium">03  Date of Birth</label>
+<span class="text-[10px] text-zinc-600 font-mono tracking-wider">UTC Calibration</span>
+</div>
+<div class="grid grid-cols-3 gap-2">
+<!-- Day -->
+<div class="relative">
+<label class="block text-[10px] uppercase font-mono text-zinc-500 mb-1">Day</label>
+<div class="relative">
+<select class="w-full h-11 bg-black border border-zinc-800 focus:border-zinc-400 text-zinc-100 text-xs font-mono rounded-lg px-3 appearance-none outline-none cursor-pointer" id="dob-day" onchange="recalculateTelemetry()"></select>
+<span class="material-symbols-outlined pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[18px] text-zinc-500 font-light">unfold_more</span>
+</div>
+</div>
+<!-- Month -->
+<div class="relative">
+<label class="block text-[10px] uppercase font-mono text-zinc-500 mb-1">Month</label>
+<div class="relative">
+<select class="w-full h-11 bg-black border border-zinc-800 focus:border-zinc-400 text-zinc-100 text-xs font-mono rounded-lg px-2.5 appearance-none outline-none cursor-pointer" id="dob-month" onchange="recalculateTelemetry()">
+<option value="0">Jan (01)</option>
+<option value="1">Feb (02)</option>
+<option value="2">Mar (03)</option>
+<option value="3">Apr (04)</option>
+<option value="4">May (05)</option>
+<option value="5">Jun (06)</option>
+<option value="6">Jul (07)</option>
+<option value="7">Aug (08)</option>
+<option value="8">Sep (09)</option>
+<option selected="" value="9">Oct (10)</option>
+<option value="10">Nov (11)</option>
+<option value="11">Dec (12)</option>
+</select>
+<span class="material-symbols-outlined pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[18px] text-zinc-500 font-light">unfold_more</span>
+</div>
+</div>
+<!-- Year -->
+<div class="relative">
+<label class="block text-[10px] uppercase font-mono text-zinc-500 mb-1">Year</label>
+<div class="relative">
+<select class="w-full h-11 bg-black border border-zinc-800 focus:border-zinc-400 text-zinc-100 text-xs font-mono rounded-lg px-3 appearance-none outline-none cursor-pointer" id="dob-year" onchange="recalculateTelemetry()"></select>
+<span class="material-symbols-outlined pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[18px] text-zinc-500 font-light">unfold_more</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Architectural Chronometric Display Card -->
+<div class="mt-6 rounded-xl border border-zinc-850 bg-card p-5 space-y-5">
+<!-- Header / Label -->
+<div class="flex items-center justify-between border-b border-zinc-850/80 pb-3">
+<div class="flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-zinc-400"></span>
+<span class="text-[11px] font-mono uppercase tracking-wider text-zinc-400">Chronometric Status</span>
+</div>
+<span class="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Active Index</span>
+</div>
+<!-- Primary Stat: Current Age -->
+<div>
+<span class="text-[10px] font-mono uppercase tracking-widest text-zinc-500 block mb-1">Calculated Age</span>
+<div class="flex items-baseline gap-2">
+<span class="text-3xl font-light tracking-tight text-white font-mono" id="chrono-years">30</span>
+<span class="text-xs text-zinc-500 font-normal mr-2">years</span>
+<span class="text-xl font-light tracking-tight text-zinc-300 font-mono" id="chrono-months">04</span>
+<span class="text-xs text-zinc-500 font-normal mr-2">mos</span>
+<span class="text-xl font-light tracking-tight text-zinc-300 font-mono" id="chrono-days">12</span>
+<span class="text-xs text-zinc-500 font-normal">days</span>
+</div>
+</div>
+<!-- Secondary Metrics Grid -->
+<div class="grid grid-cols-2 gap-3 pt-3 border-t border-zinc-850/80">
+<!-- Total Days -->
+<div class="space-y-1">
+<span class="text-[10px] font-mono uppercase tracking-wider text-zinc-500">Total Duration</span>
+<div class="text-sm font-medium text-zinc-200">
+<span class="font-mono text-white" id="chrono-total-days">11,092</span>
+<span class="text-xs text-zinc-500 font-normal ml-0.5">days</span>
+</div>
+</div>
+<!-- Next Birthday Countdown -->
+<div class="space-y-1 text-right">
+<span class="text-[10px] font-mono uppercase tracking-wider text-zinc-500">Next Anniversary</span>
+<div class="text-sm font-medium text-zinc-200">
+<span class="text-zinc-400 font-mono" id="chrono-next-date">Oct 24</span>
+<span class="text-zinc-600 mx-1">•</span>
+<span class="font-mono text-white" id="chrono-bday-rem">146d</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Primary Action Button -->
+<div class="pt-8">
+<button class="w-full h-12 bg-white hover:bg-zinc-100 active:scale-[0.99] text-black text-sm font-medium rounded-lg flex items-center justify-center gap-2 transition-all duration-150 shadow-sm" onclick="proceedNext()" type="button">
+<span>Continue</span>
+<span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+<div class="text-center mt-3">
+<span class="text-[11px] text-zinc-600 font-normal tracking-wide">Encrypted on device • Private &amp; secure</span>
+</div>
+</div>
+</main>
+<script>
+    (function initChronometry() {
+      const daySelect = document.getElementById('dob-day');
+      const yearSelect = document.getElementById('dob-year');
+
+      // Populate Days (1-31)
+      for (let d = 1; d <= 31; d++) {
+        const opt = document.createElement('option');
+        opt.value = d;
+        opt.textContent = d < 10 ? '0' + d : d;
+        if (d === 24) opt.selected = true;
+        daySelect.appendChild(opt);
+      }
+
+      // Populate Years (Current Year down to 1930)
+      const currentYear = new Date().getFullYear();
+      for (let y = currentYear; y >= 1930; y--) {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y;
+        if (y === 1994) opt.selected = true;
+        yearSelect.appendChild(opt);
+      }
+
+      window.recalculateTelemetry = function() {
+        const day = parseInt(document.getElementById('dob-day').value, 10);
+        const month = parseInt(document.getElementById('dob-month').value, 10);
+        const year = parseInt(document.getElementById('dob-year').value, 10);
+
+        const now = new Date();
+        const birthDate = new Date(year, month, day);
+
+        if (birthDate > now) return;
+
+        // Total Elapsed Days
+        const diffMs = now.getTime() - birthDate.getTime();
+        const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+        // Exact Y/M/D breakdown
+        let y = now.getFullYear() - birthDate.getFullYear();
+        let m = now.getMonth() - birthDate.getMonth();
+        let d = now.getDate() - birthDate.getDate();
+
+        if (d < 0) {
+          m -= 1;
+          const prevMonthLastDay = new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+          d += prevMonthLastDay;
+        }
+        if (m < 0) {
+          y -= 1;
+          m += 12;
+        }
+
+        // Next Birthday calculation
+        let nextBday = new Date(now.getFullYear(), month, day);
+        if (nextBday < now) {
+          nextBday.setFullYear(now.getFullYear() + 1);
+        }
+        const bdayDiffMs = nextBday.getTime() - now.getTime();
+        const bdayDaysRem = Math.ceil(bdayDiffMs / (1000 * 60 * 60 * 24));
+
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+        document.getElementById('chrono-years').textContent = y < 10 ? '0' + y : y;
+        document.getElementById('chrono-months').textContent = m < 10 ? '0' + m : m;
+        document.getElementById('chrono-days').textContent = d < 10 ? '0' + d : d;
+        document.getElementById('chrono-total-days').textContent = totalDays.toLocaleString();
+
+        const nextDateStr = monthNames[month] + ' ' + (day < 10 ? '0' + day : day);
+        document.getElementById('chrono-next-date').textContent = nextDateStr;
+        document.getElementById('chrono-bday-rem').textContent = bdayDaysRem + 'd';
+      };
+
+      window.selectGender = function(gender) {
+        const maleBtn = document.getElementById('gender-male');
+        const femaleBtn = document.getElementById('gender-female');
+
+        if (gender === 'MALE') {
+          maleBtn.className = 'h-10 text-xs font-medium rounded-md transition-all bg-white text-black shadow-sm';
+          femaleBtn.className = 'h-10 text-xs font-medium rounded-md transition-all text-zinc-400 hover:text-zinc-200';
+        } else {
+          femaleBtn.className = 'h-10 text-xs font-medium rounded-md transition-all bg-white text-black shadow-sm';
+          maleBtn.className = 'h-10 text-xs font-medium rounded-md transition-all text-zinc-400 hover:text-zinc-200';
+        }
+      };
+
+      window.proceedNext = function() {
+        console.log('Proceeding to sequence 02');
+      };
+
+      recalculateTelemetry();
+    })();
+  </script>
+</body></html>
