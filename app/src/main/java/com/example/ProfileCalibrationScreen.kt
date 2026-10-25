@@ -8,6 +8,7 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -59,6 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -82,6 +84,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
@@ -89,10 +93,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -113,7 +119,14 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+
+private enum class ActiveEditSection {
+  NONE,
+  FULL_NAME,
+  DOB,
+}
 
 // Strictly Monochrome Black, Zinc, Platinum & Pure White Palette
 private val Zinc100 = Color(0xFFF4F4F5)
@@ -268,7 +281,11 @@ private data class CalibrationResponsiveMetrics(
   val titleFontSize: TextUnit,
   val subtitleFontSize: TextUnit,
   val subtitleLineHeight: TextUnit,
-  val fieldSpacing: Dp,
+  val labelToBoxGap: Dp,
+  val titleToFirstFieldGap: Dp,
+  val formFieldGap: Dp,
+  val sectionToCardGap: Dp,
+  val cardToCtaGap: Dp,
   val inputHeight: Dp,
   val selectHeight: Dp,
   val toggleHeight: Dp,
@@ -294,7 +311,7 @@ private fun computeCalibrationMetrics(
 ): CalibrationResponsiveMetrics {
   val w = maxWidth.value.coerceAtLeast(280f)
   val h = maxHeight.value.coerceAtLeast(480f)
-  val rawScale = min(w / 385f, h / 820f).coerceIn(0.76f, 1.30f)
+  val rawScale = min(w / 385f, h / 825f).coerceIn(0.76f, 1.30f)
 
   // Normalize Android system fontScale so that even huge system font settings (e.g. 200%)
   // scale text smoothly without ever crashing, clipping, or forcing excess scroll.
@@ -316,24 +333,35 @@ private fun computeCalibrationMetrics(
     w.dp
   }
 
+  // Resolution-adaptive logical gaps between every section on the Profile page:
+  // Automatically scales with screen height (h) so sections are clearly differentiated on every device.
+  val titleToFirstFieldGap = (h * 0.023f).coerceIn(16f, 25f).dp
+  val formFieldGap = (h * 0.021f).coerceIn(15f, 23f).dp
+  val sectionToCardGap = (h * 0.025f).coerceIn(18f, 27f).dp
+  val cardToCtaGap = (h * 0.024f).coerceIn(17f, 26f).dp
+
   return CalibrationResponsiveMetrics(
     scale = rawScale,
     fontCompensation = fontCompensation,
     contentMaxWidth = contentMaxWidth,
     horizontalPadding = (20f * rawScale).coerceIn(16f, 28f).dp,
-    topContentPadding = (10f * rawScale).coerceIn(7f, 15f).dp,
-    bottomContentPadding = (6f * rawScale).coerceIn(4f, 10f).dp,
+    topContentPadding = (12f * rawScale).coerceIn(8f, 18f).dp,
+    bottomContentPadding = (8f * rawScale).coerceIn(6f, 12f).dp,
     headerHeight = (56f * rawScale).coerceIn(50f, 66f).dp,
     titleFontSize = scaledSp(23.5f, 19f, 28f),
     subtitleFontSize = scaledSp(12f, 10.2f, 14f),
-    subtitleLineHeight = scaledSp(17f, 14.5f, 20f),
-    fieldSpacing = (h * 0.0135f).coerceIn(9f, 14.5f).dp,
-    inputHeight = (45f * rawScale).coerceIn(41f, 50f).dp,
-    selectHeight = (44f * rawScale).coerceIn(40f, 50f).dp,
-    toggleHeight = (38f * rawScale).coerceIn(35f, 44f).dp,
-    chronoCardMinHeight = (h * 0.295f).coerceIn(216f, 288f).dp,
-    chronoCardPadding = (20f * rawScale).coerceIn(16f, 26f).dp,
-    chronoSectionSpacing = (15.5f * rawScale).coerceIn(12f, 21f).dp,
+    subtitleLineHeight = scaledSp(17.2f, 14.5f, 20f),
+    labelToBoxGap = (7.5f * rawScale).coerceIn(6f, 10f).dp,
+    titleToFirstFieldGap = titleToFirstFieldGap,
+    formFieldGap = formFieldGap,
+    sectionToCardGap = sectionToCardGap,
+    cardToCtaGap = cardToCtaGap,
+    inputHeight = (46f * rawScale).coerceIn(43f, 52f).dp,
+    selectHeight = (45f * rawScale).coerceIn(42f, 51f).dp,
+    toggleHeight = (39f * rawScale).coerceIn(36f, 45f).dp,
+    chronoCardMinHeight = (h * 0.285f).coerceIn(216f, 286f).dp,
+    chronoCardPadding = (20f * rawScale).coerceIn(17f, 26f).dp,
+    chronoSectionSpacing = (16f * rawScale).coerceIn(13f, 22f).dp,
     ageYearsFontSize = scaledSp(42f, 32f, 50f),
     ageSubUnitFontSize = scaledSp(26f, 20f, 32f),
     ageUnitLabelFontSize = scaledSp(13.5f, 11f, 16f),
@@ -341,6 +369,178 @@ private fun computeCalibrationMetrics(
     secondaryStatFontSize = scaledSp(18f, 15f, 22f),
     ctaHeight = (49f * rawScale).coerceIn(45f, 56f).dp,
   )
+}
+
+/**
+ * Shared modifier for text input boxes (`FullNameField`, `DAY`, and `YEAR`):
+ * - While unfocused (`isFocused == false`): rests quietly with a crisp 1.dp `Zinc800` border on `ObsidianBlack`.
+ * - While actively writing (`isFocused == true`): elevates with a floating 3D shadow and a continuous,
+ *   dull/muted platinum-white flash wave orbiting around the border so the box feels like it is floating only while writing.
+ */
+@Composable
+private fun Modifier.writingFloatingBorder(
+  isFocused: Boolean,
+  cornerRadiusDp: Dp = 8.dp,
+): Modifier {
+  val focusWeight by animateFloatAsState(
+    targetValue = if (isFocused) 1f else 0f,
+    animationSpec = tween(durationMillis = 240, easing = CalibrationEaseOut),
+    label = "writing_focus_weight",
+  )
+
+  val infiniteTransition = rememberInfiniteTransition(label = "writing_dull_flash_transition")
+  val sweepPhase by infiniteTransition.animateFloat(
+    initialValue = 0f,
+    targetValue = 1f,
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 2200, easing = LinearEasing),
+      repeatMode = RepeatMode.Restart,
+    ),
+    label = "writing_border_sweep_phase",
+  )
+  val dullPulse by infiniteTransition.animateFloat(
+    initialValue = 0.35f,
+    targetValue = 0.85f,
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 1300, easing = LinearEasing),
+      repeatMode = RepeatMode.Reverse,
+    ),
+    label = "writing_border_dull_pulse",
+  )
+
+  val focusWeightProvider = remember { { focusWeight } }
+  val sweepPhaseProvider = remember { { sweepPhase } }
+  val dullPulseProvider = remember { { dullPulse } }
+
+  return this.drawWithCache {
+    val cornerPx = cornerRadiusDp.toPx()
+    val cornerRadius = CornerRadius(cornerPx, cornerPx)
+
+    val floatingDropShadowPaint = Paint().apply {
+      isAntiAlias = true
+      asFrameworkPaint().apply {
+        color = android.graphics.Color.argb(0, 0, 0, 0)
+        maskFilter = BlurMaskFilter(safeBlurRadius(15.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
+      }
+    }
+    val dullAmbientRimPaint = Paint().apply {
+      isAntiAlias = true
+      asFrameworkPaint().apply {
+        color = android.graphics.Color.argb(0, 212, 212, 218)
+        maskFilter = BlurMaskFilter(safeBlurRadius(10.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
+      }
+    }
+
+    onDrawWithContent {
+      val fw = focusWeightProvider().coerceIn(0f, 1f)
+      val sweep = sweepPhaseProvider()
+      val pulse = dullPulseProvider()
+
+      // 1. Floating Shadow & Dull Rear Halo (active ONLY while writing)
+      if (fw > 0.01f && size.width > 1f && size.height > 1f) {
+        floatingDropShadowPaint.asFrameworkPaint().alpha = (195f * fw).roundToInt().coerceIn(0, 220)
+        dullAmbientRimPaint.asFrameworkPaint().alpha = ((32f + 24f * pulse) * fw).roundToInt().coerceIn(0, 75)
+
+        drawIntoCanvas { canvas ->
+          // Deep floating drop shadow beneath the input box
+          canvas.drawRoundRect(
+            2.dp.toPx(),
+            6.dp.toPx(),
+            size.width - 2.dp.toPx(),
+            size.height + 7.dp.toPx(),
+            cornerPx,
+            cornerPx,
+            floatingDropShadowPaint,
+          )
+          // Dull muted-silver levitation halo around the border
+          canvas.drawRoundRect(
+            -1.dp.toPx(),
+            -1.dp.toPx(),
+            size.width + 1.dp.toPx(),
+            size.height + 2.dp.toPx(),
+            cornerPx,
+            cornerPx,
+            dullAmbientRimPaint,
+          )
+        }
+      }
+
+      // 2. Field Surface Background (subtle floating obsidian lift while writing)
+      drawRoundRect(
+        color = ObsidianBlack,
+        topLeft = Offset.Zero,
+        size = size,
+        cornerRadius = cornerRadius,
+      )
+      if (fw > 0.01f) {
+        drawRoundRect(
+          brush = Brush.verticalGradient(
+            colors = listOf(
+              Color(0xFF141418).copy(alpha = 0.85f * fw),
+              Color(0xFF0B0B0E).copy(alpha = 0.85f * fw),
+            ),
+          ),
+          topLeft = Offset.Zero,
+          size = size,
+          cornerRadius = cornerRadius,
+        )
+      }
+
+      // 3. Field Inner Content (Centered Cursor, Text, Placeholder, Icon)
+      drawContent()
+
+      // 4. Resting Base Border
+      drawRoundRect(
+        color = Zinc800,
+        topLeft = Offset.Zero,
+        size = size,
+        cornerRadius = cornerRadius,
+        style = Stroke(width = 1.dp.toPx()),
+      )
+
+      // 5. Constant Dull Flash-Up Around the Borders (ONLY while writing)
+      if (fw > 0.01f && size.width > 1f && size.height > 1f) {
+        val w = size.width
+        val h = size.height
+        val spanX = w * 0.48f
+        val spanY = h * 0.90f
+        // Ping-pong / traveling wave around the border
+        val waveT = (sin(sweep * Math.PI.toFloat() * 2f) * 0.5f + 0.5f).coerceIn(0f, 1f)
+        val cx = -spanX * 0.3f + (w + spanX * 0.6f) * waveT
+        val cy = h * 0.5f
+
+        // Dull ambient border brightening
+        drawRoundRect(
+          color = Zinc600.copy(alpha = (0.45f + 0.25f * pulse) * fw),
+          topLeft = Offset.Zero,
+          size = size,
+          cornerRadius = cornerRadius,
+          style = Stroke(width = 1.15.dp.toPx()),
+        )
+
+        // Traveling dull-white / satin-zinc flash wave along the border
+        drawRoundRect(
+          brush = Brush.linearGradient(
+            colors = listOf(
+              Color.Transparent,
+              Zinc500.copy(alpha = 0.38f * fw),
+              Zinc300.copy(alpha = (0.58f + 0.18f * pulse) * fw),
+              PureWhite.copy(alpha = (0.68f + 0.18f * pulse) * fw),
+              Zinc300.copy(alpha = (0.58f + 0.18f * pulse) * fw),
+              Zinc500.copy(alpha = 0.38f * fw),
+              Color.Transparent,
+            ),
+            start = Offset(cx - spanX, cy - spanY),
+            end = Offset(cx + spanX, cy + spanY),
+          ),
+          topLeft = Offset.Zero,
+          size = size,
+          cornerRadius = cornerRadius,
+          style = Stroke(width = 1.35.dp.toPx()),
+        )
+      }
+    }
+  }
 }
 
 @Composable
@@ -365,14 +565,23 @@ fun ProfileCalibrationScreen(
   }
 
   val coroutineScope = rememberCoroutineScope()
-  // Entry animation phase [0f..1f]: animates personal chronometric values from 0 to their actual calculated values.
-  val calibPhase = remember { Animatable(0f) }
-  // One-time border flash & rear backlight reflection wave on ChronometricDisplayCard when Continue is pressed
+  val headerStepPhase = remember { Animatable(0f) }
+  val chronoPhase = remember { Animatable(0f) }
   val borderFlashPhase = remember { Animatable(0f) }
 
+  // Top STEP 01 OF 03 progress bar: animates ONLY when switching to the Profile Section page
+  LaunchedEffect(Unit) {
+    headerStepPhase.snapTo(0f)
+    headerStepPhase.animateTo(
+      targetValue = 1f,
+      animationSpec = tween(durationMillis = 720, easing = CalibrationEaseOut),
+    )
+  }
+
+  // Chronometric Status section: animates on page entry AND whenever Date of Birth is edited
   LaunchedEffect(selectedDay, selectedMonth, selectedYear) {
-    calibPhase.snapTo(0f)
-    calibPhase.animateTo(
+    chronoPhase.snapTo(0f)
+    chronoPhase.animateTo(
       targetValue = 1f,
       animationSpec = tween(durationMillis = 720, easing = CalibrationEaseOut),
     )
@@ -389,7 +598,8 @@ fun ProfileCalibrationScreen(
     }
   }
 
-  val phaseProvider = remember(calibPhase) { { calibPhase.value } }
+  val headerStepPhaseProvider = remember(headerStepPhase) { { headerStepPhase.value } }
+  val chronoPhaseProvider = remember(chronoPhase) { { chronoPhase.value } }
   val borderFlashProvider = remember(borderFlashPhase) { { borderFlashPhase.value } }
 
   Scaffold(
@@ -399,8 +609,6 @@ fun ProfileCalibrationScreen(
     containerColor = ObsidianBlack,
     contentWindowInsets = WindowInsets(0, 0, 0, 0),
   ) { innerPadding ->
-    // Use WindowInsets.systemBars on BoxWithConstraints so opening the soft keyboard
-    // NEVER shrinks maxHeight or squeezes the screen layout.
     BoxWithConstraints(
       modifier = Modifier
         .fillMaxSize()
@@ -409,6 +617,7 @@ fun ProfileCalibrationScreen(
         .windowInsetsPadding(WindowInsets.systemBars),
       contentAlignment = Alignment.TopCenter,
     ) {
+      val viewportHeight = maxHeight
       val fontScale = LocalDensity.current.fontScale
       val metrics = remember(maxWidth, maxHeight, fontScale) {
         computeCalibrationMetrics(
@@ -418,129 +627,177 @@ fun ProfileCalibrationScreen(
         )
       }
       val scrollState = rememberScrollState()
+      var activeEditSection by remember { mutableStateOf(ActiveEditSection.NONE) }
+      var fullNameTopY by remember { mutableIntStateOf(0) }
+      var bioSexTopY by remember { mutableIntStateOf(0) }
 
+      // Always redirect to the very top of the page when entering the Profile Section
+      LaunchedEffect(Unit) {
+        scrollState.scrollTo(0)
+      }
+
+      // Automatically scroll up while writing/editing so the active section and Chronometric Status
+      // are framed cleanly above the keyboard (matching image_bff83314.png)
+      LaunchedEffect(activeEditSection) {
+        when (activeEditSection) {
+          ActiveEditSection.DOB -> {
+            snapshotFlow { scrollState.maxValue to bioSexTopY }
+              .collectLatest { (maxVal, sexY) ->
+                if (maxVal > 0) {
+                  val targetScroll = if (sexY > 0) max(sexY - 12, maxVal) else maxVal
+                  scrollState.animateScrollTo(
+                    value = targetScroll.coerceIn(0, maxVal),
+                    animationSpec = tween(durationMillis = 280, easing = CalibrationEaseOut),
+                  )
+                }
+              }
+          }
+          ActiveEditSection.FULL_NAME -> {
+            snapshotFlow { scrollState.maxValue to fullNameTopY }
+              .collectLatest { (maxVal, nameY) ->
+                if (maxVal > 0 && nameY > 0) {
+                  val targetScroll = (nameY - 16).coerceIn(0, maxVal)
+                  scrollState.animateScrollTo(
+                    value = targetScroll,
+                    animationSpec = tween(durationMillis = 280, easing = CalibrationEaseOut),
+                  )
+                }
+              }
+          }
+          ActiveEditSection.NONE -> Unit
+        }
+      }
+
+      // Single unified page: Header (BioSync + STEP 01 OF 03) and Body live on one seamless canvas
+      // with no dividing line and scroll together smoothly without freezing at the top.
       Column(
         modifier = Modifier
-          .fillMaxSize()
+          .widthIn(max = metrics.contentMaxWidth)
+          .fillMaxWidth()
+          .imePadding()
+          .verticalScroll(scrollState)
+          .heightIn(min = viewportHeight)
+          .padding(
+            start = metrics.horizontalPadding,
+            end = metrics.horizontalPadding,
+            top = (6f * metrics.scale).coerceIn(4f, 10f).dp,
+            bottom = metrics.bottomContentPadding,
+          )
           .testTag("profile_calibration_screen"),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween,
       ) {
-        // Sticky Top Header Bar with Shiny Glowy White Step Bar under STEP 01 OF 03
+        // Top Header Bar (BioSync + STEP 01 OF 03 + Shiny Glowy White Step Bar) — part of the unified page
         CalibrationHeaderBar(
           onBackClick = onNavigateBack,
-          phaseProvider = phaseProvider,
+          phaseProvider = headerStepPhaseProvider,
           metrics = metrics,
         )
 
-        // Exact viewport measurement for the scrollable body area:
-        // Fits 100% into the screen height with zero unnecessary scroll when space allows,
-        // and scrolls smoothly only when needed (compact screens or when soft keyboard is open),
-        // stopping immediately at "Encrypted on-device • Private & Secure".
-        BoxWithConstraints(
-          modifier = Modifier
-            .weight(1f)
-            .fillMaxWidth()
-            .imePadding(),
-          contentAlignment = Alignment.TopCenter,
+        Spacer(modifier = Modifier.height(metrics.topContentPadding))
+
+        // 1. Top Eyebrow, Section Title & Description under Profile Section
+        Column(
+          modifier = Modifier.fillMaxWidth(),
         ) {
-          val exactBodyHeight = maxHeight
-
-          Column(
-            modifier = Modifier
-              .widthIn(max = metrics.contentMaxWidth)
-              .fillMaxWidth()
-              .verticalScroll(scrollState)
-              .heightIn(min = exactBodyHeight)
-              .padding(
-                start = metrics.horizontalPadding,
-                end = metrics.horizontalPadding,
-                top = metrics.topContentPadding,
-                bottom = metrics.bottomContentPadding,
-              ),
-            verticalArrangement = Arrangement.SpaceBetween,
-          ) {
-          // Upper Form Group
-          Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(metrics.fieldSpacing),
-          ) {
-            // Top Eyebrow, Section Title & Description under Profile Section
-            Column(
-              modifier = Modifier.fillMaxWidth(),
-            ) {
-              Text(
-                text = stringResource(R.string.calib_eyebrow),
-                color = Zinc400,
-                fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.Medium,
-                fontSize = metrics.spScaled(11.2f, 9.5f, 13f),
-                letterSpacing = 1.6.sp,
-              )
-              Spacer(modifier = Modifier.height((4f * metrics.scale).dp))
-              Text(
-                text = stringResource(R.string.calib_title),
-                color = PureWhite,
-                fontFamily = InterFontFamily,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = metrics.titleFontSize,
-                letterSpacing = (-0.5).sp,
-                modifier = Modifier.testTag("calib_title_text"),
-              )
-              Spacer(modifier = Modifier.height((4.5f * metrics.scale).coerceIn(3f, 7f).dp))
-              Text(
-                text = stringResource(R.string.calib_subtitle),
-                color = Zinc400,
-                fontFamily = InterFontFamily,
-                fontWeight = FontWeight.Normal,
-                fontSize = metrics.subtitleFontSize,
-                lineHeight = metrics.subtitleLineHeight,
-                modifier = Modifier.testTag("calib_subtitle_text"),
-              )
-            }
-
-            FullNameField(
-              value = subjectName,
-              onValueChange = { subjectName = it },
-              metrics = metrics,
-            )
-
-            BiologicalSexSelector(
-              selectedSex = selectedSex,
-              onSelectSex = { selectedSex = it },
-              metrics = metrics,
-            )
-
-            DateOfBirthSelectorRow(
-              selectedDay = selectedDay,
-              selectedMonth = selectedMonth,
-              selectedYear = selectedYear,
-              onDayChange = { selectedDay = it },
-              onMonthChange = { selectedMonth = it },
-              onYearChange = { selectedYear = it },
-              metrics = metrics,
-            )
-          }
-
-          Spacer(modifier = Modifier.height(metrics.fieldSpacing))
-
-          // Enlarged & Taller Architectural Chronometric Display Card (with One-Time Border Flash & Multi-Tone White Progress Bar)
-          ChronometricDisplayCard(
-            chronometry = chronometry,
-            phaseProvider = phaseProvider,
-            borderFlashProvider = borderFlashProvider,
-            metrics = metrics,
+          Text(
+            text = stringResource(R.string.calib_eyebrow),
+            color = Zinc400,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = metrics.spScaled(11.2f, 9.5f, 13f),
+            letterSpacing = 1.6.sp,
           )
-
-          Spacer(modifier = Modifier.height(metrics.fieldSpacing))
-
-          // Primary Action Button & Encrypted Footer (Content ends right here with no trailing scroll space)
-          CalibrationContinueSection(
-            onContinueClick = onContinueClick,
-            borderFlashProvider = borderFlashProvider,
-            metrics = metrics,
+          Spacer(modifier = Modifier.height((4f * metrics.scale).dp))
+          Text(
+            text = stringResource(R.string.calib_title),
+            color = PureWhite,
+            fontFamily = InterFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = metrics.titleFontSize,
+            letterSpacing = (-0.5).sp,
+            modifier = Modifier.testTag("calib_title_text"),
           )
-          }
+          Spacer(modifier = Modifier.height((5f * metrics.scale).coerceIn(3.5f, 7.5f).dp))
+          Text(
+            text = stringResource(R.string.calib_subtitle),
+            color = Zinc400,
+            fontFamily = InterFontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = metrics.subtitleFontSize,
+            lineHeight = metrics.subtitleLineHeight,
+            modifier = Modifier.testTag("calib_subtitle_text"),
+          )
         }
+
+        Spacer(modifier = Modifier.height(metrics.titleToFirstFieldGap))
+
+        // 2. Full Name Section (with centered cursor + floating dull border flash while writing)
+        FullNameField(
+          value = subjectName,
+          onValueChange = { subjectName = it },
+          onFocusChange = { focused ->
+            if (focused) {
+              activeEditSection = ActiveEditSection.FULL_NAME
+            } else if (activeEditSection == ActiveEditSection.FULL_NAME) {
+              activeEditSection = ActiveEditSection.NONE
+            }
+          },
+          metrics = metrics,
+          modifier = Modifier.onGloballyPositioned { coords ->
+            fullNameTopY = coords.positionInParent().y.roundToInt()
+          },
+        )
+
+        Spacer(modifier = Modifier.height(metrics.formFieldGap))
+
+        // 3. Biological Sex Section
+        BiologicalSexSelector(
+          selectedSex = selectedSex,
+          onSelectSex = { selectedSex = it },
+          metrics = metrics,
+          modifier = Modifier.onGloballyPositioned { coords ->
+            bioSexTopY = coords.positionInParent().y.roundToInt()
+          },
+        )
+
+        Spacer(modifier = Modifier.height(metrics.formFieldGap))
+
+        // 4. Date of Birth Section (Direct Day/Year typing with floating dull border flash + Floating 3D Month Picker)
+        DateOfBirthSelectorRow(
+          selectedDay = selectedDay,
+          selectedMonth = selectedMonth,
+          selectedYear = selectedYear,
+          onDayChange = { selectedDay = it },
+          onMonthChange = { selectedMonth = it },
+          onYearChange = { selectedYear = it },
+          onDobFocusChange = { focused ->
+            if (focused) {
+              activeEditSection = ActiveEditSection.DOB
+            } else if (activeEditSection == ActiveEditSection.DOB) {
+              activeEditSection = ActiveEditSection.NONE
+            }
+          },
+          metrics = metrics,
+        )
+
+        Spacer(modifier = Modifier.height(metrics.sectionToCardGap))
+
+        // 5. Architectural Chronometric Display Card
+        ChronometricDisplayCard(
+          chronometry = chronometry,
+          phaseProvider = chronoPhaseProvider,
+          borderFlashProvider = borderFlashProvider,
+          metrics = metrics,
+        )
+
+        Spacer(modifier = Modifier.height(metrics.cardToCtaGap))
+
+        // 6. Primary Action Button & Encrypted Footer (Content ends right here with no trailing scroll space)
+        CalibrationContinueSection(
+          onContinueClick = onContinueClick,
+          borderFlashProvider = borderFlashProvider,
+          metrics = metrics,
+        )
       }
     }
   }
@@ -553,104 +810,90 @@ private fun CalibrationHeaderBar(
   metrics: CalibrationResponsiveMetrics,
 ) {
   val backDesc = stringResource(R.string.cd_back_button)
-  Column(
+  Row(
     modifier = Modifier
       .fillMaxWidth()
-      .background(ObsidianBlack),
+      .heightIn(min = metrics.headerHeight)
+      .padding(vertical = (4f * metrics.scale).coerceIn(2f, 7f).dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.SpaceBetween,
   ) {
-    Row(
+    // Return Button (<)
+    Box(
       modifier = Modifier
-        .fillMaxWidth()
-        .heightIn(min = metrics.headerHeight)
-        .padding(
-          horizontal = metrics.horizontalPadding,
-          vertical = (6f * metrics.scale).coerceIn(4f, 9f).dp,
-        ),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.SpaceBetween,
+        .size(48.dp)
+        .clip(CircleShape)
+        .clickable(
+          role = Role.Button,
+          onClick = onBackClick,
+        )
+        .semantics { contentDescription = backDesc }
+        .testTag("calib_back_button"),
+      contentAlignment = Alignment.CenterStart,
     ) {
-      // Return Button (<)
-      Box(
-        modifier = Modifier
-          .size(48.dp)
-          .clip(CircleShape)
-          .clickable(
-            role = Role.Button,
-            onClick = onBackClick,
-          )
-          .semantics { contentDescription = backDesc }
-          .testTag("calib_back_button"),
-        contentAlignment = Alignment.CenterStart,
-      ) {
-        Canvas(modifier = Modifier.size((18f * metrics.scale).coerceIn(16f, 22f).dp)) {
-          val w = size.width
-          val h = size.height
-          val chevron = Path().apply {
-            moveTo(w * 0.68f, h * 0.14f)
-            lineTo(w * 0.24f, h * 0.50f)
-            lineTo(w * 0.68f, h * 0.86f)
-          }
-          drawPath(
-            path = chevron,
-            color = Zinc300,
-            style = Stroke(
-              width = 1.8.dp.toPx(),
-              cap = StrokeCap.Round,
-              join = StrokeJoin.Round,
-            ),
-          )
+      Canvas(modifier = Modifier.size((18f * metrics.scale).coerceIn(16f, 22f).dp)) {
+        val w = size.width
+        val h = size.height
+        val chevron = Path().apply {
+          moveTo(w * 0.68f, h * 0.14f)
+          lineTo(w * 0.24f, h * 0.50f)
+          lineTo(w * 0.68f, h * 0.86f)
         }
-      }
-
-      // Center Title + Step Subtitle + Shiny Glowy White Step Progress Bar right below STEP 01 OF 03
-      Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-      ) {
-        Text(
-          text = stringResource(R.string.calib_header_title),
-          color = PureWhite,
-          fontFamily = InterFontFamily,
-          fontWeight = FontWeight.SemiBold,
-          fontSize = metrics.spScaled(15f, 13f, 17.5f),
-          letterSpacing = (-0.2).sp,
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-          text = stringResource(R.string.calib_header_step),
-          color = Zinc400,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.Medium,
-          fontSize = metrics.spScaled(10.2f, 9f, 12f),
-          letterSpacing = 1.0.sp,
-        )
-        Spacer(modifier = Modifier.height((4.5f * metrics.scale).coerceIn(3.5f, 6.5f).dp))
-
-        // Slight White Color Shiny Glowy Bar right below STEP 01 OF 03
-        StepOneShinyGlowBar(
-          phaseProvider = phaseProvider,
-          modifier = Modifier
-            .width((108f * metrics.scale).coerceIn(92f, 136f).dp)
-            .height((4f * metrics.scale).coerceIn(3.5f, 5f).dp)
-            .testTag("step_01_glow_bar"),
-        )
-      }
-
-      // Right Luminous Status Dot (same PureWhite color as BioSync header title)
-      Box(
-        modifier = Modifier.size(48.dp),
-        contentAlignment = Alignment.CenterEnd,
-      ) {
-        LuminousWhiteDot(
-          size = (8.5f * metrics.scale).coerceIn(7f, 10.5f).dp,
+        drawPath(
+          path = chevron,
+          color = Zinc300,
+          style = Stroke(
+            width = 1.8.dp.toPx(),
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round,
+          ),
         )
       }
     }
 
-    HorizontalDivider(
-      thickness = 1.dp,
-      color = Zinc900,
-    )
+    // Center Title + Step Subtitle + Shiny Glowy White Step Progress Bar right below STEP 01 OF 03
+    Column(
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.Center,
+    ) {
+      Text(
+        text = stringResource(R.string.calib_header_title),
+        color = PureWhite,
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = metrics.spScaled(15f, 13f, 17.5f),
+        letterSpacing = (-0.2).sp,
+      )
+      Spacer(modifier = Modifier.height(2.dp))
+      Text(
+        text = stringResource(R.string.calib_header_step),
+        color = Zinc400,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = metrics.spScaled(10.2f, 9f, 12f),
+        letterSpacing = 1.0.sp,
+      )
+      Spacer(modifier = Modifier.height((4.5f * metrics.scale).coerceIn(3.5f, 6.5f).dp))
+
+      // Slight White Color Shiny Glowy Bar right below STEP 01 OF 03
+      StepOneShinyGlowBar(
+        phaseProvider = phaseProvider,
+        modifier = Modifier
+          .width((108f * metrics.scale).coerceIn(92f, 136f).dp)
+          .height((4f * metrics.scale).coerceIn(3.5f, 5f).dp)
+          .testTag("step_01_glow_bar"),
+      )
+    }
+
+    // Right Luminous Status Dot (same PureWhite color as BioSync header title)
+    Box(
+      modifier = Modifier.size(48.dp),
+      contentAlignment = Alignment.CenterEnd,
+    ) {
+      LuminousWhiteDot(
+        size = (8.5f * metrics.scale).coerceIn(7f, 10.5f).dp,
+      )
+    }
   }
 }
 
@@ -729,7 +972,6 @@ private fun StepOneShinyGlowBar(
           val p = phaseProvider().coerceIn(0f, 1f)
           val activeFraction = 0.36f * p
 
-          // 1. Subtle 3-step background track with step tick dividers
           drawRoundRect(
             color = Zinc850,
             topLeft = Offset.Zero,
@@ -807,20 +1049,34 @@ private fun StepOneShinyGlowBar(
 private fun FullNameField(
   value: String,
   onValueChange: (String) -> Unit,
+  onFocusChange: (Boolean) -> Unit,
   metrics: CalibrationResponsiveMetrics,
+  modifier: Modifier = Modifier,
 ) {
   val interactionSource = remember { MutableInteractionSource() }
   val isFocused by interactionSource.collectIsFocusedAsState()
-  val borderColor by animateColorAsState(
-    targetValue = if (isFocused) Zinc400 else Zinc800,
-    animationSpec = tween(durationMillis = 150),
-    label = "name_border_color",
-  )
-  val fieldShape = RoundedCornerShape(8.dp)
+  LaunchedEffect(isFocused) {
+    onFocusChange(isFocused)
+  }
+  val fieldFontSize = metrics.spScaled(13.8f, 12f, 16f)
+  val centeredTextStyle = remember(fieldFontSize) {
+    TextStyle(
+      color = Zinc100,
+      fontFamily = InterFontFamily,
+      fontWeight = FontWeight.Normal,
+      fontSize = fieldFontSize,
+      lineHeight = fieldFontSize * 1.15f,
+      platformStyle = PlatformTextStyle(includeFontPadding = false),
+      lineHeightStyle = LineHeightStyle(
+        alignment = LineHeightStyle.Alignment.Center,
+        trim = LineHeightStyle.Trim.Both,
+      ),
+    )
+  }
 
   Column(
-    modifier = Modifier.fillMaxWidth(),
-    verticalArrangement = Arrangement.spacedBy((6f * metrics.scale).coerceIn(4f, 9f).dp),
+    modifier = modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(metrics.labelToBoxGap),
   ) {
     val nameTag = stringResource(R.string.calib_field_name_tag)
     Row(
@@ -847,57 +1103,52 @@ private fun FullNameField(
       }
     }
 
-    Box(
+    // Input field with vertically centered cursor + floating dull border flash while writing
+    BasicTextField(
+      value = value,
+      onValueChange = onValueChange,
+      singleLine = true,
+      interactionSource = interactionSource,
+      cursorBrush = SolidColor(PureWhite),
+      textStyle = centeredTextStyle,
+      decorationBox = { innerTextField ->
+        Row(
+          modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 14.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+          Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.CenterStart,
+          ) {
+            if (value.isEmpty()) {
+              Text(
+                text = stringResource(R.string.calib_field_name_placeholder),
+                style = centeredTextStyle.copy(
+                  color = if (isFocused) Zinc600.copy(alpha = 0.75f) else Zinc700,
+                ),
+                maxLines = 1,
+              )
+            }
+            innerTextField()
+          }
+
+          Spacer(modifier = Modifier.width(10.dp))
+
+          BadgeVectorIcon(
+            color = if (isFocused) Zinc400 else Zinc600,
+            size = (18f * metrics.scale).coerceIn(16f, 22f).dp,
+          )
+        }
+      },
       modifier = Modifier
         .fillMaxWidth()
         .height(metrics.inputHeight)
-        .clip(fieldShape)
-        .background(ObsidianBlack)
-        .border(width = 1.dp, color = borderColor, shape = fieldShape)
-        .padding(horizontal = 14.dp),
-      contentAlignment = Alignment.CenterStart,
-    ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-      ) {
-        Box(modifier = Modifier.weight(1f)) {
-          if (value.isEmpty()) {
-            Text(
-              text = stringResource(R.string.calib_field_name_placeholder),
-              color = Zinc700,
-              fontFamily = InterFontFamily,
-              fontWeight = FontWeight.Normal,
-              fontSize = metrics.spScaled(13.8f, 12f, 16f),
-            )
-          }
-          BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            singleLine = true,
-            interactionSource = interactionSource,
-            cursorBrush = SolidColor(PureWhite),
-            textStyle = TextStyle(
-              color = Zinc100,
-              fontFamily = InterFontFamily,
-              fontWeight = FontWeight.Normal,
-              fontSize = metrics.spScaled(13.8f, 12f, 16f),
-            ),
-            modifier = Modifier
-              .fillMaxWidth()
-              .testTag("profile_name_input"),
-          )
-        }
-
-        Spacer(modifier = Modifier.width(10.dp))
-
-        BadgeVectorIcon(
-          color = Zinc600,
-          size = (18f * metrics.scale).coerceIn(16f, 22f).dp,
-        )
-      }
-    }
+        .writingFloatingBorder(isFocused = isFocused, cornerRadiusDp = 8.dp)
+        .testTag("profile_name_input"),
+    )
   }
 }
 
@@ -957,13 +1208,14 @@ private fun BiologicalSexSelector(
   selectedSex: String,
   onSelectSex: (String) -> Unit,
   metrics: CalibrationResponsiveMetrics,
+  modifier: Modifier = Modifier,
 ) {
   val containerShape = RoundedCornerShape(8.dp)
   val pillShape = RoundedCornerShape(6.dp)
 
   Column(
-    modifier = Modifier.fillMaxWidth(),
-    verticalArrangement = Arrangement.spacedBy((6f * metrics.scale).coerceIn(4f, 9f).dp),
+    modifier = modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(metrics.labelToBoxGap),
   ) {
     val sexTag = stringResource(R.string.calib_field_sex_tag)
     Row(
@@ -1044,9 +1296,9 @@ private fun BiologicalSexSelector(
 
 /**
  * Date of Birth Section:
- * - DAY: Direct numeric input field (01..31)
+ * - DAY: Direct numeric input field (01..31) with centered cursor & floating dull border flash while writing
  * - MONTH: Tapping opens a realistic, floating 3D monochrome Month Picker modal popup (Jan..Dec)
- * - YEAR: Direct numeric input field (1900..currentYear)
+ * - YEAR: Direct numeric input field (1900..currentYear) with centered cursor & floating dull border flash while writing
  */
 @Composable
 private fun DateOfBirthSelectorRow(
@@ -1056,15 +1308,22 @@ private fun DateOfBirthSelectorRow(
   onDayChange: (Int) -> Unit,
   onMonthChange: (Int) -> Unit,
   onYearChange: (Int) -> Unit,
+  onDobFocusChange: (Boolean) -> Unit,
   metrics: CalibrationResponsiveMetrics,
 ) {
   val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
   var showMonthPopup by rememberSaveable { mutableStateOf(false) }
+  var isDayFocused by remember { mutableStateOf(false) }
+  var isYearFocused by remember { mutableStateOf(false) }
 
-  var dayInputText by rememberSaveable(selectedDay) {
+  LaunchedEffect(isDayFocused, isYearFocused) {
+    onDobFocusChange(isDayFocused || isYearFocused)
+  }
+
+  var dayInputText by rememberSaveable {
     mutableStateOf(selectedDay.toString().padStart(2, '0'))
   }
-  var yearInputText by rememberSaveable(selectedYear) {
+  var yearInputText by rememberSaveable {
     mutableStateOf(selectedYear.toString())
   }
 
@@ -1074,7 +1333,7 @@ private fun DateOfBirthSelectorRow(
 
   Column(
     modifier = Modifier.fillMaxWidth(),
-    verticalArrangement = Arrangement.spacedBy((6f * metrics.scale).coerceIn(4f, 9f).dp),
+    verticalArrangement = Arrangement.spacedBy(metrics.labelToBoxGap),
   ) {
     Text(
       text = stringResource(R.string.calib_field_dob_label),
@@ -1102,6 +1361,7 @@ private fun DateOfBirthSelectorRow(
             onDayChange(parsed)
           }
         },
+        onFocusChange = { isDayFocused = it },
         onFocusLost = {
           val parsed = dayInputText.toIntOrNull()
           val validDay = (parsed ?: selectedDay).coerceIn(1, 31)
@@ -1147,6 +1407,7 @@ private fun DateOfBirthSelectorRow(
             onYearChange(parsed)
           }
         },
+        onFocusChange = { isYearFocused = it },
         onFocusLost = {
           val parsed = yearInputText.toIntOrNull()
           val validYear = if (parsed != null && parsed in 1900..currentYear) parsed else selectedYear
@@ -1183,6 +1444,7 @@ private fun DirectNumberDobField(
   placeholder: String,
   unitHint: String,
   onValueChange: (String) -> Unit,
+  onFocusChange: (Boolean) -> Unit,
   onFocusLost: () -> Unit,
   focusRequester: FocusRequester,
   imeAction: ImeAction,
@@ -1193,13 +1455,24 @@ private fun DirectNumberDobField(
 ) {
   var isFocused by remember { mutableStateOf(false) }
   var hadFocus by remember { mutableStateOf(false) }
-  val boxShape = RoundedCornerShape(8.dp)
-
-  val borderColor by animateColorAsState(
-    targetValue = if (isFocused) PureWhite.copy(alpha = 0.85f) else Zinc800,
-    animationSpec = tween(durationMillis = 150),
-    label = "direct_dob_border",
-  )
+  LaunchedEffect(isFocused) {
+    onFocusChange(isFocused)
+  }
+  val fieldFontSize = metrics.spScaled(13f, 11.2f, 15f)
+  val centeredMonoStyle = remember(fieldFontSize) {
+    TextStyle(
+      color = Zinc100,
+      fontFamily = JetBrainsMonoFontFamily,
+      fontWeight = FontWeight.SemiBold,
+      fontSize = fieldFontSize,
+      lineHeight = fieldFontSize * 1.15f,
+      platformStyle = PlatformTextStyle(includeFontPadding = false),
+      lineHeightStyle = LineHeightStyle(
+        alignment = LineHeightStyle.Alignment.Center,
+        trim = LineHeightStyle.Trim.Both,
+      ),
+    )
+  }
 
   Column(modifier = modifier) {
     Text(
@@ -1210,80 +1483,71 @@ private fun DirectNumberDobField(
       fontSize = metrics.spScaled(10f, 8.5f, 11.5f),
       letterSpacing = 0.5.sp,
     )
-    Spacer(modifier = Modifier.height(4.dp))
-    Row(
+    Spacer(modifier = Modifier.height(5.dp))
+
+    BasicTextField(
+      value = value,
+      onValueChange = onValueChange,
+      singleLine = true,
+      cursorBrush = SolidColor(PureWhite),
+      keyboardOptions = KeyboardOptions(
+        keyboardType = KeyboardType.Number,
+        imeAction = imeAction,
+      ),
+      keyboardActions = KeyboardActions(
+        onNext = { onImeAction() },
+        onDone = { onImeAction() },
+      ),
+      textStyle = centeredMonoStyle,
+      decorationBox = { innerTextField ->
+        Row(
+          modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 11.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+          Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.CenterStart,
+          ) {
+            if (value.isEmpty()) {
+              Text(
+                text = placeholder,
+                style = centeredMonoStyle.copy(
+                  color = Zinc600,
+                  fontWeight = FontWeight.Normal,
+                ),
+                maxLines = 1,
+              )
+            }
+            innerTextField()
+          }
+
+          Text(
+            text = unitHint,
+            color = if (isFocused) Zinc400 else Zinc700,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = metrics.spScaled(8.8f, 7.5f, 10f),
+          )
+        }
+      },
       modifier = Modifier
         .fillMaxWidth()
         .height(metrics.selectHeight)
-        .clip(boxShape)
-        .background(ObsidianBlack)
-        .border(width = 1.dp, color = borderColor, shape = boxShape)
-        .clickable(
-          interactionSource = remember { MutableInteractionSource() },
-          indication = null,
-          onClick = { focusRequester.requestFocus() },
-        )
-        .padding(horizontal = 11.dp)
-        .testTag(testTag),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-      Box(
-        modifier = Modifier.weight(1f),
-        contentAlignment = Alignment.CenterStart,
-      ) {
-        if (value.isEmpty()) {
-          Text(
-            text = placeholder,
-            color = Zinc600,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Normal,
-            fontSize = metrics.spScaled(12.5f, 11f, 14.5f),
-            maxLines = 1,
-          )
+        .writingFloatingBorder(isFocused = isFocused, cornerRadiusDp = 8.dp)
+        .focusRequester(focusRequester)
+        .onFocusChanged { state ->
+          isFocused = state.isFocused
+          if (state.isFocused) {
+            hadFocus = true
+          } else if (hadFocus) {
+            onFocusLost()
+          }
         }
-        BasicTextField(
-          value = value,
-          onValueChange = onValueChange,
-          singleLine = true,
-          cursorBrush = SolidColor(PureWhite),
-          keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Number,
-            imeAction = imeAction,
-          ),
-          keyboardActions = KeyboardActions(
-            onNext = { onImeAction() },
-            onDone = { onImeAction() },
-          ),
-          textStyle = TextStyle(
-            color = Zinc100,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = metrics.spScaled(13f, 11.2f, 15f),
-          ),
-          modifier = Modifier
-            .fillMaxWidth()
-            .focusRequester(focusRequester)
-            .onFocusChanged { state ->
-              isFocused = state.isFocused
-              if (state.isFocused) {
-                hadFocus = true
-              } else if (hadFocus) {
-                onFocusLost()
-              }
-            }
-            .testTag("${testTag}_input"),
-        )
-      }
-
-      Text(
-        text = unitHint,
-        color = if (isFocused) Zinc400 else Zinc700,
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize = metrics.spScaled(8.8f, 7.5f, 10f),
-      )
-    }
+        .testTag(testTag),
+    )
   }
 }
 
@@ -1316,7 +1580,7 @@ private fun MonthPopupTriggerField(
       fontSize = metrics.spScaled(10f, 8.5f, 11.5f),
       letterSpacing = 0.5.sp,
     )
-    Spacer(modifier = Modifier.height(4.dp))
+    Spacer(modifier = Modifier.height(5.dp))
     Row(
       modifier = Modifier
         .fillMaxWidth()
@@ -1711,7 +1975,6 @@ private fun ChronometricDisplayCard(
             maskFilter = BlurMaskFilter(safeBlurRadius(20.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
           }
         }
-        // Rear backlight flash wave paint for the one-time border flash when Continue is pressed
         val rearFlashHaloPaint = Paint().apply {
           isAntiAlias = true
           asFrameworkPaint().apply {
@@ -1776,7 +2039,7 @@ private fun ChronometricDisplayCard(
           // 2. Card Content
           drawContent()
 
-          // 3. Base Architectural Monochrome Border (dims slightly as the flash wave passes for contrast)
+          // 3. Base Architectural Monochrome Border
           val baseBorderAlpha = (1f - 0.38f * flashEnvelope).coerceIn(0.42f, 1f)
           drawRoundRect(
             brush = baseBorderBrush,
@@ -1796,12 +2059,11 @@ private fun ChronometricDisplayCard(
             val centerX = -bandSpanX + (diagW + bandSpanX * 2f) * flashProgress
             val centerY = -bandSpanY + (diagH + bandSpanY * 2f) * flashProgress
 
-            // Subtle diagonal surface reflection sheen across the card face
             drawRoundRect(
               brush = Brush.linearGradient(
                 colors = listOf(
                   Color.Transparent,
-                   Zinc300.copy(alpha = 0.05f * flashEnvelope),
+                  Zinc300.copy(alpha = 0.05f * flashEnvelope),
                   PureWhite.copy(alpha = 0.12f * flashEnvelope),
                   Color(0xFFF7EFE6).copy(alpha = 0.06f * flashEnvelope),
                   Color.Transparent,
@@ -1814,7 +2076,6 @@ private fun ChronometricDisplayCard(
               cornerRadius = cornerRadius,
             )
 
-            // Brilliant traveling border flash reflection all over the card border
             drawRoundRect(
               brush = Brush.linearGradient(
                 colors = listOf(
@@ -1872,23 +2133,6 @@ private fun ChronometricDisplayCard(
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.SemiBold,
             fontSize = metrics.spScaled(12f, 10.2f, 14f),
-            letterSpacing = 1.1.sp,
-          )
-        }
-
-        Box(
-          modifier = Modifier
-            .clip(RoundedCornerShape(5.dp))
-            .background(Zinc900)
-            .border(1.dp, Zinc700.copy(alpha = 0.7f), RoundedCornerShape(5.dp))
-            .padding(horizontal = 9.dp, vertical = 4.dp),
-        ) {
-          Text(
-            text = stringResource(R.string.calib_active_index),
-            color = Zinc200,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Medium,
-            fontSize = metrics.spScaled(10.2f, 8.8f, 12f),
             letterSpacing = 1.1.sp,
           )
         }
@@ -2150,7 +2394,6 @@ private fun CalculatedAgeProgressBar(
           val progress = progressProvider().coerceIn(0f, 1f)
           val boost = shimmerBoostProvider().coerceIn(0f, 1f)
 
-          // 1. Recessed Monochrome Capsule Track
           drawRoundRect(
             color = MonochromeTrack,
             topLeft = Offset.Zero,
@@ -2176,7 +2419,6 @@ private fun CalculatedAgeProgressBar(
               ),
             )
 
-            // 2. Multi-Tone Liquid Chrome & Pearl-White Gradient Fill
             drawPath(
               path = fillPath,
               brush = Brush.horizontalGradient(
@@ -2186,7 +2428,6 @@ private fun CalculatedAgeProgressBar(
               ),
             )
 
-            // 3. Liquid-Silver Specular Folds & Dimensional Surface Lighting
             clipPath(fillPath) {
               drawRect(
                 brush = verticalLightingBrush,
@@ -2213,7 +2454,6 @@ private fun CalculatedAgeProgressBar(
               )
             }
 
-            // 4. Crisp Pure-White Top Rim Highlight
             drawRoundRect(
               brush = topRimBrush,
               topLeft = Offset(0.5.dp.toPx(), 0.5.dp.toPx()),
@@ -2305,7 +2545,6 @@ private fun CalibrationContinueSection(
             val boostAlpha = (sin(clickBoost * Math.PI.toFloat()).coerceIn(0f, 1f) * 85f).roundToInt()
             outerAuraPaint.asFrameworkPaint().alpha = (60 + (55 * breath).roundToInt() + boostAlpha).coerceIn(45, 195)
 
-            // 1. Soft Luminous White Outer Glow Aura
             drawIntoCanvas { canvas ->
               canvas.drawRoundRect(
                 2.dp.toPx(),
@@ -2327,7 +2566,6 @@ private fun CalibrationContinueSection(
               )
             }
 
-            // 2. Crisp Metallic White Button Surface
             drawRoundRect(
               brush = if (isPressed) pressedBrush else baseMetallicBrush,
               topLeft = Offset.Zero,
@@ -2335,7 +2573,6 @@ private fun CalibrationContinueSection(
               cornerRadius = cornerRadius,
             )
 
-            // 3. Sweeping Specular Liquid-Chrome Shimmer Band
             clipPath(buttonClipPath) {
               val activePhase = if (clickBoost > 0.01f) clickBoost else phase
               val sweepSpan = (size.width * 0.38f).coerceAtLeast(1f)
@@ -2356,7 +2593,6 @@ private fun CalibrationContinueSection(
               )
             }
 
-            // 4. Luminous Specular Rim Border
             drawRoundRect(
               color = PureWhite,
               topLeft = Offset.Zero,
