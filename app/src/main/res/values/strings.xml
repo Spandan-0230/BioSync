@@ -48,4 +48,22 @@
     <string name="calib_cta_continue">Continue</string>
     <string name="calib_footer_encrypted">Encrypted on device • Private &amp; secure</string>
     <string name="cd_back_button">Return to Welcome screen</string>
+
+    <!-- Personal Details Screen (Step 02 of 03) -->
+    <string name="personal_header_step">STEP 02 OF 03</string>
+    <string name="personal_eyebrow">ANTHROPOMETRICS</string>
+    <string name="personal_title">Personal Details</string>
+    <string name="personal_subtitle">Your physical stature and mass baseline. Precision somatic calibration powers real-time BMI indexing and daily energy modeling.</string>
+    <string name="personal_height_label">Height</string>
+    <string name="personal_unit_cm">CM</string>
+    <string name="personal_unit_inch">INCH</string>
+    <string name="personal_weight_label">Weight</string>
+    <string name="personal_weight_unit">kg</string>
+    <string name="personal_bmi_header">BIOMETRIC MASS INDEX</string>
+    <string name="personal_bmi_label">CALCULATED BMI</string>
+    <string name="personal_bmi_unit">kg/m²</string>
+    <string name="personal_ideal_weight">OPTIMAL MASS RANGE</string>
+    <string name="personal_resting_bmr">RESTING METABOLIC RATE</string>
+    <string name="personal_bmr_accuracy_note">70–85% estimated accuracy • Consult a fitness coach or medical professional for clinical precision</string>
+    <string name="cd_back_to_profile">Return to Profile Section</string>
 </resources>

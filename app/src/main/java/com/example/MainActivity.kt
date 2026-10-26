@@ -56,6 +56,8 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -156,12 +158,27 @@ private fun safeBlurRadius(radius: Float): Float = radius.coerceAtLeast(0.5f)
 
 @Composable
 fun BioSyncApp() {
-  var showCalibration by rememberSaveable { mutableStateOf(false) }
+  // 0 = Welcome, 1 = Profile Section (Step 01 of 03), 2 = Personal Details (Step 02 of 03)
+  var currentStep by rememberSaveable { mutableIntStateOf(0) }
+
+  // Persisted Step 01 Profile State
+  var subjectName by rememberSaveable { mutableStateOf("Elena Rostova") }
+  var selectedSex by rememberSaveable { mutableStateOf("FEMALE") }
+  var selectedDay by rememberSaveable { mutableIntStateOf(24) }
+  var selectedMonth by rememberSaveable { mutableIntStateOf(9) }
+  var selectedYear by rememberSaveable { mutableIntStateOf(1994) }
+  var calculatedAgeYears by rememberSaveable { mutableIntStateOf(31) }
+
+  // Persisted Step 02 Personal Details State
+  var heightCm by rememberSaveable { mutableFloatStateOf(172f) }
+  var selectedHeightUnitName by rememberSaveable { mutableStateOf(HeightUnit.CM.name) }
+  var weightKg by rememberSaveable { mutableFloatStateOf(62.0f) }
+  var selectedWeightUnitName by rememberSaveable { mutableStateOf(WeightUnit.KG.name) }
 
   AnimatedContent(
-    targetState = showCalibration,
+    targetState = currentStep,
     transitionSpec = {
-      if (targetState) {
+      if (targetState > initialState) {
         (slideInHorizontally(
           animationSpec = tween(durationMillis = 360, easing = TelemetryEaseOut),
           initialOffsetX = { fullWidth -> fullWidth / 4 },
@@ -182,15 +199,56 @@ fun BioSyncApp() {
       }
     },
     label = "biosync_screen_transition",
-  ) { isCalibrationScreen ->
-    if (isCalibrationScreen) {
-      ProfileCalibrationScreen(
-        onNavigateBack = { showCalibration = false },
-      )
-    } else {
-      BioSyncWelcomeScreen(
-        onNavigateToCalibration = { showCalibration = true },
-      )
+  ) { step ->
+    when (step) {
+      0 -> {
+        BioSyncWelcomeScreen(
+          onNavigateToCalibration = { currentStep = 1 },
+        )
+      }
+      1 -> {
+        ProfileCalibrationScreen(
+          onNavigateBack = { currentStep = 0 },
+          onNavigateToPersonalDetails = { name, sex, age ->
+            subjectName = name
+            selectedSex = sex
+            calculatedAgeYears = age
+            currentStep = 2
+          },
+          initialName = subjectName,
+          onNamePersist = { subjectName = it },
+          initialSex = selectedSex,
+          onSexPersist = { selectedSex = it },
+          initialDay = selectedDay,
+          onDayPersist = { selectedDay = it },
+          initialMonth = selectedMonth,
+          onMonthPersist = { selectedMonth = it },
+          initialYear = selectedYear,
+          onYearPersist = { selectedYear = it },
+        )
+      }
+      else -> {
+        val currentHeightUnit = remember(selectedHeightUnitName) {
+          runCatching { HeightUnit.valueOf(selectedHeightUnitName) }.getOrDefault(HeightUnit.CM)
+        }
+        val currentWeightUnit = remember(selectedWeightUnitName) {
+          runCatching { WeightUnit.valueOf(selectedWeightUnitName) }.getOrDefault(WeightUnit.KG)
+        }
+        PersonalDetailsScreen(
+          subjectName = subjectName,
+          selectedSex = selectedSex,
+          ageYears = calculatedAgeYears,
+          heightCm = heightCm,
+          onHeightCmChange = { heightCm = it },
+          selectedHeightUnit = currentHeightUnit,
+          onSelectHeightUnit = { selectedHeightUnitName = it.name },
+          weightKg = weightKg,
+          onWeightKgChange = { weightKg = it },
+          selectedWeightUnit = currentWeightUnit,
+          onSelectWeightUnit = { selectedWeightUnitName = it.name },
+          onNavigateBack = { currentStep = 1 },
+        )
+      }
     }
   }
 }
@@ -374,6 +432,7 @@ fun BioSyncWelcomeScreen(
   modifier: Modifier = Modifier,
 ) {
   val coroutineScope = rememberCoroutineScope()
+  val haptics = rememberBioSyncHaptics()
   // Master animation phase:
   // 0f -> 1f on app launch (0 to current telemetry values)
   // -> 2f on Get Started click (reaches 100% max limit across all numbers, bars, and dial blocks)
@@ -393,6 +452,7 @@ fun BioSyncWelcomeScreen(
 
   val onGetStartedClick: () -> Unit = {
     if (!isTransitioning) {
+      haptics.confirm()
       isTransitioning = true
       coroutineScope.launch {
         // Fire the one-time border flash reflection wave across the progress bar block

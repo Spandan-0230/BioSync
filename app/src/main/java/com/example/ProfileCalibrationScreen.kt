@@ -546,15 +546,33 @@ private fun Modifier.writingFloatingBorder(
 @Composable
 fun ProfileCalibrationScreen(
   onNavigateBack: () -> Unit,
+  onNavigateToPersonalDetails: (subjectName: String, selectedSex: String, calculatedAgeYears: Int) -> Unit = { _, _, _ -> },
+  initialName: String = "Elena Rostova",
+  onNamePersist: (String) -> Unit = {},
+  initialSex: String = "FEMALE",
+  onSexPersist: (String) -> Unit = {},
+  initialDay: Int = 24,
+  onDayPersist: (Int) -> Unit = {},
+  initialMonth: Int = 9,
+  onMonthPersist: (Int) -> Unit = {},
+  initialYear: Int = 1994,
+  onYearPersist: (Int) -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
   BackHandler(onBack = onNavigateBack)
 
-  var subjectName by rememberSaveable { mutableStateOf("Elena Rostova") }
-  var selectedSex by rememberSaveable { mutableStateOf("FEMALE") }
-  var selectedDay by rememberSaveable { mutableIntStateOf(24) }
-  var selectedMonth by rememberSaveable { mutableIntStateOf(9) } // 9 = Oct (10)
-  var selectedYear by rememberSaveable { mutableIntStateOf(1994) }
+  var subjectName by rememberSaveable { mutableStateOf(initialName) }
+  var selectedSex by rememberSaveable { mutableStateOf(initialSex) }
+  var selectedDay by rememberSaveable { mutableIntStateOf(initialDay) }
+  var selectedMonth by rememberSaveable { mutableIntStateOf(initialMonth) } // 9 = Oct (10)
+  var selectedYear by rememberSaveable { mutableIntStateOf(initialYear) }
+  var isTransitioning by remember { mutableStateOf(false) }
+
+  LaunchedEffect(subjectName) { onNamePersist(subjectName) }
+  LaunchedEffect(selectedSex) { onSexPersist(selectedSex) }
+  LaunchedEffect(selectedDay) { onDayPersist(selectedDay) }
+  LaunchedEffect(selectedMonth) { onMonthPersist(selectedMonth) }
+  LaunchedEffect(selectedYear) { onYearPersist(selectedYear) }
 
   val chronometry = remember(selectedDay, selectedMonth, selectedYear) {
     calculateChronometry(
@@ -565,6 +583,7 @@ fun ProfileCalibrationScreen(
   }
 
   val coroutineScope = rememberCoroutineScope()
+  val haptics = rememberBioSyncHaptics()
   val headerStepPhase = remember { Animatable(0f) }
   val chronoPhase = remember { Animatable(0f) }
   val borderFlashPhase = remember { Animatable(0f) }
@@ -588,13 +607,19 @@ fun ProfileCalibrationScreen(
   }
 
   val onContinueClick: () -> Unit = {
-    coroutineScope.launch {
-      borderFlashPhase.snapTo(0f)
-      borderFlashPhase.animateTo(
-        targetValue = 1f,
-        animationSpec = tween(durationMillis = 680, easing = CalibrationEaseOut),
-      )
-      borderFlashPhase.snapTo(0f)
+    if (!isTransitioning) {
+      haptics.confirm()
+      isTransitioning = true
+      coroutineScope.launch {
+        borderFlashPhase.snapTo(0f)
+        borderFlashPhase.animateTo(
+          targetValue = 1f,
+          animationSpec = tween(durationMillis = 480, easing = CalibrationEaseOut),
+        )
+        borderFlashPhase.snapTo(0f)
+        onNavigateToPersonalDetails(subjectName, selectedSex, chronometry.years)
+        isTransitioning = false
+      }
     }
   }
 
@@ -688,7 +713,10 @@ fun ProfileCalibrationScreen(
       ) {
         // Top Header Bar (BioSync + STEP 01 OF 03 + Shiny Glowy White Step Bar) — part of the unified page
         CalibrationHeaderBar(
-          onBackClick = onNavigateBack,
+          onBackClick = {
+            haptics.selection()
+            onNavigateBack()
+          },
           phaseProvider = headerStepPhaseProvider,
           metrics = metrics,
         )
@@ -734,9 +762,13 @@ fun ProfileCalibrationScreen(
         // 2. Full Name Section (with centered cursor + floating dull border flash while writing)
         FullNameField(
           value = subjectName,
-          onValueChange = { subjectName = it },
+          onValueChange = {
+            haptics.tick()
+            subjectName = it
+          },
           onFocusChange = { focused ->
             if (focused) {
+              haptics.tick()
               activeEditSection = ActiveEditSection.FULL_NAME
             } else if (activeEditSection == ActiveEditSection.FULL_NAME) {
               activeEditSection = ActiveEditSection.NONE
@@ -753,7 +785,14 @@ fun ProfileCalibrationScreen(
         // 3. Biological Sex Section
         BiologicalSexSelector(
           selectedSex = selectedSex,
-          onSelectSex = { selectedSex = it },
+          onSelectSex = { sex ->
+            if (selectedSex != sex) {
+              haptics.selection()
+              selectedSex = sex
+            } else {
+              haptics.tick()
+            }
+          },
           metrics = metrics,
           modifier = Modifier.onGloballyPositioned { coords ->
             bioSexTopY = coords.positionInParent().y.roundToInt()
@@ -768,15 +807,20 @@ fun ProfileCalibrationScreen(
           selectedMonth = selectedMonth,
           selectedYear = selectedYear,
           onDayChange = { selectedDay = it },
-          onMonthChange = { selectedMonth = it },
+          onMonthChange = {
+            haptics.selection()
+            selectedMonth = it
+          },
           onYearChange = { selectedYear = it },
           onDobFocusChange = { focused ->
             if (focused) {
+              haptics.tick()
               activeEditSection = ActiveEditSection.DOB
             } else if (activeEditSection == ActiveEditSection.DOB) {
               activeEditSection = ActiveEditSection.NONE
             }
           },
+          haptics = haptics,
           metrics = metrics,
         )
 
@@ -1309,6 +1353,7 @@ private fun DateOfBirthSelectorRow(
   onMonthChange: (Int) -> Unit,
   onYearChange: (Int) -> Unit,
   onDobFocusChange: (Boolean) -> Unit,
+  haptics: BioSyncHapticController,
   metrics: CalibrationResponsiveMetrics,
 ) {
   val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
@@ -1354,6 +1399,7 @@ private fun DateOfBirthSelectorRow(
         placeholder = "DD",
         unitHint = "01-31",
         onValueChange = { raw ->
+          haptics.tick()
           val digits = raw.filter { it.isDigit() }.take(2)
           dayInputText = digits
           val parsed = digits.toIntOrNull()
@@ -1371,6 +1417,7 @@ private fun DateOfBirthSelectorRow(
         focusRequester = dayFocusRequester,
         imeAction = ImeAction.Next,
         onImeAction = {
+          haptics.selection()
           focusManager.clearFocus()
           showMonthPopup = true
         },
@@ -1385,6 +1432,7 @@ private fun DateOfBirthSelectorRow(
         selectedMonthZeroBased = selectedMonth,
         isPopupOpen = showMonthPopup,
         onClick = {
+          haptics.selection()
           focusManager.clearFocus()
           showMonthPopup = true
         },
@@ -1400,6 +1448,7 @@ private fun DateOfBirthSelectorRow(
         placeholder = "YYYY",
         unitHint = "YEAR",
         onValueChange = { raw ->
+          haptics.tick()
           val digits = raw.filter { it.isDigit() }.take(4)
           yearInputText = digits
           val parsed = digits.toIntOrNull()
@@ -1416,7 +1465,10 @@ private fun DateOfBirthSelectorRow(
         },
         focusRequester = yearFocusRequester,
         imeAction = ImeAction.Done,
-        onImeAction = { focusManager.clearFocus() },
+        onImeAction = {
+          haptics.confirm()
+          focusManager.clearFocus()
+        },
         metrics = metrics,
         testTag = "dob_year_selector",
         modifier = Modifier.weight(0.96f),
