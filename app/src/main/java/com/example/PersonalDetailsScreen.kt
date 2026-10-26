@@ -104,17 +104,17 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.CaloriesEnd
-import com.example.ui.theme.CarbsMid
-import com.example.ui.theme.CarbsStart
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.ui.theme.CyberCyan
-import com.example.ui.theme.FatsMid
+import com.example.ui.theme.HydrationMid
 import com.example.ui.theme.HydrationStart
 import com.example.ui.theme.InterFontFamily
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.ObsidianBlack
 import com.example.ui.theme.ProteinStart
 import com.example.ui.theme.PureWhite
+import com.example.ui.theme.StepsMid
 import com.example.ui.theme.StepsStart
 import java.text.NumberFormat
 import java.util.Locale
@@ -131,6 +131,7 @@ import kotlinx.coroutines.launch
 enum class HeightUnit {
   CM,
   INCH,
+  FEET,
 }
 
 enum class WeightUnit {
@@ -168,28 +169,63 @@ private val CardBgBottom = Color(0xFF0A0A0C)
 private val MonochromeTrack = Color(0xFF1A1A1E)
 private val MonochromeTrackBorder = Color(0xFF2E2E34)
 
-// Multi-Tone White / Liquid Chrome / Pearl Variant Gradient (Matches Step 01 Profile Section Progress Bar)
-private val WhiteVariantMulticolorGradient = listOf(
-  Color(0xFF7A7F87), // Gunmetal Platinum
-  Color(0xFFAEC0CE), // Cool Liquid Silver
-  Color(0xFFE6E9EF), // Satin Ice White
-  Color(0xFFF7EFE6), // Warm Pearl Champagne Highlight
-  Color(0xFFFFFFFF), // Pure Brilliant White Crest
+// Warm Sunset Palette for Overweight (Warm Sunset Horizon Amber-Peach-Gold — neither harsh orange nor red)
+private val OverweightSunsetDeep = Color(0xFFE8733A)
+private val OverweightSunsetMid = Color(0xFFFF8E4D)
+private val OverweightSunsetGold = Color(0xFFFFBC57)
+
+// True Crimson-Scarlet Red Palette for Obese Class (Pure rich Red — zero pink or magenta)
+private val ObeseRedDeep = Color(0xFFB91C1C)
+private val ObeseRedMid = Color(0xFFDC2626)
+private val ObeseRedBright = Color(0xFFFF3B30)
+
+// White-Integrated Multi-Color BMI Spectrum Gradients per Range:
+// Each range blends its synced category colors with a luminous pearl-white & pure-white crest
+private val BarUnderweightGradient = listOf(
+  HydrationMid,          // #0B76E0 Deep Azure
+  HydrationStart,        // #5BC0FF Luminous Sky Blue
+  ProteinStart,          // #7BE3FF Soft Cyan-Blue
+  Color(0xFFDFF8FF),     // Ice-Pearl White Integration
+  PureWhite,             // #FFFFFF Brilliant White Crest
 )
 
-// Solid Opaque Welcome-Screen Progress Bar Colors Used EXCLUSIVELY for the BMI Category Badge Box:
+private val BarOptimalGradient = listOf(
+  StepsMid,              // #10B981 Vibrant Emerald
+  StepsStart,            // #7BF1A8 Luminous Mint
+  CyberCyan,             // #00F5D4 Cyber Cyan
+  Color(0xFFE2FFF6),     // Mint-Pearl White Integration
+  PureWhite,             // #FFFFFF Brilliant White Crest
+)
+
+private val BarOverweightGradient = listOf(
+  OverweightSunsetDeep,  // #E8733A Warm Sunset Dusk
+  OverweightSunsetMid,   // #FF8E4D Sunset Horizon Coral-Amber
+  OverweightSunsetGold,  // #FFBC57 Warm Sunset Golden-Apricot
+  Color(0xFFFFF2DC),     // Sunset Pearl-White Integration
+  PureWhite,             // #FFFFFF Brilliant White Crest
+)
+
+private val BarObeseGradient = listOf(
+  ObeseRedDeep,          // #B91C1C Deep Crimson Red
+  ObeseRedMid,           // #DC2626 Rich Cardinal Red
+  ObeseRedBright,        // #FF3B30 Pure Scarlet Red
+  Color(0xFFFFE2E0),     // Scarlet Pearl-White Integration
+  PureWhite,             // #FFFFFF Brilliant White Crest
+)
+
+// Solid Opaque Range Colors Synced Across the Header Dot, BMI Category Badge, and Progress Bar:
 // 1. UNDERWEIGHT (<18.5): Solid Hydration Sky-Blue -> Protein Cyan
-private val BadgeUnderweightStart = HydrationStart // #5BC0FF
-private val BadgeUnderweightEnd = ProteinStart     // #7BE3FF
+private val BadgeUnderweightStart = HydrationStart       // #5BC0FF
+private val BadgeUnderweightEnd = ProteinStart           // #7BE3FF
 // 2. OPTIMAL RANGE (18.5–24.9): Solid Steps Mint-Emerald -> Cyber Cyan
-private val BadgeOptimalStart = StepsStart         // #7BF1A8
-private val BadgeOptimalEnd = CyberCyan            // #00F5D4
-// 3. OVERWEIGHT (25.0–29.9): Solid Carbs Lemon-Gold -> Rich Amber
-private val BadgeOverweightStart = CarbsStart      // #FFE97D
-private val BadgeOverweightEnd = CarbsMid          // #FBBF24
-// 4. OBESE CLASS (30.0+): Solid Fats Coral-Rose -> Calories Vibrant Crimson
-private val BadgeObeseStart = FatsMid              // #FB4570
-private val BadgeObeseEnd = CaloriesEnd            // #FF2E63
+private val BadgeOptimalStart = StepsStart               // #7BF1A8
+private val BadgeOptimalEnd = CyberCyan                  // #00F5D4
+// 3. OVERWEIGHT (25.0–29.9): Warm Sunset Horizon Coral-Amber -> Sunset Golden-Apricot
+private val BadgeOverweightStart = OverweightSunsetMid   // #FF8E4D
+private val BadgeOverweightEnd = OverweightSunsetGold    // #FFBC57
+// 4. OBESE CLASS (30.0+): True Cardinal Red -> Vibrant Scarlet Red
+private val BadgeObeseStart = ObeseRedMid                // #DC2626
+private val BadgeObeseEnd = ObeseRedBright               // #FF3B30
 
 private val PersonalEaseOut = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
 
@@ -207,10 +243,11 @@ private data class BmiTelemetryResult(
   val idealMinKg: Float,
   val idealMaxKg: Float,
   val restingBmrKcal: Int,
-  val sexCalibrationLabel: String,
   val badgeSolidStart: Color,
   val badgeSolidEnd: Color,
   val badgeTextColor: Color,
+  val barGradientColors: List<Color>,
+  val barAccentColor: Color,
 )
 
 /**
@@ -268,6 +305,8 @@ private fun calculateBmiTelemetry(
   val badgeSolidStart: Color
   val badgeSolidEnd: Color
   val badgeTextColor: Color
+  val barGradientColors: List<Color>
+  val barAccentColor: Color
 
   when {
     bmiRaw < 18.5f -> {
@@ -277,6 +316,8 @@ private fun calculateBmiTelemetry(
       badgeSolidStart = BadgeUnderweightStart
       badgeSolidEnd = BadgeUnderweightEnd
       badgeTextColor = ObsidianBlack
+      barGradientColors = BarUnderweightGradient
+      barAccentColor = HydrationStart
     }
     bmiRaw < 25.0f -> {
       zone = BmiZone.OPTIMAL
@@ -285,6 +326,8 @@ private fun calculateBmiTelemetry(
       badgeSolidStart = BadgeOptimalStart
       badgeSolidEnd = BadgeOptimalEnd
       badgeTextColor = ObsidianBlack
+      barGradientColors = BarOptimalGradient
+      barAccentColor = StepsStart
     }
     bmiRaw < 30.0f -> {
       zone = BmiZone.OVERWEIGHT
@@ -293,6 +336,8 @@ private fun calculateBmiTelemetry(
       badgeSolidStart = BadgeOverweightStart
       badgeSolidEnd = BadgeOverweightEnd
       badgeTextColor = ObsidianBlack
+      barGradientColors = BarOverweightGradient
+      barAccentColor = OverweightSunsetMid
     }
     else -> {
       zone = BmiZone.OBESE
@@ -301,6 +346,8 @@ private fun calculateBmiTelemetry(
       badgeSolidStart = BadgeObeseStart
       badgeSolidEnd = BadgeObeseEnd
       badgeTextColor = PureWhite
+      barGradientColors = BarObeseGradient
+      barAccentColor = ObeseRedBright
     }
   }
 
@@ -310,11 +357,6 @@ private fun calculateBmiTelemetry(
   val safeAge = ageYears.coerceIn(10, 110)
   val isMale = biologicalSex.trim().equals("MALE", ignoreCase = true)
   val sexConstant = if (isMale) 5f else -161f
-  val sexCalibrationLabel = if (isMale) {
-    "MALE (+5) • MIFFLIN-ST JEOR"
-  } else {
-    "FEMALE (-161) • MIFFLIN-ST JEOR"
-  }
   val bmrRaw = (10f * safeKg) + (6.25f * safeCm) - (5f * safeAge) + sexConstant
   val bmr = bmrRaw.roundToInt().coerceAtLeast(if (isMale) 1050 else 880)
 
@@ -329,15 +371,25 @@ private fun calculateBmiTelemetry(
     idealMinKg = idealMinKg,
     idealMaxKg = idealMaxKg,
     restingBmrKcal = bmr,
-    sexCalibrationLabel = sexCalibrationLabel,
     badgeSolidStart = badgeSolidStart,
     badgeSolidEnd = badgeSolidEnd,
     badgeTextColor = badgeTextColor,
+    barGradientColors = barGradientColors,
+    barAccentColor = barAccentColor,
   )
 }
 
 private fun formatOneDecimal(value: Float): String {
   return String.format(Locale.US, "%.1f", value)
+}
+
+private fun formatFeetDecimal(feetValue: Float): String {
+  val rounded2 = (feetValue * 100f).roundToInt() / 100f
+  return if ((rounded2 * 100f).roundToInt() % 10 == 0) {
+    String.format(Locale.US, "%.1f", rounded2)
+  } else {
+    String.format(Locale.US, "%.2f", rounded2)
+  }
 }
 
 private fun formatCleanMetric(value: Float): String {
@@ -547,7 +599,12 @@ private fun Modifier.personalWritingFloatingBorder(
       }
 
       drawRoundRect(
-        color = ObsidianBlack,
+        brush = Brush.verticalGradient(
+          colors = listOf(
+            Color(0xFF131317),
+            Color(0xFF0A0A0D),
+          ),
+        ),
         topLeft = Offset.Zero,
         size = size,
         cornerRadius = cornerRadius,
@@ -556,8 +613,8 @@ private fun Modifier.personalWritingFloatingBorder(
         drawRoundRect(
           brush = Brush.verticalGradient(
             colors = listOf(
-              Color(0xFF141418).copy(alpha = 0.85f * fw),
-              Color(0xFF0B0B0E).copy(alpha = 0.85f * fw),
+              Color(0xFF19191F).copy(alpha = 0.90f * fw),
+              Color(0xFF0D0D11).copy(alpha = 0.90f * fw),
             ),
           ),
           topLeft = Offset.Zero,
@@ -568,12 +625,17 @@ private fun Modifier.personalWritingFloatingBorder(
 
       drawContent()
 
+      // Architectural top-lit monochrome border even at rest
       drawRoundRect(
-        color = Zinc800,
+        brush = Brush.verticalGradient(
+          0.0f to PureWhite.copy(alpha = 0.20f + 0.14f * fw),
+          0.35f to Zinc700.copy(alpha = 0.65f),
+          1.0f to Zinc850,
+        ),
         topLeft = Offset.Zero,
         size = size,
         cornerRadius = cornerRadius,
-        style = Stroke(width = 1.dp.toPx()),
+        style = Stroke(width = 1.1.dp.toPx()),
       )
 
       if (fw > 0.01f && size.width > 1f && size.height > 1f) {
@@ -1050,6 +1112,56 @@ private fun PersonalLuminousWhiteDot(
 }
 
 /**
+ * Luminous Range-Synced Dot next to "BIOMETRIC MASS INDEX":
+ * Syncs its solid gradient fill and outer glow with the active BMI range badge and progress bar.
+ */
+@Composable
+private fun PersonalSyncedRangeDot(
+  startColor: Color,
+  endColor: Color,
+  glowColor: Color,
+  size: Dp,
+  modifier: Modifier = Modifier,
+) {
+  Spacer(
+    modifier = modifier
+      .size(size)
+      .drawWithCache {
+        val glowPaint = Paint().apply {
+          isAntiAlias = true
+          asFrameworkPaint().apply {
+            color = android.graphics.Color.argb(165, 255, 255, 255)
+            maskFilter = BlurMaskFilter(
+              safeBlurRadius(this@drawWithCache.size.minDimension * 0.75f),
+              BlurMaskFilter.Blur.NORMAL,
+            )
+          }
+        }
+        val dotBrush = Brush.linearGradient(
+          colors = listOf(startColor, endColor),
+          start = Offset.Zero,
+          end = Offset(this.size.width.coerceAtLeast(1f), this.size.height.coerceAtLeast(1f)),
+        )
+        onDrawBehind {
+          val r = (this.size.minDimension / 2f).coerceAtLeast(1f)
+          val gR = (glowColor.red * 255f).roundToInt().coerceIn(0, 255)
+          val gG = (glowColor.green * 255f).roundToInt().coerceIn(0, 255)
+          val gB = (glowColor.blue * 255f).roundToInt().coerceIn(0, 255)
+          glowPaint.asFrameworkPaint().color = android.graphics.Color.argb(175, gR, gG, gB)
+          drawIntoCanvas { canvas ->
+            canvas.drawCircle(center, r * 1.25f, glowPaint)
+          }
+          drawCircle(
+            brush = dotBrush,
+            radius = r,
+            center = center,
+          )
+        }
+      },
+  )
+}
+
+/**
  * Shiny, glowing pure-white step indicator bar directly below "STEP 02 OF 03".
  * Smoothly animates from Step 01 (0.36f) to Step 02 (0.68f) ONLY when switching to this page.
  */
@@ -1169,13 +1281,13 @@ private fun StepTwoShinyGlowBar(
 
 /**
  * Single Unified Height Block:
- * - Everything is inside ONE single sleek block (no separate conversion block or external toggle buttons,
- *   and no "Focus: Inch Live CM" label).
- * - Top line: Primary editable height number + unit badge (`cm` by default, or `in` when swapped).
- * - Small secondary line directly underneath in `Zinc400` monospace: shows the converted feet/inches (`5' 07.7" • 67.7 in`)
- *   when CM is active. Tapping that small text portion swaps the active editable metric to INCH at the top,
- *   and brings CM (`172.0 cm • 1.72 m`) down into that small text line.
- * - Right side: Tactile `-` / `+` buttons that update lively on tap AND continuously update while held down.
+ * - Everything lives inside ONE single cohesive block.
+ * - Clicking the icon box just left of the numbers (`height_unit_selector_box`) pops up a floating 3D
+ *   Metric Unit Selection modal with all three separate units (`CM`, `INCH`, and `FEET`).
+ * - The small secondary conversion line directly below the primary number is a clean,
+ *   non-clickable live conversion readout showing the other units.
+ * - Right: Sculpted Dual-Stepper Capsule (`− | +`) supporting single tap and press-and-hold acceleration.
+ * - Bottom of the same block: Live Calibrated Vernier Micro-Ruler that glides smoothly as height changes.
  */
 @Composable
 private fun HeightUnifiedCardSection(
@@ -1192,6 +1304,7 @@ private fun HeightUnifiedCardSection(
   val focusRequester = remember { FocusRequester() }
   var isHeightFocused by remember { mutableStateOf(false) }
   var hadFocus by remember { mutableStateOf(false) }
+  var showHeightUnitPopup by rememberSaveable { mutableStateOf(false) }
   val latestHeightCm by rememberUpdatedState(heightCm)
   val latestSelectedUnit by rememberUpdatedState(selectedUnit)
 
@@ -1200,11 +1313,18 @@ private fun HeightUnifiedCardSection(
   }
 
   val inchesFromCm = remember(heightCm) { heightCm / 2.54f }
+  val feetFromCm = remember(heightCm) { heightCm / 30.48f }
+  val normalizedHeightFraction by animateFloatAsState(
+    targetValue = ((heightCm - 100f) / (240f - 100f)).coerceIn(0f, 1f),
+    animationSpec = tween(durationMillis = 260, easing = PersonalEaseOut),
+    label = "height_scale_fraction",
+  )
 
   fun formatHeightForUnit(cmVal: Float, unit: HeightUnit): String {
     return when (unit) {
       HeightUnit.CM -> formatCleanMetric(cmVal)
       HeightUnit.INCH -> formatOneDecimal(cmVal / 2.54f)
+      HeightUnit.FEET -> formatFeetDecimal(cmVal / 30.48f)
     }
   }
 
@@ -1212,20 +1332,19 @@ private fun HeightUnifiedCardSection(
     mutableStateOf(formatHeightForUnit(heightCm, selectedUnit))
   }
 
-  // Keep inputText synchronized when unfocused or when unit changes
   LaunchedEffect(heightCm, selectedUnit, isHeightFocused) {
     if (!isHeightFocused) {
       inputText = formatHeightForUnit(heightCm, selectedUnit)
     }
   }
 
-  // Stepper handler using latestHeightCm so holding down + / - continuously updates live
   val stepHeightBy: (Boolean) -> Unit = { isIncrement ->
     haptics.step()
     val unit = latestSelectedUnit
     val deltaCm = when (unit) {
       HeightUnit.CM -> if (isIncrement) 1.0f else -1.0f
       HeightUnit.INCH -> if (isIncrement) (0.5f * 2.54f) else (-0.5f * 2.54f)
+      HeightUnit.FEET -> if (isIncrement) (0.1f * 30.48f) else (-0.1f * 30.48f)
     }
     val updatedCm = (latestHeightCm + deltaCm).coerceIn(100f, 240f)
     onHeightCmChange(updatedCm)
@@ -1238,6 +1357,7 @@ private fun HeightUnifiedCardSection(
       val newCm = when (selectedUnit) {
         HeightUnit.CM -> parsed.coerceIn(100f, 240f)
         HeightUnit.INCH -> (parsed * 2.54f).coerceIn(100f, 240f)
+        HeightUnit.FEET -> (parsed * 30.48f).coerceIn(100f, 240f)
       }
       onHeightCmChange(newCm)
       inputText = formatHeightForUnit(newCm, selectedUnit)
@@ -1246,15 +1366,21 @@ private fun HeightUnifiedCardSection(
     }
   }
 
-  val primaryFontSize = metrics.spScaled(22f, 18.5f, 26f)
+  val openHeightUnitPopup: () -> Unit = {
+    haptics.selection()
+    focusManager.clearFocus()
+    showHeightUnitPopup = true
+  }
+
+  val primaryFontSize = metrics.spScaled(23.5f, 19.5f, 27.5f)
   val centeredPrimaryStyle = remember(primaryFontSize) {
     TextStyle(
       color = PureWhite,
       fontFamily = JetBrainsMonoFontFamily,
       fontWeight = FontWeight.SemiBold,
       fontSize = primaryFontSize,
-      lineHeight = primaryFontSize * 1.12f,
-      letterSpacing = (-0.5).sp,
+      lineHeight = primaryFontSize * 1.10f,
+      letterSpacing = (-0.6).sp,
       platformStyle = PlatformTextStyle(includeFontPadding = false),
       lineHeightStyle = LineHeightStyle(
         alignment = LineHeightStyle.Alignment.Center,
@@ -1263,18 +1389,27 @@ private fun HeightUnifiedCardSection(
     )
   }
 
-  val primaryUnitSuffix = if (selectedUnit == HeightUnit.CM) "cm" else "in"
-  val bottomConvertedReadout = if (selectedUnit == HeightUnit.CM) {
-    "${formatFeetInches(inchesFromCm)}  •  ${formatOneDecimal(inchesFromCm)} in"
-  } else {
-    "${formatOneDecimal(heightCm)} cm  •  ${String.format(Locale.US, "%.2f", heightCm / 100f)} m"
+  val primaryUnitSuffix = when (selectedUnit) {
+    HeightUnit.CM -> "cm"
+    HeightUnit.INCH -> "in"
+    HeightUnit.FEET -> "ft"
+  }
+  val activeUnitCode = when (selectedUnit) {
+    HeightUnit.CM -> "CM"
+    HeightUnit.INCH -> "IN"
+    HeightUnit.FEET -> "FT"
+  }
+  val bottomConvertedReadout = when (selectedUnit) {
+    HeightUnit.CM -> "${formatFeetDecimal(feetFromCm)} ft (${formatFeetInches(inchesFromCm)})  •  ${formatOneDecimal(inchesFromCm)} in"
+    HeightUnit.INCH -> "${formatOneDecimal(heightCm)} cm  •  ${formatFeetDecimal(feetFromCm)} ft (${formatFeetInches(inchesFromCm)})"
+    HeightUnit.FEET -> "${formatOneDecimal(heightCm)} cm  •  ${formatOneDecimal(inchesFromCm)} in (${formatFeetInches(inchesFromCm)})"
   }
 
   Column(
     modifier = modifier.fillMaxWidth(),
     verticalArrangement = Arrangement.spacedBy(metrics.labelToBoxGap),
   ) {
-    // Clean Section Label (matches Full Name / Biological Sex / Date of Birth on Step 01)
+    // Section Label
     Text(
       text = stringResource(R.string.personal_height_label),
       color = Zinc300,
@@ -1284,165 +1419,228 @@ private fun HeightUnifiedCardSection(
     )
 
     // ONE SINGLE UNIFIED HEIGHT BLOCK
-    Row(
+    Column(
       modifier = Modifier
         .fillMaxWidth()
-        .heightIn(min = metrics.unifiedBlockMinHeight)
-        .personalWritingFloatingBorder(isFocused = isHeightFocused, cornerRadiusDp = 10.dp)
-        .padding(horizontal = 14.dp, vertical = 10.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.SpaceBetween,
+        .personalWritingFloatingBorder(isFocused = isHeightFocused, cornerRadiusDp = 12.dp)
+        .padding(horizontal = 14.dp, vertical = 11.dp),
     ) {
-      // Left Column: Primary Editable Value on Top + Small Clickable Conversion Text Directly Underneath
-      Column(
-        modifier = Modifier.weight(1f),
-        verticalArrangement = Arrangement.Center,
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
       ) {
-        BasicTextField(
-          value = inputText,
-          onValueChange = { raw ->
-            haptics.tick()
-            val filtered = raw.filter { it.isDigit() || it == '.' }.take(5)
-            if (filtered.count { it == '.' } <= 1) {
-              inputText = filtered
-              val parsed = filtered.toFloatOrNull()
-              if (parsed != null) {
-                when (selectedUnit) {
-                  HeightUnit.CM -> if (parsed in 90f..250f) onHeightCmChange(parsed)
-                  HeightUnit.INCH -> if (parsed in 36f..98f) onHeightCmChange(parsed * 2.54f)
-                }
-              }
-            }
-          },
-          singleLine = true,
-          cursorBrush = SolidColor(PureWhite),
-          keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Decimal,
-            imeAction = ImeAction.Done,
-          ),
-          keyboardActions = KeyboardActions(
-            onDone = {
-              haptics.confirm()
-              commitHeightInput()
-              focusManager.clearFocus()
-            },
-          ),
-          textStyle = centeredPrimaryStyle,
-          decorationBox = { innerTextField ->
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-            ) {
-              Box(
-                modifier = Modifier.widthIn(min = 52.dp, max = 118.dp),
-                contentAlignment = Alignment.CenterStart,
-              ) {
-                if (inputText.isEmpty()) {
-                  Text(
-                    text = if (selectedUnit == HeightUnit.CM) "172" else "67.7",
-                    style = centeredPrimaryStyle.copy(
-                      color = Zinc600,
-                      fontWeight = FontWeight.Medium,
-                    ),
-                    maxLines = 1,
-                  )
-                }
-                innerTextField()
-              }
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = primaryUnitSuffix,
-                color = Zinc400,
-                fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.Medium,
-                fontSize = metrics.spScaled(13f, 11f, 15f),
-              )
-            }
-          },
-          modifier = Modifier
-            .fillMaxWidth()
-            .focusRequester(focusRequester)
-            .onFocusChanged { state ->
-              isHeightFocused = state.isFocused
-              if (state.isFocused) {
-                hadFocus = true
-              } else if (hadFocus) {
-                commitHeightInput()
-              }
-            }
-            .testTag("height_primary_input"),
-        )
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        // Small secondary conversion text directly below the primary number inside the same block:
-        // Clicking this small portion swaps the active editable metric and brings the other metric down here.
+        // Left Box (Unit Selector Popup Trigger) + Primary Editable Value + Clean Live Conversion Line
         Row(
-          modifier = Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .clickable(
-              role = Role.Button,
-              onClick = {
-                val nextUnit = if (selectedUnit == HeightUnit.CM) HeightUnit.INCH else HeightUnit.CM
-                onSelectUnit(nextUnit)
-                inputText = formatHeightForUnit(heightCm, nextUnit)
-              },
-            )
-            .padding(vertical = 2.dp, horizontal = 2.dp)
-            .testTag("height_secondary_conversion_card"),
+          modifier = Modifier.weight(1f),
           verticalAlignment = Alignment.CenterVertically,
         ) {
-          Text(
-            text = bottomConvertedReadout,
-            color = Zinc400,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Normal,
-            fontSize = metrics.spScaled(10.6f, 9.2f, 12.2f),
-            letterSpacing = 0.2.sp,
-            modifier = Modifier.testTag("height_converted_value_text"),
+          AnthropometricIconBadge(
+            isHeight = true,
+            activeUnitCode = activeUnitCode,
+            isFocused = isHeightFocused || showHeightUnitPopup,
+            metrics = metrics,
+            onClick = openHeightUnitPopup,
+            testTag = "height_unit_selector_box",
           )
-          Spacer(modifier = Modifier.width(6.dp))
-          Text(
-            text = "⇅",
-            color = Zinc500,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Medium,
-            fontSize = metrics.spScaled(10.5f, 9f, 12f),
-          )
+
+          Spacer(modifier = Modifier.width(12.dp))
+
+          Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center,
+          ) {
+            BasicTextField(
+              value = inputText,
+              onValueChange = { raw ->
+                haptics.tick()
+                val filtered = raw.filter { it.isDigit() || it == '.' }.take(5)
+                if (filtered.count { it == '.' } <= 1) {
+                  inputText = filtered
+                  val parsed = filtered.toFloatOrNull()
+                  if (parsed != null) {
+                    when (selectedUnit) {
+                      HeightUnit.CM -> if (parsed in 90f..250f) onHeightCmChange(parsed)
+                      HeightUnit.INCH -> if (parsed in 36f..98f) onHeightCmChange(parsed * 2.54f)
+                      HeightUnit.FEET -> if (parsed in 3.0f..8.2f) onHeightCmChange(parsed * 30.48f)
+                    }
+                  }
+                }
+              },
+              singleLine = true,
+              cursorBrush = SolidColor(PureWhite),
+              keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Decimal,
+                imeAction = ImeAction.Done,
+              ),
+              keyboardActions = KeyboardActions(
+                onDone = {
+                  haptics.confirm()
+                  commitHeightInput()
+                  focusManager.clearFocus()
+                },
+              ),
+              textStyle = centeredPrimaryStyle,
+              decorationBox = { innerTextField ->
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                ) {
+                  Box(
+                    modifier = Modifier.widthIn(min = 48.dp, max = 112.dp),
+                    contentAlignment = Alignment.CenterStart,
+                  ) {
+                    if (inputText.isEmpty()) {
+                      Text(
+                        text = when (selectedUnit) {
+                          HeightUnit.CM -> "172"
+                          HeightUnit.INCH -> "67.7"
+                          HeightUnit.FEET -> "5.64"
+                        },
+                        style = centeredPrimaryStyle.copy(
+                          color = Zinc600,
+                          fontWeight = FontWeight.Medium,
+                        ),
+                        maxLines = 1,
+                      )
+                    }
+                    innerTextField()
+                  }
+                  Spacer(modifier = Modifier.width(7.dp))
+                  // Active Unit Badge beside primary value
+                  Box(
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(5.dp))
+                      .background(Zinc850)
+                      .border(0.8.dp, Zinc700, RoundedCornerShape(5.dp))
+                      .padding(horizontal = 7.dp, vertical = 2.dp),
+                    contentAlignment = Alignment.Center,
+                  ) {
+                    Text(
+                      text = primaryUnitSuffix,
+                      color = Zinc200,
+                      fontFamily = JetBrainsMonoFontFamily,
+                      fontWeight = FontWeight.SemiBold,
+                      fontSize = metrics.spScaled(11.2f, 9.8f, 13f),
+                    )
+                  }
+                }
+              },
+              modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester)
+                .onFocusChanged { state ->
+                  isHeightFocused = state.isFocused
+                  if (state.isFocused) {
+                    hadFocus = true
+                  } else if (hadFocus) {
+                    commitHeightInput()
+                  }
+                }
+                .testTag("height_primary_input"),
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Small secondary conversion line directly below the primary number (non-clickable readout)
+            Row(
+              modifier = Modifier
+                .padding(vertical = 2.dp)
+                .testTag("height_secondary_conversion_card"),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Text(
+                text = bottomConvertedReadout,
+                color = Zinc400,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Normal,
+                fontSize = metrics.spScaled(10.5f, 9.2f, 12f),
+                letterSpacing = 0.2.sp,
+                modifier = Modifier.testTag("height_converted_value_text"),
+              )
+            }
+          }
         }
-      }
 
-      Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(10.dp))
 
-      // Right Side: Tactile Monochrome - / + Steppers (Tap or Hold to Continuously Update)
-      Row(
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        HoldableStepperButton(
-          symbol = "−",
-          onStep = { stepHeightBy(false) },
+        // Right Side: Unified Precision Stepper Capsule (− | +)
+        UnifiedStepperCapsule(
+          onDecrement = { stepHeightBy(false) },
+          onIncrement = { stepHeightBy(true) },
+          decrementTestTag = "height_decrement_button",
+          incrementTestTag = "height_increment_button",
           metrics = metrics,
-          testTag = "height_decrement_button",
-        )
-        HoldableStepperButton(
-          symbol = "+",
-          onStep = { stepHeightBy(true) },
-          metrics = metrics,
-          testTag = "height_increment_button",
         )
       }
+
+      Spacer(modifier = Modifier.height(9.dp))
+
+      // Integrated Live Calibrated Vernier Micro-Scale Strip at the bottom of the same block
+      LiveCalibratedScaleStrip(
+        fraction = normalizedHeightFraction,
+        isFocused = isHeightFocused,
+      )
     }
+  }
+
+  if (showHeightUnitPopup) {
+    FloatingMetricUnitPickerDialog(
+      eyebrow = "STATURE CALIBRATION UNIT",
+      title = "Select Height Unit",
+      activeBadgeText = when (selectedUnit) {
+        HeightUnit.CM -> "METRIC • CM"
+        HeightUnit.INCH -> "IMPERIAL • INCH"
+        HeightUnit.FEET -> "IMPERIAL • FEET"
+      },
+      option1Code = "CM",
+      option1Title = "Centimeters",
+      option1System = "METRIC STANDARD • SI",
+      option1LivePreview = "${formatCleanMetric(heightCm)} cm  •  ${String.format(Locale.US, "%.2f", heightCm / 100f)} m",
+      isOption1Selected = selectedUnit == HeightUnit.CM,
+      onSelectOption1 = {
+        haptics.selection()
+        onSelectUnit(HeightUnit.CM)
+        inputText = formatHeightForUnit(heightCm, HeightUnit.CM)
+        showHeightUnitPopup = false
+      },
+      option2Code = "IN",
+      option2Title = "Inches",
+      option2System = "IMPERIAL STANDARD • INCH",
+      option2LivePreview = "${formatOneDecimal(inchesFromCm)} in  •  ${formatOneDecimal(heightCm)} cm",
+      isOption2Selected = selectedUnit == HeightUnit.INCH,
+      onSelectOption2 = {
+        haptics.selection()
+        onSelectUnit(HeightUnit.INCH)
+        inputText = formatHeightForUnit(heightCm, HeightUnit.INCH)
+        showHeightUnitPopup = false
+      },
+      option3Code = "FT",
+      option3Title = "Feet",
+      option3System = "IMPERIAL STANDARD • FEET",
+      option3LivePreview = "${formatFeetDecimal(feetFromCm)} ft (${formatFeetInches(inchesFromCm)})  •  ${formatOneDecimal(heightCm)} cm",
+      isOption3Selected = selectedUnit == HeightUnit.FEET,
+      onSelectOption3 = {
+        haptics.selection()
+        onSelectUnit(HeightUnit.FEET)
+        inputText = formatHeightForUnit(heightCm, HeightUnit.FEET)
+        showHeightUnitPopup = false
+      },
+      onDismiss = { showHeightUnitPopup = false },
+      metrics = metrics,
+      dialogTestTag = "height_unit_picker_dialog",
+    )
   }
 }
 
 /**
  * Single Unified Weight Block:
- * - Redesigned to match the exact sleek single-block layout of Height.
- * - Top line: Primary editable weight number (`62.0 kg` by default, or `lbs` when swapped).
- * - Small secondary line directly underneath in `Zinc400` monospace: shows live converted `136.7 lbs • 9 st 9.7 lb`
- *   (and clicking it swaps between editing in `kg` and `lbs`).
- * - Right side: Tactile `-` / `+` buttons that update BOTH the primary weight and the converted readout
- *   lively on tap AND continuously when held down.
+ * - Matches the exact sleek single-block layout of Height.
+ * - Clicking the icon box just left of the numbers (`weight_unit_selector_box`) pops up a floating 3D
+ *   Metric Unit Selection modal (`KG` vs `LBS / ST`).
+ * - The small secondary conversion line directly below the primary number (`136.7 lbs • 9 st 9.7 lb`) is a clean,
+ *   non-clickable live conversion readout.
+ * - Right: Sculpted Dual-Stepper Capsule (`− | +`) updating both primary and converted values live on tap or hold.
+ * - Bottom of the same block: Live Calibrated Vernier Micro-Ruler that glides smoothly as weight changes.
  */
 @Composable
 private fun WeightUnifiedCardSection(
@@ -1459,6 +1657,7 @@ private fun WeightUnifiedCardSection(
   val focusRequester = remember { FocusRequester() }
   var isWeightFocused by remember { mutableStateOf(false) }
   var hadFocus by remember { mutableStateOf(false) }
+  var showWeightUnitPopup by rememberSaveable { mutableStateOf(false) }
   val latestWeightKg by rememberUpdatedState(weightKg)
   val latestSelectedUnit by rememberUpdatedState(selectedUnit)
 
@@ -1467,6 +1666,11 @@ private fun WeightUnifiedCardSection(
   }
 
   val weightLbs = remember(weightKg) { weightKg * 2.20462f }
+  val normalizedWeightFraction by animateFloatAsState(
+    targetValue = ((weightKg - 35f) / (165f - 35f)).coerceIn(0f, 1f),
+    animationSpec = tween(durationMillis = 260, easing = PersonalEaseOut),
+    label = "weight_scale_fraction",
+  )
 
   fun formatWeightForUnit(kgVal: Float, unit: WeightUnit): String {
     return when (unit) {
@@ -1479,14 +1683,12 @@ private fun WeightUnifiedCardSection(
     mutableStateOf(formatWeightForUnit(weightKg, selectedUnit))
   }
 
-  // Keep weightInputText synchronized when unfocused or when unit changes
   LaunchedEffect(weightKg, selectedUnit, isWeightFocused) {
     if (!isWeightFocused) {
       weightInputText = formatWeightForUnit(weightKg, selectedUnit)
     }
   }
 
-  // Stepper handler using latestWeightKg so holding down + / - continuously updates BOTH weight and lbs live
   val stepWeightBy: (Boolean) -> Unit = { isIncrement ->
     haptics.step()
     val unit = latestSelectedUnit
@@ -1519,15 +1721,21 @@ private fun WeightUnifiedCardSection(
     }
   }
 
-  val primaryFontSize = metrics.spScaled(22f, 18.5f, 26f)
+  val openWeightUnitPopup: () -> Unit = {
+    haptics.selection()
+    focusManager.clearFocus()
+    showWeightUnitPopup = true
+  }
+
+  val primaryFontSize = metrics.spScaled(23.5f, 19.5f, 27.5f)
   val centeredWeightStyle = remember(primaryFontSize) {
     TextStyle(
       color = PureWhite,
       fontFamily = JetBrainsMonoFontFamily,
       fontWeight = FontWeight.SemiBold,
       fontSize = primaryFontSize,
-      lineHeight = primaryFontSize * 1.12f,
-      letterSpacing = (-0.5).sp,
+      lineHeight = primaryFontSize * 1.10f,
+      letterSpacing = (-0.6).sp,
       platformStyle = PlatformTextStyle(includeFontPadding = false),
       lineHeightStyle = LineHeightStyle(
         alignment = LineHeightStyle.Alignment.Center,
@@ -1547,7 +1755,7 @@ private fun WeightUnifiedCardSection(
     modifier = modifier.fillMaxWidth(),
     verticalArrangement = Arrangement.spacedBy(metrics.labelToBoxGap),
   ) {
-    // Clean Section Label
+    // Section Label
     Text(
       text = stringResource(R.string.personal_weight_label),
       color = Zinc300,
@@ -1557,152 +1765,870 @@ private fun WeightUnifiedCardSection(
     )
 
     // ONE SINGLE UNIFIED WEIGHT BLOCK
-    Row(
+    Column(
       modifier = Modifier
         .fillMaxWidth()
-        .heightIn(min = metrics.unifiedBlockMinHeight)
-        .personalWritingFloatingBorder(isFocused = isWeightFocused, cornerRadiusDp = 10.dp)
-        .padding(horizontal = 14.dp, vertical = 10.dp),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.SpaceBetween,
+        .personalWritingFloatingBorder(isFocused = isWeightFocused, cornerRadiusDp = 12.dp)
+        .padding(horizontal = 14.dp, vertical = 11.dp),
     ) {
-      // Left Column: Primary Editable Weight on Top + Small Clickable Conversion Line Directly Underneath
-      Column(
-        modifier = Modifier.weight(1f),
-        verticalArrangement = Arrangement.Center,
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
       ) {
-        BasicTextField(
-          value = weightInputText,
-          onValueChange = { raw ->
-            haptics.tick()
-            val filtered = raw.filter { it.isDigit() || it == '.' }.take(5)
-            if (filtered.count { it == '.' } <= 1) {
-              weightInputText = filtered
-              val parsed = filtered.toFloatOrNull()
-              if (parsed != null) {
-                when (selectedUnit) {
-                  WeightUnit.KG -> if (parsed in 25f..260f) onWeightKgChange(parsed)
-                  WeightUnit.LBS -> if (parsed in 55f..573f) onWeightKgChange(parsed / 2.20462f)
+        // Left Box (Unit Selector Popup Trigger) + Primary Editable Value + Clean Live Conversion Line
+        Row(
+          modifier = Modifier.weight(1f),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          AnthropometricIconBadge(
+            isHeight = false,
+            activeUnitCode = if (selectedUnit == WeightUnit.KG) "KG" else "LB",
+            isFocused = isWeightFocused || showWeightUnitPopup,
+            metrics = metrics,
+            onClick = openWeightUnitPopup,
+            testTag = "weight_unit_selector_box",
+          )
+
+          Spacer(modifier = Modifier.width(12.dp))
+
+          Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center,
+          ) {
+            BasicTextField(
+              value = weightInputText,
+              onValueChange = { raw ->
+                haptics.tick()
+                val filtered = raw.filter { it.isDigit() || it == '.' }.take(5)
+                if (filtered.count { it == '.' } <= 1) {
+                  weightInputText = filtered
+                  val parsed = filtered.toFloatOrNull()
+                  if (parsed != null) {
+                    when (selectedUnit) {
+                      WeightUnit.KG -> if (parsed in 25f..260f) onWeightKgChange(parsed)
+                      WeightUnit.LBS -> if (parsed in 55f..573f) onWeightKgChange(parsed / 2.20462f)
+                    }
+                  }
                 }
-              }
-            }
-          },
-          singleLine = true,
-          cursorBrush = SolidColor(PureWhite),
-          keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Decimal,
-            imeAction = ImeAction.Done,
-          ),
-          keyboardActions = KeyboardActions(
-            onDone = {
-              haptics.confirm()
-              commitWeightInput()
-              focusManager.clearFocus()
-            },
-          ),
-          textStyle = centeredWeightStyle,
-          decorationBox = { innerTextField ->
+              },
+              singleLine = true,
+              cursorBrush = SolidColor(PureWhite),
+              keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Decimal,
+                imeAction = ImeAction.Done,
+              ),
+              keyboardActions = KeyboardActions(
+                onDone = {
+                  haptics.confirm()
+                  commitWeightInput()
+                  focusManager.clearFocus()
+                },
+              ),
+              textStyle = centeredWeightStyle,
+              decorationBox = { innerTextField ->
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                ) {
+                  Box(
+                    modifier = Modifier.widthIn(min = 48.dp, max = 112.dp),
+                    contentAlignment = Alignment.CenterStart,
+                  ) {
+                    if (weightInputText.isEmpty()) {
+                      Text(
+                        text = if (selectedUnit == WeightUnit.KG) "62.0" else "136.7",
+                        style = centeredWeightStyle.copy(
+                          color = Zinc600,
+                          fontWeight = FontWeight.Medium,
+                        ),
+                        maxLines = 1,
+                      )
+                    }
+                    innerTextField()
+                  }
+                  Spacer(modifier = Modifier.width(7.dp))
+                  // Active Unit Badge beside primary value
+                  Box(
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(5.dp))
+                      .background(Zinc850)
+                      .border(0.8.dp, Zinc700, RoundedCornerShape(5.dp))
+                      .padding(horizontal = 7.dp, vertical = 2.dp),
+                    contentAlignment = Alignment.Center,
+                  ) {
+                    Text(
+                      text = primaryUnitSuffix,
+                      color = Zinc200,
+                      fontFamily = JetBrainsMonoFontFamily,
+                      fontWeight = FontWeight.SemiBold,
+                      fontSize = metrics.spScaled(11.2f, 9.8f, 13f),
+                    )
+                  }
+                }
+              },
+              modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester)
+                .onFocusChanged { state ->
+                  isWeightFocused = state.isFocused
+                  if (state.isFocused) {
+                    hadFocus = true
+                  } else if (hadFocus) {
+                    commitWeightInput()
+                  }
+                }
+                .testTag("weight_kg_input"),
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Small secondary conversion line directly below the primary weight number (non-clickable readout)
             Row(
+              modifier = Modifier
+                .padding(vertical = 2.dp)
+                .testTag("weight_lbs_conversion_text"),
               verticalAlignment = Alignment.CenterVertically,
             ) {
-              Box(
-                modifier = Modifier.widthIn(min = 52.dp, max = 118.dp),
-                contentAlignment = Alignment.CenterStart,
-              ) {
-                if (weightInputText.isEmpty()) {
-                  Text(
-                    text = if (selectedUnit == WeightUnit.KG) "62.0" else "136.7",
-                    style = centeredWeightStyle.copy(
-                      color = Zinc600,
-                      fontWeight = FontWeight.Medium,
-                    ),
-                    maxLines = 1,
-                  )
-                }
-                innerTextField()
-              }
-              Spacer(modifier = Modifier.width(6.dp))
               Text(
-                text = primaryUnitSuffix,
+                text = bottomConvertedReadout,
+                color = Zinc400,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Normal,
+                fontSize = metrics.spScaled(10.5f, 9.2f, 12f),
+                letterSpacing = 0.2.sp,
+              )
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        // Right Side: Unified Precision Stepper Capsule (− | +)
+        UnifiedStepperCapsule(
+          onDecrement = { stepWeightBy(false) },
+          onIncrement = { stepWeightBy(true) },
+          decrementTestTag = "weight_decrement_button",
+          incrementTestTag = "weight_increment_button",
+          metrics = metrics,
+        )
+      }
+
+      Spacer(modifier = Modifier.height(9.dp))
+
+      // Integrated Live Calibrated Vernier Micro-Scale Strip at the bottom of the same block
+      LiveCalibratedScaleStrip(
+        fraction = normalizedWeightFraction,
+        isFocused = isWeightFocused,
+      )
+    }
+  }
+
+  if (showWeightUnitPopup) {
+    FloatingMetricUnitPickerDialog(
+      eyebrow = "MASS CALIBRATION UNIT",
+      title = "Select Weight Unit",
+      activeBadgeText = if (selectedUnit == WeightUnit.KG) "METRIC • KG" else "IMPERIAL • LBS",
+      option1Code = "KG",
+      option1Title = "Kilograms",
+      option1System = "METRIC STANDARD • SI",
+      option1LivePreview = "${formatOneDecimal(weightKg)} kg  •  ${formatStonesPounds(weightLbs)}",
+      isOption1Selected = selectedUnit == WeightUnit.KG,
+      onSelectOption1 = {
+        haptics.selection()
+        onSelectUnit(WeightUnit.KG)
+        weightInputText = formatWeightForUnit(weightKg, WeightUnit.KG)
+        showWeightUnitPopup = false
+      },
+      option2Code = "LBS",
+      option2Title = "Pounds & Stones",
+      option2System = "IMPERIAL STANDARD • US/UK",
+      option2LivePreview = "${formatOneDecimal(weightLbs)} lbs  •  ${formatStonesPounds(weightLbs)}",
+      isOption2Selected = selectedUnit == WeightUnit.LBS,
+      onSelectOption2 = {
+        haptics.selection()
+        onSelectUnit(WeightUnit.LBS)
+        weightInputText = formatWeightForUnit(weightKg, WeightUnit.LBS)
+        showWeightUnitPopup = false
+      },
+      onDismiss = { showWeightUnitPopup = false },
+      metrics = metrics,
+      dialogTestTag = "weight_unit_picker_dialog",
+    )
+  }
+}
+
+/**
+ * Interactive Unit Selector Box Just Left of the Numbers (`image_f0811cdd.png`):
+ * - Displays the precision vector icon (Vertical Stature Caliper for Height, Mass Balance Dial for Weight)
+ *   plus a subtle active unit micro-pill (`CM`/`IN`/`FT` or `KG`/`LB`) so users know clicking this box
+ *   opens the Floating 3D Metric Unit Selection Popup.
+ */
+@Composable
+private fun AnthropometricIconBadge(
+  isHeight: Boolean,
+  activeUnitCode: String,
+  isFocused: Boolean,
+  metrics: PersonalResponsiveMetrics,
+  onClick: () -> Unit,
+  testTag: String,
+) {
+  val boxWidth = (44f * metrics.scale).coerceIn(38f, 48f).dp
+  val boxHeight = (46f * metrics.scale).coerceIn(40f, 50f).dp
+  val shape = RoundedCornerShape(10.dp)
+  Column(
+    modifier = Modifier
+      .size(width = boxWidth, height = boxHeight)
+      .clip(shape)
+      .background(
+        brush = Brush.verticalGradient(
+          colors = if (isFocused) {
+            listOf(Color(0xFF282830), Color(0xFF15151A))
+          } else {
+            listOf(Color(0xFF1D1D24), Color(0xFF101014))
+          },
+        ),
+      )
+      .border(
+        width = 1.dp,
+        brush = Brush.verticalGradient(
+          colors = if (isFocused) {
+            listOf(PureWhite.copy(alpha = 0.75f), Zinc500)
+          } else {
+            listOf(PureWhite.copy(alpha = 0.28f), Zinc700)
+          },
+        ),
+        shape = shape,
+      )
+      .clickable(
+        role = Role.DropdownList,
+        onClick = onClick,
+      )
+      .padding(vertical = 3.dp)
+      .testTag(testTag),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.SpaceBetween,
+  ) {
+    val glyphColor = if (isFocused) PureWhite else Zinc200
+    val tickColor = if (isFocused) Zinc300 else Zinc500
+    Canvas(
+      modifier = Modifier.size((18f * metrics.scale).coerceIn(15.5f, 20f).dp),
+    ) {
+      val w = size.width
+      val h = size.height
+      val strokeW = 1.5.dp.toPx()
+      if (isHeight) {
+        // Stature vertical caliper column + measurement ticks
+        drawLine(
+          color = glyphColor,
+          start = Offset(w * 0.34f, h * 0.14f),
+          end = Offset(w * 0.34f, h * 0.86f),
+          strokeWidth = strokeW,
+          cap = StrokeCap.Round,
+        )
+        val tickYs = listOf(0.20f, 0.35f, 0.50f, 0.65f, 0.80f)
+        tickYs.forEachIndexed { idx, yf ->
+          val len = if (idx % 2 == 0) w * 0.26f else w * 0.16f
+          drawLine(
+            color = if (idx % 2 == 0) glyphColor else tickColor,
+            start = Offset(w * 0.34f, h * yf),
+            end = Offset(w * 0.34f + len, h * yf),
+            strokeWidth = 1.2.dp.toPx(),
+            cap = StrokeCap.Round,
+          )
+        }
+        // Right vertical range axis
+        drawLine(
+          color = tickColor,
+          start = Offset(w * 0.78f, h * 0.22f),
+          end = Offset(w * 0.78f, h * 0.78f),
+          strokeWidth = 1.2.dp.toPx(),
+          cap = StrokeCap.Round,
+        )
+        drawCircle(
+          color = glyphColor,
+          radius = 2.0.dp.toPx(),
+          center = Offset(w * 0.78f, h * 0.38f),
+        )
+      } else {
+        // Precision mass platform + calibrated dial arc & needle
+        drawRoundRect(
+          color = glyphColor,
+          topLeft = Offset(w * 0.14f, h * 0.16f),
+          size = Size(w * 0.72f, h * 0.68f),
+          cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
+          style = Stroke(width = strokeW),
+        )
+        // Inner gauge window
+        drawArc(
+          color = tickColor,
+          startAngle = 195f,
+          sweepAngle = 150f,
+          useCenter = false,
+          topLeft = Offset(w * 0.28f, h * 0.30f),
+          size = Size(w * 0.44f, h * 0.44f),
+          style = Stroke(width = 1.25.dp.toPx(), cap = StrokeCap.Round),
+        )
+        // Calibration needle pointing up-right
+        drawLine(
+          color = glyphColor,
+          start = Offset(w * 0.50f, h * 0.54f),
+          end = Offset(w * 0.62f, h * 0.35f),
+          strokeWidth = 1.4.dp.toPx(),
+          cap = StrokeCap.Round,
+        )
+        drawCircle(
+          color = glyphColor,
+          radius = 1.8.dp.toPx(),
+          center = Offset(w * 0.50f, h * 0.54f),
+        )
+      }
+    }
+
+    // Active Unit Micro-Selector Tag (`CM ▾` / `IN ▾` / `FT ▾` or `KG ▾` / `LB ▾`)
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.Center,
+    ) {
+      Text(
+        text = activeUnitCode,
+        color = PureWhite,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = metrics.spScaled(8.2f, 7.2f, 9.2f),
+        letterSpacing = 0.4.sp,
+      )
+      Spacer(modifier = Modifier.width(2.dp))
+      Text(
+        text = "▾",
+        color = Zinc400,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = metrics.spScaled(7.5f, 6.5f, 8.5f),
+      )
+    }
+  }
+}
+
+/**
+ * Floating 3D Monochrome Architectural Unit Selection Popup Modal:
+ * Appears when the user clicks the icon box just to the left of the Height or Weight numbers.
+ * Lets the user choose between `CM`, `IN`, and `FT` for Height (or `KG` and `LBS` for Weight) with live converted previews.
+ */
+@Composable
+private fun FloatingMetricUnitPickerDialog(
+  eyebrow: String,
+  title: String,
+  activeBadgeText: String,
+  option1Code: String,
+  option1Title: String,
+  option1System: String,
+  option1LivePreview: String,
+  isOption1Selected: Boolean,
+  onSelectOption1: () -> Unit,
+  option2Code: String,
+  option2Title: String,
+  option2System: String,
+  option2LivePreview: String,
+  isOption2Selected: Boolean,
+  onSelectOption2: () -> Unit,
+  option3Code: String? = null,
+  option3Title: String? = null,
+  option3System: String? = null,
+  option3LivePreview: String? = null,
+  isOption3Selected: Boolean = false,
+  onSelectOption3: (() -> Unit)? = null,
+  onDismiss: () -> Unit,
+  metrics: PersonalResponsiveMetrics,
+  dialogTestTag: String,
+) {
+  val entryAnim = remember { Animatable(0f) }
+  LaunchedEffect(Unit) {
+    entryAnim.animateTo(
+      targetValue = 1f,
+      animationSpec = tween(durationMillis = 260, easing = PersonalEaseOut),
+    )
+  }
+
+  Dialog(
+    onDismissRequest = onDismiss,
+    properties = DialogProperties(usePlatformDefaultWidth = false),
+  ) {
+    val modalCorner = 20.dp
+    val modalShape = RoundedCornerShape(modalCorner)
+
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .background(ObsidianBlack.copy(alpha = 0.74f))
+        .clickable(
+          interactionSource = remember { MutableInteractionSource() },
+          indication = null,
+          onClick = onDismiss,
+        )
+        .padding(horizontal = 20.dp),
+      contentAlignment = Alignment.Center,
+    ) {
+      Column(
+        modifier = Modifier
+          .widthIn(max = 390.dp)
+          .fillMaxWidth()
+          .graphicsLayer {
+            val p = entryAnim.value
+            alpha = p
+            scaleX = 0.92f + 0.08f * p
+            scaleY = 0.92f + 0.08f * p
+          }
+          .clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = {},
+          )
+          .drawWithCache {
+            val cornerPx = modalCorner.toPx()
+            val deepShadowPaint = Paint().apply {
+              isAntiAlias = true
+              asFrameworkPaint().apply {
+                color = android.graphics.Color.argb(235, 0, 0, 0)
+                maskFilter = BlurMaskFilter(safeBlurRadius(34.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
+              }
+            }
+            val silverHaloPaint = Paint().apply {
+              isAntiAlias = true
+              asFrameworkPaint().apply {
+                color = android.graphics.Color.argb(72, 240, 244, 255)
+                maskFilter = BlurMaskFilter(safeBlurRadius(18.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
+              }
+            }
+            onDrawBehind {
+              drawIntoCanvas { canvas ->
+                canvas.drawRoundRect(
+                  4.dp.toPx(),
+                  14.dp.toPx(),
+                  size.width - 4.dp.toPx(),
+                  size.height + 16.dp.toPx(),
+                  cornerPx,
+                  cornerPx,
+                  deepShadowPaint,
+                )
+                canvas.drawRoundRect(
+                  0f,
+                  2.dp.toPx(),
+                  size.width,
+                  size.height + 4.dp.toPx(),
+                  cornerPx,
+                  cornerPx,
+                  silverHaloPaint,
+                )
+              }
+            }
+          }
+          .clip(modalShape)
+          .background(
+            brush = Brush.verticalGradient(
+              colors = listOf(
+                Color(0xFF18181E),
+                Color(0xFF0E0E12),
+                Color(0xFF08080A),
+              ),
+            ),
+          )
+          .border(
+            width = 1.4.dp,
+            brush = Brush.verticalGradient(
+              0.0f to PureWhite.copy(alpha = 0.58f),
+              0.32f to Zinc600.copy(alpha = 0.65f),
+              0.75f to Zinc850,
+              1.0f to Zinc900,
+            ),
+            shape = modalShape,
+          )
+          .padding(20.dp)
+          .testTag(dialogTestTag),
+      ) {
+        // Modal Header
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              PersonalLuminousWhiteDot(size = 7.dp)
+              Spacer(modifier = Modifier.width(8.dp))
+              Text(
+                text = eyebrow,
                 color = Zinc400,
                 fontFamily = JetBrainsMonoFontFamily,
                 fontWeight = FontWeight.Medium,
-                fontSize = metrics.spScaled(13f, 11f, 15f),
+                fontSize = metrics.spScaled(9.8f, 8.6f, 11.2f),
+                letterSpacing = 1.3.sp,
               )
             }
-          },
-          modifier = Modifier
-            .fillMaxWidth()
-            .focusRequester(focusRequester)
-            .onFocusChanged { state ->
-              isWeightFocused = state.isFocused
-              if (state.isFocused) {
-                hadFocus = true
-              } else if (hadFocus) {
-                commitWeightInput()
-              }
-            }
-            .testTag("weight_kg_input"),
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+              text = title,
+              color = PureWhite,
+              fontFamily = InterFontFamily,
+              fontWeight = FontWeight.SemiBold,
+              fontSize = metrics.spScaled(18f, 15.5f, 21f),
+              letterSpacing = (-0.3).sp,
+            )
+          }
+
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(6.dp))
+              .background(Zinc900)
+              .border(1.dp, Zinc700, RoundedCornerShape(6.dp))
+              .padding(horizontal = 10.dp, vertical = 5.dp),
+          ) {
+            Text(
+              text = activeBadgeText,
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.SemiBold,
+              fontSize = metrics.spScaled(10f, 8.8f, 11.5f),
+              letterSpacing = 0.6.sp,
+            )
+          }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        HorizontalDivider(thickness = 1.dp, color = Zinc850)
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Option 1 Card
+        MetricUnitOptionCard(
+          unitCode = option1Code,
+          unitTitle = option1Title,
+          systemLabel = option1System,
+          livePreview = option1LivePreview,
+          isSelected = isOption1Selected,
+          onClick = onSelectOption1,
+          metrics = metrics,
+          testTag = "${dialogTestTag}_option_1",
         )
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        // Small secondary conversion text directly below the primary weight number inside the same block
-        Row(
-          modifier = Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .clickable(
-              role = Role.Button,
-              onClick = {
-                val nextUnit = if (selectedUnit == WeightUnit.KG) WeightUnit.LBS else WeightUnit.KG
-                onSelectUnit(nextUnit)
-                weightInputText = formatWeightForUnit(weightKg, nextUnit)
-              },
-            )
-            .padding(vertical = 2.dp, horizontal = 2.dp)
-            .testTag("weight_lbs_conversion_text"),
-          verticalAlignment = Alignment.CenterVertically,
+        // Option 2 Card
+        MetricUnitOptionCard(
+          unitCode = option2Code,
+          unitTitle = option2Title,
+          systemLabel = option2System,
+          livePreview = option2LivePreview,
+          isSelected = isOption2Selected,
+          onClick = onSelectOption2,
+          metrics = metrics,
+          testTag = "${dialogTestTag}_option_2",
+        )
+
+        // Optional Option 3 Card (e.g., FEET for Height Unit Selection)
+        if (
+          option3Code != null &&
+          option3Title != null &&
+          option3System != null &&
+          option3LivePreview != null &&
+          onSelectOption3 != null
         ) {
-          Text(
-            text = bottomConvertedReadout,
-            color = Zinc400,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Normal,
-            fontSize = metrics.spScaled(10.6f, 9.2f, 12.2f),
-            letterSpacing = 0.2.sp,
-          )
-          Spacer(modifier = Modifier.width(6.dp))
-          Text(
-            text = "⇅",
-            color = Zinc500,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Medium,
-            fontSize = metrics.spScaled(10.5f, 9f, 12f),
+          Spacer(modifier = Modifier.height(10.dp))
+
+          MetricUnitOptionCard(
+            unitCode = option3Code,
+            unitTitle = option3Title,
+            systemLabel = option3System,
+            livePreview = option3LivePreview,
+            isSelected = isOption3Selected,
+            onClick = onSelectOption3,
+            metrics = metrics,
+            testTag = "${dialogTestTag}_option_3",
           )
         }
+      }
+    }
+  }
+}
+
+@Composable
+private fun MetricUnitOptionCard(
+  unitCode: String,
+  unitTitle: String,
+  systemLabel: String,
+  livePreview: String,
+  isSelected: Boolean,
+  onClick: () -> Unit,
+  metrics: PersonalResponsiveMetrics,
+  testTag: String,
+) {
+  val cardShape = RoundedCornerShape(12.dp)
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(cardShape)
+      .background(
+        brush = if (isSelected) {
+          Brush.verticalGradient(
+            colors = listOf(
+              PureWhite,
+              Color(0xFFE6E8EE),
+            ),
+          )
+        } else {
+          Brush.verticalGradient(
+            colors = listOf(
+              Color(0xFF17171D),
+              Color(0xFF0F0F13),
+            ),
+          )
+        },
+      )
+      .border(
+        width = if (isSelected) 1.5.dp else 1.dp,
+        color = if (isSelected) PureWhite else Zinc800,
+        shape = cardShape,
+      )
+      .clickable(
+        role = Role.RadioButton,
+        onClick = onClick,
+      )
+      .padding(horizontal = 14.dp, vertical = 13.dp)
+      .testTag(testTag),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.SpaceBetween,
+  ) {
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      modifier = Modifier.weight(1f),
+    ) {
+      // Left Sculpted Unit Code Badge
+      Box(
+        modifier = Modifier
+          .widthIn(min = 52.dp)
+          .clip(RoundedCornerShape(8.dp))
+          .background(if (isSelected) ObsidianBlack else Zinc900)
+          .border(
+            width = 1.dp,
+            color = if (isSelected) ObsidianBlack else Zinc700,
+            shape = RoundedCornerShape(8.dp),
+          )
+          .padding(horizontal = 10.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+      ) {
+        Text(
+          text = unitCode,
+          color = PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = metrics.spScaled(12.5f, 11f, 14.5f),
+          letterSpacing = 0.5.sp,
+        )
       }
 
       Spacer(modifier = Modifier.width(12.dp))
 
-      // Right Side: Tactile Monochrome - / + Steppers (Tap or Hold to Continuously Update)
-      Row(
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        HoldableStepperButton(
-          symbol = "−",
-          onStep = { stepWeightBy(false) },
-          metrics = metrics,
-          testTag = "weight_decrement_button",
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = systemLabel,
+          color = if (isSelected) ObsidianBlack.copy(alpha = 0.65f) else Zinc500,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.SemiBold,
+          fontSize = metrics.spScaled(8.8f, 7.6f, 10f),
+          letterSpacing = 0.8.sp,
         )
-        HoldableStepperButton(
-          symbol = "+",
-          onStep = { stepWeightBy(true) },
-          metrics = metrics,
-          testTag = "weight_increment_button",
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+          text = unitTitle,
+          color = if (isSelected) ObsidianBlack else PureWhite,
+          fontFamily = InterFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = metrics.spScaled(15f, 13f, 17f),
+          letterSpacing = (-0.2).sp,
+        )
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(
+          text = livePreview,
+          color = if (isSelected) ObsidianBlack.copy(alpha = 0.80f) else Zinc400,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Medium,
+          fontSize = metrics.spScaled(10.8f, 9.4f, 12.2f),
         )
       }
     }
+
+    Spacer(modifier = Modifier.width(10.dp))
+
+    // Right Selection Indicator
+    Box(
+      modifier = Modifier
+        .size(22.dp)
+        .clip(CircleShape)
+        .background(if (isSelected) ObsidianBlack else Color.Transparent)
+        .border(
+          width = 1.5.dp,
+          color = if (isSelected) ObsidianBlack else Zinc600,
+          shape = CircleShape,
+        ),
+      contentAlignment = Alignment.Center,
+    ) {
+      if (isSelected) {
+        Box(
+          modifier = Modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(PureWhite),
+        )
+      }
+    }
+  }
+}
+
+/**
+ * Live Calibrated Vernier Micro-Scale Strip inside the bottom of the unified Height/Weight block:
+ * Renders precision tick marks and a glowing PureWhite marker that glides smoothly as the value changes.
+ */
+@Composable
+private fun LiveCalibratedScaleStrip(
+  fraction: Float,
+  isFocused: Boolean,
+) {
+  Spacer(
+    modifier = Modifier
+      .fillMaxWidth()
+      .height(10.dp)
+      .drawWithCache {
+        val markerGlowPaint = Paint().apply {
+          isAntiAlias = true
+          asFrameworkPaint().apply {
+            color = android.graphics.Color.argb(150, 255, 255, 255)
+            maskFilter = BlurMaskFilter(safeBlurRadius(4.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
+          }
+        }
+        onDrawBehind {
+          val w = size.width
+          val h = size.height
+          if (w <= 1f || h <= 1f) return@onDrawBehind
+
+          val clamped = fraction.coerceIn(0f, 1f)
+          val activeX = w * clamped
+          val totalTicks = 28
+
+          // Subtle baseline rail
+          drawLine(
+            color = Zinc850,
+            start = Offset(0f, h * 0.55f),
+            end = Offset(w, h * 0.55f),
+            strokeWidth = 1.dp.toPx(),
+          )
+          // Lit silver-white rail up to active position
+          drawLine(
+            brush = Brush.horizontalGradient(
+              colors = listOf(
+                Zinc600.copy(alpha = 0.55f),
+                Zinc300.copy(alpha = 0.85f),
+                PureWhite,
+              ),
+              startX = 0f,
+              endX = activeX.coerceAtLeast(1f),
+            ),
+            start = Offset(0f, h * 0.55f),
+            end = Offset(activeX, h * 0.55f),
+            strokeWidth = 1.35.dp.toPx(),
+            cap = StrokeCap.Round,
+          )
+
+          // Vernier ruler ticks
+          for (i in 0..totalTicks) {
+            val tf = i.toFloat() / totalTicks.toFloat()
+            val tx = w * tf
+            val isMajor = i % 4 == 0
+            val tickHalfH = if (isMajor) h * 0.42f else h * 0.22f
+            val dist = abs(tf - clamped)
+            val tickColor = when {
+              dist < 0.045f -> PureWhite
+              tf <= clamped -> if (isMajor) Zinc300 else Zinc500
+              else -> if (isMajor) Zinc600 else Zinc800
+            }
+            drawLine(
+              color = tickColor,
+              start = Offset(tx, h * 0.55f - tickHalfH),
+              end = Offset(tx, h * 0.55f + tickHalfH),
+              strokeWidth = if (isMajor) 1.2.dp.toPx() else 0.85.dp.toPx(),
+              cap = StrokeCap.Round,
+            )
+          }
+
+          // Glowing PureWhite vernacular needle
+          val markerCenter = Offset(activeX.coerceIn(3.dp.toPx(), w - 3.dp.toPx()), h * 0.55f)
+          drawIntoCanvas { canvas ->
+            canvas.drawCircle(markerCenter, 4.2.dp.toPx(), markerGlowPaint)
+          }
+          drawCircle(
+            color = PureWhite,
+            radius = if (isFocused) 3.0.dp.toPx() else 2.5.dp.toPx(),
+            center = markerCenter,
+          )
+        }
+      },
+  )
+}
+
+/**
+ * Unified Precision Stepper Capsule (`− | +`) with Press-and-Hold Continuous Acceleration:
+ * Houses both decrement and increment controls inside a sculpted monochrome instrument dock.
+ */
+@Composable
+private fun UnifiedStepperCapsule(
+  onDecrement: () -> Unit,
+  onIncrement: () -> Unit,
+  decrementTestTag: String,
+  incrementTestTag: String,
+  metrics: PersonalResponsiveMetrics,
+) {
+  val capsuleShape = RoundedCornerShape(10.dp)
+  Row(
+    modifier = Modifier
+      .clip(capsuleShape)
+      .background(
+        brush = Brush.verticalGradient(
+          colors = listOf(
+            Color(0xFF1B1B22),
+            Color(0xFF101014),
+          ),
+        ),
+      )
+      .border(
+        width = 1.dp,
+        brush = Brush.verticalGradient(
+          colors = listOf(
+            PureWhite.copy(alpha = 0.24f),
+            Zinc700,
+          ),
+        ),
+        shape = capsuleShape,
+      )
+      .padding(2.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    HoldableStepperButton(
+      symbol = "−",
+      onStep = onDecrement,
+      metrics = metrics,
+      testTag = decrementTestTag,
+    )
+    Box(
+      modifier = Modifier
+        .width(1.dp)
+        .height((22f * metrics.scale).coerceIn(18f, 26f).dp)
+        .background(Zinc700.copy(alpha = 0.65f)),
+    )
+    HoldableStepperButton(
+      symbol = "+",
+      onStep = onIncrement,
+      metrics = metrics,
+      testTag = incrementTestTag,
+    )
   }
 }
 
@@ -1742,11 +2668,12 @@ private fun HoldableStepperButton(
     }
   }
 
-  val btnSize = (34f * metrics.scale).coerceIn(30f, 38f).dp
+  val btnWidth = (36f * metrics.scale).coerceIn(32f, 40f).dp
+  val btnHeight = (34f * metrics.scale).coerceIn(30f, 38f).dp
   val shape = RoundedCornerShape(8.dp)
   Box(
     modifier = Modifier
-      .size(btnSize)
+      .size(width = btnWidth, height = btnHeight)
       .clip(shape)
       .background(
         brush = if (isPressed) {
@@ -1759,16 +2686,11 @@ private fun HoldableStepperButton(
         } else {
           Brush.verticalGradient(
             colors = listOf(
-              Color(0xFF1A1A20),
-              Color(0xFF101014),
+              Color.Transparent,
+              Color.Transparent,
             ),
           )
         },
-      )
-      .border(
-        width = 1.dp,
-        color = if (isPressed) PureWhite else Zinc700,
-        shape = shape,
       )
       .clickable(
         interactionSource = interactionSource,
@@ -1789,7 +2711,7 @@ private fun HoldableStepperButton(
       color = if (isPressed) ObsidianBlack else PureWhite,
       fontFamily = JetBrainsMonoFontFamily,
       fontWeight = FontWeight.SemiBold,
-      fontSize = metrics.spScaled(15.5f, 13.5f, 18f),
+      fontSize = metrics.spScaled(16f, 14f, 18.5f),
     )
   }
 }
@@ -1828,7 +2750,7 @@ private fun BiometricMassIndexCard(
     label = "bmi_live_pulse",
   )
 
-  // Solid Welcome-Screen Progress Bar Colors animated ONLY for the Category Badge Box
+  // Solid Welcome-Screen Progress Bar Colors animated for the Category Badge Box
   val animatedBadgeStart by animateColorAsState(
     targetValue = telemetry.badgeSolidStart,
     animationSpec = tween(durationMillis = 320),
@@ -1844,6 +2766,42 @@ private fun BiometricMassIndexCard(
     animationSpec = tween(durationMillis = 280),
     label = "bmi_badge_text_color",
   )
+
+  // Lively Multi-Color + White-Integrated Progress Bar Gradient Stops animated smoothly across ranges
+  val targetStops = telemetry.barGradientColors
+  val barStop0 by animateColorAsState(
+    targetValue = targetStops.getOrElse(0) { StepsMid },
+    animationSpec = tween(durationMillis = 380),
+    label = "bmi_bar_stop_0",
+  )
+  val barStop1 by animateColorAsState(
+    targetValue = targetStops.getOrElse(1) { StepsStart },
+    animationSpec = tween(durationMillis = 380),
+    label = "bmi_bar_stop_1",
+  )
+  val barStop2 by animateColorAsState(
+    targetValue = targetStops.getOrElse(2) { CyberCyan },
+    animationSpec = tween(durationMillis = 380),
+    label = "bmi_bar_stop_2",
+  )
+  val barStop3 by animateColorAsState(
+    targetValue = targetStops.getOrElse(3) { Color(0xFFE2FFF6) },
+    animationSpec = tween(durationMillis = 380),
+    label = "bmi_bar_stop_3",
+  )
+  val barStop4 by animateColorAsState(
+    targetValue = targetStops.getOrElse(4) { PureWhite },
+    animationSpec = tween(durationMillis = 380),
+    label = "bmi_bar_stop_4",
+  )
+  val animatedBarAccent by animateColorAsState(
+    targetValue = telemetry.barAccentColor,
+    animationSpec = tween(durationMillis = 380),
+    label = "bmi_bar_accent",
+  )
+  val animatedBarGradient = remember(barStop0, barStop1, barStop2, barStop3, barStop4) {
+    listOf(barStop0, barStop1, barStop2, barStop3, barStop4)
+  }
 
   val displayBmi by remember(animatedBmi, entryPhaseProvider) {
     derivedStateOf {
@@ -2027,7 +2985,7 @@ private fun BiometricMassIndexCard(
       .testTag("bmi_calculation_card"),
     verticalArrangement = Arrangement.SpaceBetween,
   ) {
-    // 1. Header Row: Luminous White Dot + BIOMETRIC MASS INDEX + SOLID Welcome-Screen-Colored Category Badge
+    // 1. Header Row: Range-Synced Luminous Dot + BIOMETRIC MASS INDEX + Synced Solid Category Badge
     Column {
       Row(
         modifier = Modifier
@@ -2039,8 +2997,12 @@ private fun BiometricMassIndexCard(
         Row(
           verticalAlignment = Alignment.CenterVertically,
         ) {
-          PersonalLuminousWhiteDot(
+          PersonalSyncedRangeDot(
+            startColor = animatedBadgeStart,
+            endColor = animatedBadgeEnd,
+            glowColor = animatedBarAccent,
             size = (8.5f * metrics.scale).coerceIn(7f, 10.5f).dp,
+            modifier = Modifier.testTag("bmi_header_synced_dot"),
           )
           Spacer(modifier = Modifier.width(10.dp))
           Text(
@@ -2190,14 +3152,15 @@ private fun BiometricMassIndexCard(
 
       Spacer(modifier = Modifier.height((12f * metrics.scale).coerceIn(9f, 16f).dp))
 
-      // Monochrome Liquid-Chrome BMI Spectrum Bar (Matches Step 01 Profile Section Progress Bar)
+      // Lively Multi-Color + White-Integrated BMI Spectrum Bar (Changes Colors Smoothly per Range)
       AnimatedBmiSpectrumGauge(
         progressProvider = {
           animatedGaugeProgress * entryPhaseProvider().coerceIn(0f, 1f)
         },
         livePulseProvider = { livePulse },
         shimmerBoostProvider = borderFlashProvider,
-        gradientColors = WhiteVariantMulticolorGradient,
+        gradientColors = animatedBarGradient,
+        accentColor = animatedBarAccent,
         barHeight = metrics.bmiBarHeight,
         modifier = Modifier
           .fillMaxWidth()
@@ -2206,7 +3169,7 @@ private fun BiometricMassIndexCard(
 
       Spacer(modifier = Modifier.height((7f * metrics.scale).coerceIn(5f, 10f).dp))
 
-      // Calibrated Monochrome Spectrum Threshold Labels
+      // Calibrated Spectrum Threshold Labels
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -2245,7 +3208,7 @@ private fun BiometricMassIndexCard(
 
     Spacer(modifier = Modifier.height(metrics.bmiSectionSpacing))
 
-    // 3. Secondary Somatic Metrics Grid (Crystal-Clear Optimal Mass Range & Sex-Calibrated Metabolic Rate)
+    // 3. Secondary Somatic Metrics Grid (Clean Optimal Mass Range & Resting Metabolic Rate without clutter subtext)
     Column(
       modifier = Modifier.fillMaxWidth(),
     ) {
@@ -2261,18 +3224,19 @@ private fun BiometricMassIndexCard(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.Top,
       ) {
-        // Left: Optimal Mass Range (Clearly Differentiated Min & Max Pills in Monochrome)
+        // Left: Optimal Mass Range (Clearly Differentiated Min & Max Pills without redundant bottom subtext)
         Column(
-          modifier = Modifier.weight(1.08f),
-          verticalArrangement = Arrangement.spacedBy((6f * metrics.scale).coerceIn(4.5f, 8f).dp),
+          modifier = Modifier.weight(1.02f),
+          verticalArrangement = Arrangement.spacedBy((7f * metrics.scale).coerceIn(5.5f, 9f).dp),
         ) {
           Text(
             text = stringResource(R.string.personal_ideal_weight),
             color = Zinc400,
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.Medium,
-            fontSize = metrics.spScaled(10.2f, 8.8f, 11.8f),
-            letterSpacing = 0.8.sp,
+            fontSize = metrics.spScaled(10.0f, 8.6f, 11.5f),
+            letterSpacing = 0.7.sp,
+            maxLines = 1,
           )
 
           // Distinct Min and Max Badges so the range is effortlessly readable
@@ -2329,33 +3293,25 @@ private fun BiometricMassIndexCard(
               fontSize = metrics.spScaled(11.8f, 10f, 13.8f),
             )
           }
-
-          Text(
-            text = "MIN ${formatOneDecimal(telemetry.idealMinKg)} • MAX ${formatOneDecimal(telemetry.idealMaxKg)} KG",
-            color = Zinc500,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Normal,
-            fontSize = metrics.spScaled(8.6f, 7.5f, 10f),
-            letterSpacing = 0.4.sp,
-          )
         }
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        // Right: Scientifically Calibrated Resting Metabolic Rate (Men +5 / Women -161 Mifflin-St Jeor)
+        // Right: Scientifically Calibrated Resting Metabolic Rate (Clean readout without bottom equation subtext)
         Column(
-          modifier = Modifier.weight(0.96f),
+          modifier = Modifier.weight(1.02f),
           horizontalAlignment = Alignment.End,
-          verticalArrangement = Arrangement.spacedBy((5f * metrics.scale).coerceIn(4f, 7f).dp),
+          verticalArrangement = Arrangement.spacedBy((7f * metrics.scale).coerceIn(5.5f, 9f).dp),
         ) {
           Text(
             text = stringResource(R.string.personal_resting_bmr),
             color = Zinc400,
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.Medium,
-            fontSize = metrics.spScaled(10.2f, 8.8f, 11.8f),
-            letterSpacing = 0.8.sp,
+            fontSize = metrics.spScaled(10.0f, 8.6f, 11.5f),
+            letterSpacing = 0.7.sp,
             textAlign = TextAlign.End,
+            maxLines = 1,
           )
           Row(
             verticalAlignment = Alignment.Bottom,
@@ -2378,73 +3334,33 @@ private fun BiometricMassIndexCard(
               modifier = Modifier.padding(bottom = 1.dp),
             )
           }
-          Text(
-            text = telemetry.sexCalibrationLabel,
-            color = Zinc500,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Normal,
-            fontSize = metrics.spScaled(8.6f, 7.5f, 10f),
-            letterSpacing = 0.3.sp,
-            textAlign = TextAlign.End,
-            maxLines = 1,
-          )
         }
       }
 
-      Spacer(modifier = Modifier.height((12f * metrics.scale).coerceIn(9f, 15f).dp))
+      Spacer(modifier = Modifier.height((10f * metrics.scale).coerceIn(8f, 13f).dp))
 
-      // 4. Monochrome Scientific Accuracy (70–85%) & Fitness Coach / Medical Consultation Banner
-      val advisoryShape = RoundedCornerShape(8.dp)
-      Row(
+      // 4. Clean RMR-Specific Disclaimer Text Only (No Boxed Badge or Block)
+      Text(
+        text = stringResource(R.string.personal_bmr_accuracy_note),
+        color = Zinc500,
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = metrics.spScaled(9.4f, 8.2f, 10.6f),
+        lineHeight = metrics.spScaled(13.0f, 11.2f, 14.6f),
         modifier = Modifier
           .fillMaxWidth()
-          .clip(advisoryShape)
-          .background(Zinc950)
-          .border(
-            width = 0.8.dp,
-            color = Zinc800,
-            shape = advisoryShape,
-          )
-          .padding(horizontal = 10.dp, vertical = 7.5.dp)
           .testTag("bmi_metabolic_accuracy_banner"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        Box(
-          modifier = Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .background(Zinc850)
-            .border(0.7.dp, Zinc600, RoundedCornerShape(4.dp))
-            .padding(horizontal = 6.dp, vertical = 2.5.dp),
-        ) {
-          Text(
-            text = "70–85% ACCURACY",
-            color = PureWhite,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = metrics.spScaled(8.4f, 7.4f, 9.6f),
-            letterSpacing = 0.4.sp,
-          )
-        }
-
-        Text(
-          text = "Consult a fitness coach or medical professional for best clinical precision.",
-          color = Zinc400,
-          fontFamily = InterFontFamily,
-          fontWeight = FontWeight.Normal,
-          fontSize = metrics.spScaled(9.6f, 8.4f, 11f),
-          lineHeight = metrics.spScaled(13f, 11.2f, 14.8f),
-          modifier = Modifier.weight(1f),
-        )
-      }
+      )
     }
   }
 }
 
 /**
- * Monochrome Multi-Tone White / Liquid-Chrome BMI Spectrum Gauge
- * (Matches Step 01 Profile Section's CalculatedAgeProgressBar in black & white,
- * with zone dividers and a glowing PureWhite marker reticle).
+ * Lively Multi-Color + White-Integrated BMI Spectrum Gauge:
+ * - Smoothly shifts between range-specific multi-color gradients (Azure-Cyan for Underweight,
+ *   Emerald-Mint-Cyan for Optimal, Tangerine-Amber-Gold for Overweight, Ruby-Coral-Rose for Obese)
+ *   seamlessly integrated with a luminous pearl-white & pure-white crest, glass lighting,
+ *   and a dual-halo glowing reticle marker.
  */
 @Composable
 private fun AnimatedBmiSpectrumGauge(
@@ -2452,6 +3368,7 @@ private fun AnimatedBmiSpectrumGauge(
   livePulseProvider: () -> Float,
   shimmerBoostProvider: () -> Float,
   gradientColors: List<Color>,
+  accentColor: Color,
   barHeight: Dp,
   modifier: Modifier = Modifier,
 ) {
@@ -2465,13 +3382,20 @@ private fun AnimatedBmiSpectrumGauge(
         val cornerRadius = CornerRadius(radius, radius)
         val trackBorderBrush = Brush.horizontalGradient(
           colors = listOf(
-            Zinc600.copy(alpha = 0.35f),
+            accentColor.copy(alpha = 0.32f),
             MonochromeTrackBorder,
-            PureWhite.copy(alpha = 0.25f),
+            PureWhite.copy(alpha = 0.30f),
           ),
         )
+        val subtleSpectrumUnderlay = Brush.horizontalGradient(
+          0.0f to HydrationStart.copy(alpha = 0.08f),
+          0.25f to StepsStart.copy(alpha = 0.09f),
+          0.58f to OverweightSunsetMid.copy(alpha = 0.09f),
+          0.80f to ObeseRedMid.copy(alpha = 0.09f),
+          1.0f to ObeseRedDeep.copy(alpha = 0.08f),
+        )
         val verticalLightingBrush = Brush.verticalGradient(
-          0.0f to PureWhite.copy(alpha = 0.38f),
+          0.0f to PureWhite.copy(alpha = 0.42f),
           0.42f to Color.Transparent,
           1.0f to ObsidianBlack.copy(alpha = 0.24f),
           startY = 0f,
@@ -2479,17 +3403,24 @@ private fun AnimatedBmiSpectrumGauge(
         )
         val topRimBrush = Brush.verticalGradient(
           colors = listOf(
-            PureWhite.copy(alpha = 0.45f),
+            PureWhite.copy(alpha = 0.52f),
             Color.Transparent,
           ),
           startY = 0f,
           endY = (trackHeight * 0.65f).coerceAtLeast(1f),
         )
-        val markerHaloPaint = Paint().apply {
+        val barAuraPaint = Paint().apply {
           isAntiAlias = true
           asFrameworkPaint().apply {
-            color = android.graphics.Color.argb(180, 255, 255, 255)
-            maskFilter = BlurMaskFilter(safeBlurRadius(trackHeight * 1.15f), BlurMaskFilter.Blur.NORMAL)
+            color = android.graphics.Color.argb(95, 255, 255, 255)
+            maskFilter = BlurMaskFilter(safeBlurRadius(trackHeight * 0.95f), BlurMaskFilter.Blur.NORMAL)
+          }
+        }
+        val markerColorHaloPaint = Paint().apply {
+          isAntiAlias = true
+          asFrameworkPaint().apply {
+            color = android.graphics.Color.argb(175, 255, 255, 255)
+            maskFilter = BlurMaskFilter(safeBlurRadius(trackHeight * 1.25f), BlurMaskFilter.Blur.NORMAL)
           }
         }
         val fillPath = Path()
@@ -2500,9 +3431,15 @@ private fun AnimatedBmiSpectrumGauge(
           val pulse = livePulseProvider().coerceIn(0f, 1f)
           val boost = shimmerBoostProvider().coerceIn(0f, 1f)
 
-          // 1. Monochrome Track Chassis
+          // 1. Recessed Capsule Track with Subtle Range Undertone & Tinted Hairline Border
           drawRoundRect(
             color = MonochromeTrack,
+            topLeft = Offset.Zero,
+            size = Size(size.width, trackHeight),
+            cornerRadius = cornerRadius,
+          )
+          drawRoundRect(
+            brush = subtleSpectrumUnderlay,
             topLeft = Offset.Zero,
             size = Size(size.width, trackHeight),
             cornerRadius = cornerRadius,
@@ -2515,7 +3452,7 @@ private fun AnimatedBmiSpectrumGauge(
             style = Stroke(width = 1.dp.toPx()),
           )
 
-          // 2. Liquid-Chrome Monochrome Fill up to current BMI position
+          // 2. Lively Multi-Color + White-Integrated Fill up to current BMI position
           if (progress > 0.002f) {
             val minFill = (trackHeight * 0.5f).coerceAtMost(size.width)
             val fillWidth = (size.width * progress).coerceIn(minFill, size.width)
@@ -2526,6 +3463,26 @@ private fun AnimatedBmiSpectrumGauge(
                 cornerRadius = cornerRadius,
               ),
             )
+
+            // Ambient colored + white glow behind the active progress fill
+            val auraRed = (accentColor.red * 255f).roundToInt().coerceIn(0, 255)
+            val auraGreen = (accentColor.green * 255f).roundToInt().coerceIn(0, 255)
+            val auraBlue = (accentColor.blue * 255f).roundToInt().coerceIn(0, 255)
+            val auraAlpha = (72f + 42f * pulse).roundToInt().coerceIn(50, 140)
+            barAuraPaint.asFrameworkPaint().color =
+              android.graphics.Color.argb(auraAlpha, auraRed, auraGreen, auraBlue)
+
+            drawIntoCanvas { canvas ->
+              canvas.drawRoundRect(
+                0f,
+                -trackHeight * 0.15f,
+                fillWidth,
+                trackHeight * 1.15f,
+                radius,
+                radius,
+                barAuraPaint,
+              )
+            }
 
             drawPath(
               path = fillPath,
@@ -2543,15 +3500,15 @@ private fun AnimatedBmiSpectrumGauge(
                 size = Size(fillWidth, trackHeight),
               )
 
-              val sheenRatio = if (boost > 0.01f) boost else (0.35f + 0.30f * pulse)
+              val sheenRatio = if (boost > 0.01f) boost else (0.30f + 0.38f * pulse)
               val sheenCenter = fillWidth * sheenRatio
-              val sheenSpan = (fillWidth * 0.28f).coerceAtLeast(trackHeight * 2.2f)
+              val sheenSpan = (fillWidth * 0.30f).coerceAtLeast(trackHeight * 2.4f)
               drawRect(
                 brush = Brush.linearGradient(
                   colors = listOf(
                     Color.Transparent,
-                    PureWhite.copy(alpha = 0.36f),
-                    Color(0xFFF7EFE6).copy(alpha = 0.22f),
+                    PureWhite.copy(alpha = 0.44f),
+                    PureWhite.copy(alpha = 0.22f),
                     Color.Transparent,
                   ),
                   start = Offset(sheenCenter - sheenSpan, 0f),
@@ -2586,19 +3543,25 @@ private fun AnimatedBmiSpectrumGauge(
             )
           }
 
-          // 4. Lively Glowing PureWhite BMI Marker Reticle at Fill Crest
+          // 4. Lively Glowing White-Integrated Reticle Marker at Fill Crest
           if (progress > 0.002f) {
             val minFill = (trackHeight * 0.5f).coerceAtMost(size.width)
             val fillWidth = (size.width * progress).coerceIn(minFill, size.width)
             val markerX = fillWidth.coerceIn(radius, size.width - radius)
             val markerCenter = Offset(markerX, trackHeight / 2f)
-            markerHaloPaint.asFrameworkPaint().alpha = (135f + 85f * pulse).roundToInt().coerceIn(100, 235)
+            val haloAlpha = (145f + 80f * pulse).roundToInt().coerceIn(110, 235)
+            val haloR = ((accentColor.red * 0.55f + 0.45f) * 255f).roundToInt().coerceIn(0, 255)
+            val haloG = ((accentColor.green * 0.55f + 0.45f) * 255f).roundToInt().coerceIn(0, 255)
+            val haloB = ((accentColor.blue * 0.55f + 0.45f) * 255f).roundToInt().coerceIn(0, 255)
+            markerColorHaloPaint.asFrameworkPaint().color =
+              android.graphics.Color.argb(haloAlpha, haloR, haloG, haloB)
+
             drawIntoCanvas { canvas ->
-              canvas.drawCircle(markerCenter, trackHeight * 0.75f, markerHaloPaint)
+              canvas.drawCircle(markerCenter, trackHeight * 0.82f, markerColorHaloPaint)
             }
             drawCircle(
               color = PureWhite,
-              radius = (trackHeight * 0.44f).coerceAtLeast(2f),
+              radius = (trackHeight * 0.45f).coerceAtLeast(2f),
               center = markerCenter,
             )
             drawCircle(

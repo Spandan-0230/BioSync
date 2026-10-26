@@ -465,9 +465,14 @@ private fun Modifier.writingFloatingBorder(
         }
       }
 
-      // 2. Field Surface Background (subtle floating obsidian lift while writing)
+      // 2. Field Surface Background (architectural carbon gradient + subtle floating obsidian lift while writing)
       drawRoundRect(
-        color = ObsidianBlack,
+        brush = Brush.verticalGradient(
+          colors = listOf(
+            Color(0xFF131317),
+            Color(0xFF0A0A0D),
+          ),
+        ),
         topLeft = Offset.Zero,
         size = size,
         cornerRadius = cornerRadius,
@@ -476,8 +481,8 @@ private fun Modifier.writingFloatingBorder(
         drawRoundRect(
           brush = Brush.verticalGradient(
             colors = listOf(
-              Color(0xFF141418).copy(alpha = 0.85f * fw),
-              Color(0xFF0B0B0E).copy(alpha = 0.85f * fw),
+              Color(0xFF18181E).copy(alpha = 0.85f * fw),
+              Color(0xFF0C0C10).copy(alpha = 0.85f * fw),
             ),
           ),
           topLeft = Offset.Zero,
@@ -489,9 +494,15 @@ private fun Modifier.writingFloatingBorder(
       // 3. Field Inner Content (Centered Cursor, Text, Placeholder, Icon)
       drawContent()
 
-      // 4. Resting Base Border
+      // 4. Resting Base Border (top-lit specular architectural rim)
       drawRoundRect(
-        color = Zinc800,
+        brush = Brush.verticalGradient(
+          colors = listOf(
+            PureWhite.copy(alpha = 0.20f),
+            Zinc700.copy(alpha = 0.72f),
+            Zinc850,
+          ),
+        ),
         topLeft = Offset.Zero,
         size = size,
         cornerRadius = cornerRadius,
@@ -1099,15 +1110,30 @@ private fun FullNameField(
 ) {
   val interactionSource = remember { MutableInteractionSource() }
   val isFocused by interactionSource.collectIsFocusedAsState()
+  var attemptedInvalidChar by rememberSaveable { mutableStateOf(false) }
+
   LaunchedEffect(isFocused) {
     onFocusChange(isFocused)
+    if (!isFocused) {
+      attemptedInvalidChar = false
+    }
   }
-  val fieldFontSize = metrics.spScaled(13.8f, 12f, 16f)
+
+  val trimmedValue = value.trim()
+  val hasOnlyLettersAndSpaces = remember(trimmedValue) {
+    trimmedValue.isNotEmpty() && trimmedValue.all { it.isLetter() || it == ' ' }
+  }
+  val letterCount = remember(trimmedValue) {
+    trimmedValue.count { it.isLetter() }
+  }
+  val isNameVerified = hasOnlyLettersAndSpaces && letterCount >= 2 && !attemptedInvalidChar
+
+  val fieldFontSize = metrics.spScaled(14.5f, 12.6f, 16.8f)
   val centeredTextStyle = remember(fieldFontSize) {
     TextStyle(
-      color = Zinc100,
+      color = PureWhite,
       fontFamily = InterFontFamily,
-      fontWeight = FontWeight.Normal,
+      fontWeight = FontWeight.Medium,
       fontSize = fieldFontSize,
       lineHeight = fieldFontSize * 1.15f,
       platformStyle = PlatformTextStyle(includeFontPadding = false),
@@ -1117,6 +1143,23 @@ private fun FullNameField(
       ),
     )
   }
+
+  val subjectInitials = remember(value) {
+    val parts = value
+      .filter { it.isLetter() || it == ' ' }
+      .trim()
+      .split("\\s+".toRegex())
+      .filter { it.isNotEmpty() }
+    when {
+      parts.size >= 2 -> "${parts.first().first().uppercaseChar()}${parts.last().first().uppercaseChar()}"
+      parts.size == 1 && parts[0].length >= 2 -> parts[0].take(2).uppercase()
+      parts.size == 1 -> "${parts[0].first().uppercaseChar()}•"
+      else -> "ID"
+    }
+  }
+
+  val iconBadgeShape = RoundedCornerShape(10.dp)
+  val monogramShape = RoundedCornerShape(8.dp)
 
   Column(
     modifier = modifier.fillMaxWidth(),
@@ -1130,15 +1173,15 @@ private fun FullNameField(
     ) {
       Text(
         text = stringResource(R.string.calib_field_name_label),
-        color = Zinc300,
+        color = Zinc200,
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = metrics.spScaled(12.2f, 11f, 14.5f),
+        fontSize = metrics.spScaled(12.4f, 11.2f, 14.8f),
       )
       if (nameTag.isNotEmpty()) {
         Text(
           text = nameTag,
-          color = Zinc600,
+          color = Zinc500,
           fontFamily = JetBrainsMonoFontFamily,
           fontWeight = FontWeight.Normal,
           fontSize = metrics.spScaled(10f, 8.8f, 11.5f),
@@ -1147,50 +1190,160 @@ private fun FullNameField(
       }
     }
 
-    // Input field with vertically centered cursor + floating dull border flash while writing
+    // Architectural Single-Block Identity Field (strictly letters & spaces; blocks numbers/symbols)
     BasicTextField(
       value = value,
-      onValueChange = onValueChange,
+      onValueChange = { rawInput ->
+        val sanitized = rawInput.filter { it.isLetter() || it == ' ' }
+        val hadInvalidCharacters = rawInput != sanitized
+        attemptedInvalidChar = hadInvalidCharacters
+        if (sanitized != value) {
+          onValueChange(sanitized)
+        }
+      },
       singleLine = true,
       interactionSource = interactionSource,
       cursorBrush = SolidColor(PureWhite),
+      keyboardOptions = KeyboardOptions(
+        keyboardType = KeyboardType.Text,
+        imeAction = ImeAction.Done,
+      ),
       textStyle = centeredTextStyle,
       decorationBox = { innerTextField ->
         Row(
           modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 12.dp, vertical = 9.dp),
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.SpaceBetween,
         ) {
+          // Left Sculpted Biometric Identity Emblem Box
           Box(
-            modifier = Modifier.weight(1f),
-            contentAlignment = Alignment.CenterStart,
-          ) {
-            if (value.isEmpty()) {
-              Text(
-                text = stringResource(R.string.calib_field_name_placeholder),
-                style = centeredTextStyle.copy(
-                  color = if (isFocused) Zinc600.copy(alpha = 0.75f) else Zinc700,
+            modifier = Modifier
+              .size((38f * metrics.scale).coerceIn(34f, 44f).dp)
+              .clip(iconBadgeShape)
+              .background(
+                brush = Brush.verticalGradient(
+                  colors = listOf(
+                    Color(0xFF1E1E25),
+                    Color(0xFF0E0E12),
+                  ),
                 ),
-                maxLines = 1,
               )
+              .border(
+                width = 1.dp,
+                brush = Brush.verticalGradient(
+                  colors = listOf(
+                    PureWhite.copy(alpha = if (isFocused) 0.48f else 0.24f),
+                    Zinc700.copy(alpha = 0.65f),
+                    Zinc850,
+                  ),
+                ),
+                shape = iconBadgeShape,
+              ),
+            contentAlignment = Alignment.Center,
+          ) {
+            BadgeVectorIcon(
+              color = if (isNameVerified) {
+                if (isFocused) PureWhite else Zinc300
+              } else {
+                Zinc500
+              },
+              size = (18f * metrics.scale).coerceIn(16f, 21f).dp,
+            )
+          }
+
+          Spacer(modifier = Modifier.width(12.dp))
+
+          // Center Editable Identity Stack
+          Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center,
+          ) {
+            Box(
+              modifier = Modifier.fillMaxWidth(),
+              contentAlignment = Alignment.CenterStart,
+            ) {
+              if (value.isEmpty()) {
+                Text(
+                  text = stringResource(R.string.calib_field_name_placeholder),
+                  style = centeredTextStyle.copy(
+                    color = if (isFocused) Zinc500.copy(alpha = 0.78f) else Zinc600,
+                    fontWeight = FontWeight.Normal,
+                  ),
+                  maxLines = 1,
+                )
+              }
+              innerTextField()
             }
-            innerTextField()
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+              text = when {
+                attemptedInvalidChar -> "SUBJECT RECORD • UNVERIFIED"
+                isNameVerified -> "SUBJECT RECORD • VERIFIED"
+                else -> "SUBJECT RECORD • UNVERIFIED"
+              },
+              color = when {
+                attemptedInvalidChar -> Zinc300
+                isNameVerified -> if (isFocused) Zinc400 else Zinc500
+                else -> Zinc500
+              },
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Medium,
+              fontSize = metrics.spScaled(8.6f, 7.6f, 9.8f),
+              letterSpacing = 0.6.sp,
+              maxLines = 1,
+            )
           }
 
           Spacer(modifier = Modifier.width(10.dp))
 
-          BadgeVectorIcon(
-            color = if (isFocused) Zinc400 else Zinc600,
-            size = (18f * metrics.scale).coerceIn(16f, 22f).dp,
-          )
+          // Right Live Monogram Signature Pill
+          Row(
+            modifier = Modifier
+              .clip(monogramShape)
+              .background(
+                brush = Brush.verticalGradient(
+                  colors = listOf(
+                    Color(0xFF1A1A21),
+                    Color(0xFF101014),
+                  ),
+                ),
+              )
+              .border(
+                width = 1.dp,
+                color = if (isNameVerified && isFocused) {
+                  PureWhite.copy(alpha = 0.36f)
+                } else {
+                  Zinc700.copy(alpha = 0.65f)
+                },
+                shape = monogramShape,
+              )
+              .padding(horizontal = 9.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .size(5.dp)
+                .clip(CircleShape)
+                .background(if (isNameVerified) PureWhite else Zinc600),
+            )
+            Text(
+              text = if (isNameVerified) subjectInitials else "UNV",
+              color = if (isNameVerified) PureWhite else Zinc500,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.SemiBold,
+              fontSize = metrics.spScaled(10.2f, 9f, 11.8f),
+              letterSpacing = 0.6.sp,
+            )
+          }
         }
       },
       modifier = Modifier
         .fillMaxWidth()
-        .height(metrics.inputHeight)
-        .writingFloatingBorder(isFocused = isFocused, cornerRadiusDp = 8.dp)
+        .height((metrics.inputHeight * 1.18f).coerceIn(54.dp, 66.dp))
+        .writingFloatingBorder(isFocused = isFocused, cornerRadiusDp = 12.dp)
         .testTag("profile_name_input"),
     )
   }
@@ -1254,8 +1407,9 @@ private fun BiologicalSexSelector(
   metrics: CalibrationResponsiveMetrics,
   modifier: Modifier = Modifier,
 ) {
-  val containerShape = RoundedCornerShape(8.dp)
-  val pillShape = RoundedCornerShape(6.dp)
+  val containerShape = RoundedCornerShape(12.dp)
+  val cardShape = RoundedCornerShape(9.dp)
+  val emblemShape = RoundedCornerShape(8.dp)
 
   Column(
     modifier = modifier.fillMaxWidth(),
@@ -1269,15 +1423,15 @@ private fun BiologicalSexSelector(
     ) {
       Text(
         text = stringResource(R.string.calib_field_sex_label),
-        color = Zinc300,
+        color = Zinc200,
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = metrics.spScaled(12.2f, 11f, 14.5f),
+        fontSize = metrics.spScaled(12.4f, 11.2f, 14.8f),
       )
       if (sexTag.isNotEmpty()) {
         Text(
           text = sexTag,
-          color = Zinc600,
+          color = Zinc500,
           fontFamily = JetBrainsMonoFontFamily,
           fontWeight = FontWeight.Normal,
           fontSize = metrics.spScaled(10f, 8.8f, 11.5f),
@@ -1286,51 +1440,139 @@ private fun BiologicalSexSelector(
       }
     }
 
+    // Architectural Top-Lit Dual Somatic Selector Dock
     Row(
       modifier = Modifier
         .fillMaxWidth()
         .clip(containerShape)
-        .background(Zinc950)
-        .border(width = 1.dp, color = Zinc850, shape = containerShape)
-        .padding(4.dp),
-      horizontalArrangement = Arrangement.spacedBy(4.dp),
+        .background(
+          brush = Brush.verticalGradient(
+            colors = listOf(
+              Color(0xFF131317),
+              Color(0xFF0A0A0D),
+            ),
+          ),
+        )
+        .border(
+          width = 1.dp,
+          brush = Brush.verticalGradient(
+            colors = listOf(
+              PureWhite.copy(alpha = 0.20f),
+              Zinc700.copy(alpha = 0.72f),
+              Zinc850,
+            ),
+          ),
+          shape = containerShape,
+        )
+        .padding(5.dp),
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
       val options = listOf(
-        "MALE" to R.string.calib_sex_male,
-        "FEMALE" to R.string.calib_sex_female,
+        Triple("MALE", R.string.calib_sex_male, "XY • SOMATIC"),
+        Triple("FEMALE", R.string.calib_sex_female, "XX • SOMATIC"),
       )
-      options.forEach { (key, labelRes) ->
+      options.forEach { (key, labelRes, bioCode) ->
         val isSelected = selectedSex == key
         val bgColor by animateColorAsState(
-          targetValue = if (isSelected) PureWhite else Color.Transparent,
-          animationSpec = tween(durationMillis = 160),
+          targetValue = if (isSelected) PureWhite else Color(0xFF121216),
+          animationSpec = tween(durationMillis = 180),
           label = "sex_bg_$key",
         )
-        val textColor by animateColorAsState(
-          targetValue = if (isSelected) ObsidianBlack else Zinc400,
-          animationSpec = tween(durationMillis = 160),
+        val borderColor by animateColorAsState(
+          targetValue = if (isSelected) PureWhite else Zinc800.copy(alpha = 0.75f),
+          animationSpec = tween(durationMillis = 180),
+          label = "sex_border_$key",
+        )
+        val primaryTextColor by animateColorAsState(
+          targetValue = if (isSelected) ObsidianBlack else Zinc200,
+          animationSpec = tween(durationMillis = 180),
           label = "sex_text_$key",
         )
+        val subTextColor by animateColorAsState(
+          targetValue = if (isSelected) Color(0xFF32323A) else Zinc500,
+          animationSpec = tween(durationMillis = 180),
+          label = "sex_subtext_$key",
+        )
+        val emblemBgColor by animateColorAsState(
+          targetValue = if (isSelected) ObsidianBlack.copy(alpha = 0.10f) else Color(0xFF1B1B22),
+          animationSpec = tween(durationMillis = 180),
+          label = "sex_emblem_bg_$key",
+        )
+        val emblemIconColor by animateColorAsState(
+          targetValue = if (isSelected) ObsidianBlack else Zinc300,
+          animationSpec = tween(durationMillis = 180),
+          label = "sex_emblem_icon_$key",
+        )
 
-        Box(
+        Row(
           modifier = Modifier
             .weight(1f)
-            .height(metrics.toggleHeight)
-            .clip(pillShape)
+            .heightIn(min = (metrics.toggleHeight * 1.32f).coerceIn(50.dp, 60.dp))
+            .clip(cardShape)
             .background(bgColor)
+            .border(width = 1.dp, color = borderColor, shape = cardShape)
             .clickable(
               role = Role.RadioButton,
               onClick = { onSelectSex(key) },
             )
+            .padding(horizontal = 10.dp, vertical = 7.dp)
             .testTag("gender_${key.lowercase()}"),
-          contentAlignment = Alignment.Center,
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-          Text(
-            text = stringResource(labelRes),
-            color = textColor,
-            fontFamily = InterFontFamily,
-            fontWeight = FontWeight.Medium,
-            fontSize = metrics.spScaled(12.2f, 11f, 14.5f),
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+          ) {
+            // Geometric Biometric Emblem Box
+            Box(
+              modifier = Modifier
+                .size((30f * metrics.scale).coerceIn(27f, 34f).dp)
+                .clip(emblemShape)
+                .background(emblemBgColor)
+                .border(
+                  width = 0.8.dp,
+                  color = if (isSelected) ObsidianBlack.copy(alpha = 0.18f) else Zinc700.copy(alpha = 0.65f),
+                  shape = emblemShape,
+                ),
+              contentAlignment = Alignment.Center,
+            ) {
+              BiologicalSexSymbolIcon(
+                isMale = key == "MALE",
+                color = emblemIconColor,
+                size = (15f * metrics.scale).coerceIn(13.5f, 17.5f).dp,
+              )
+            }
+
+            Column(
+              verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+              Text(
+                text = stringResource(labelRes),
+                color = primaryTextColor,
+                fontFamily = InterFontFamily,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = metrics.spScaled(12.8f, 11.4f, 14.8f),
+                maxLines = 1,
+              )
+              Text(
+                text = bioCode,
+                color = subTextColor,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = metrics.spScaled(8.4f, 7.4f, 9.5f),
+                letterSpacing = 0.5.sp,
+                maxLines = 1,
+              )
+            }
+          }
+
+          // Active Status Indicator Dot
+          Box(
+            modifier = Modifier
+              .size(6.5.dp)
+              .clip(CircleShape)
+              .background(if (isSelected) ObsidianBlack else Zinc700),
           )
         }
       }
@@ -1338,11 +1580,88 @@ private fun BiologicalSexSelector(
   }
 }
 
+@Composable
+private fun BiologicalSexSymbolIcon(
+  isMale: Boolean,
+  color: Color,
+  size: Dp,
+) {
+  Canvas(modifier = Modifier.size(size)) {
+    val w = this.size.width
+    val h = this.size.height
+    val strokeW = 1.65.dp.toPx()
+    val stroke = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    if (isMale) {
+      val r = w * 0.27f
+      val cx = w * 0.40f
+      val cy = h * 0.60f
+      drawCircle(
+        color = color,
+        radius = r,
+        center = Offset(cx, cy),
+        style = stroke,
+      )
+      // Diagonal arrow to top-right
+      val startX = cx + r * 0.707f
+      val startY = cy - r * 0.707f
+      val tipX = w * 0.82f
+      val tipY = h * 0.18f
+      drawLine(
+        color = color,
+        start = Offset(startX, startY),
+        end = Offset(tipX, tipY),
+        strokeWidth = strokeW,
+        cap = StrokeCap.Round,
+      )
+      drawLine(
+        color = color,
+        start = Offset(tipX, tipY),
+        end = Offset(tipX - w * 0.24f, tipY),
+        strokeWidth = strokeW,
+        cap = StrokeCap.Round,
+      )
+      drawLine(
+        color = color,
+        start = Offset(tipX, tipY),
+        end = Offset(tipX, tipY + h * 0.24f),
+        strokeWidth = strokeW,
+        cap = StrokeCap.Round,
+      )
+    } else {
+      val r = w * 0.26f
+      val cx = w * 0.50f
+      val cy = h * 0.37f
+      drawCircle(
+        color = color,
+        radius = r,
+        center = Offset(cx, cy),
+        style = stroke,
+      )
+      // Vertical stem + crossbar below
+      val stemTop = cy + r
+      val stemBottom = h * 0.88f
+      drawLine(
+        color = color,
+        start = Offset(cx, stemTop),
+        end = Offset(cx, stemBottom),
+        strokeWidth = strokeW,
+        cap = StrokeCap.Round,
+      )
+      drawLine(
+        color = color,
+        start = Offset(cx - w * 0.19f, h * 0.73f),
+        end = Offset(cx + w * 0.19f, h * 0.73f),
+        strokeWidth = strokeW,
+        cap = StrokeCap.Round,
+      )
+    }
+  }
+}
+
 /**
  * Date of Birth Section:
- * - DAY: Direct numeric input field (01..31) with centered cursor & floating dull border flash while writing
- * - MONTH: Tapping opens a realistic, floating 3D monochrome Month Picker modal popup (Jan..Dec)
- * - YEAR: Direct numeric input field (1900..currentYear) with centered cursor & floating dull border flash while writing
+ * - Architectural unified block with sculpted cells for DAY, MONTH (3D popup trigger), and YEAR,
+ *   plus an integrated bottom chronometric calibration scale strip matching the Height & Weight blocks.
  */
 @Composable
 private fun DateOfBirthSelectorRow(
@@ -1376,102 +1695,143 @@ private fun DateOfBirthSelectorRow(
   val yearFocusRequester = remember { FocusRequester() }
   val focusManager = LocalFocusManager.current
 
+  val isAnyDobActive = isDayFocused || isYearFocused || showMonthPopup
+  val safeMonthIdx = selectedMonth.coerceIn(0, 11)
+  val formattedIsoDate = remember(selectedDay, safeMonthIdx, selectedYear) {
+    "${selectedYear}-${(safeMonthIdx + 1).toString().padStart(2, '0')}-${selectedDay.toString().padStart(2, '0')}"
+  }
+  val dayOfYearProgress = remember(selectedDay, safeMonthIdx) {
+    ((safeMonthIdx * 30.4f + selectedDay) / 365.25f).coerceIn(0.03f, 0.98f)
+  }
+
   Column(
     modifier = Modifier.fillMaxWidth(),
     verticalArrangement = Arrangement.spacedBy(metrics.labelToBoxGap),
   ) {
-    Text(
-      text = stringResource(R.string.calib_field_dob_label),
-      color = Zinc300,
-      fontFamily = InterFontFamily,
-      fontWeight = FontWeight.Medium,
-      fontSize = metrics.spScaled(12.2f, 11f, 14.5f),
-    )
-
     Row(
       modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
     ) {
-      // 1. DAY: Direct Numeric Input
-      DirectNumberDobField(
-        label = stringResource(R.string.calib_dob_day),
-        value = dayInputText,
-        placeholder = "DD",
-        unitHint = "01-31",
-        onValueChange = { raw ->
-          haptics.tick()
-          val digits = raw.filter { it.isDigit() }.take(2)
-          dayInputText = digits
-          val parsed = digits.toIntOrNull()
-          if (parsed != null && parsed in 1..31) {
-            onDayChange(parsed)
-          }
-        },
-        onFocusChange = { isDayFocused = it },
-        onFocusLost = {
-          val parsed = dayInputText.toIntOrNull()
-          val validDay = (parsed ?: selectedDay).coerceIn(1, 31)
-          onDayChange(validDay)
-          dayInputText = validDay.toString().padStart(2, '0')
-        },
-        focusRequester = dayFocusRequester,
-        imeAction = ImeAction.Next,
-        onImeAction = {
-          haptics.selection()
-          focusManager.clearFocus()
-          showMonthPopup = true
-        },
-        metrics = metrics,
-        testTag = "dob_day_selector",
-        modifier = Modifier.weight(0.92f),
+      Text(
+        text = stringResource(R.string.calib_field_dob_label),
+        color = Zinc200,
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = metrics.spScaled(12.4f, 11.2f, 14.8f),
       )
-
-      // 2. MONTH: Opens Realistic Floating 3D Monochrome Month Picker Modal
-      MonthPopupTriggerField(
-        label = stringResource(R.string.calib_dob_month),
-        selectedMonthZeroBased = selectedMonth,
-        isPopupOpen = showMonthPopup,
-        onClick = {
-          haptics.selection()
-          focusManager.clearFocus()
-          showMonthPopup = true
-        },
-        metrics = metrics,
-        testTag = "dob_month_selector",
-        modifier = Modifier.weight(1.16f),
+      Text(
+        text = "ISO • $formattedIsoDate",
+        color = Zinc400,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = metrics.spScaled(10f, 8.8f, 11.5f),
+        letterSpacing = 0.6.sp,
       )
+    }
 
-      // 3. YEAR: Direct Numeric Input
-      DirectNumberDobField(
-        label = stringResource(R.string.calib_dob_year),
-        value = yearInputText,
-        placeholder = "YYYY",
-        unitHint = "YEAR",
-        onValueChange = { raw ->
-          haptics.tick()
-          val digits = raw.filter { it.isDigit() }.take(4)
-          yearInputText = digits
-          val parsed = digits.toIntOrNull()
-          if (digits.length == 4 && parsed != null && parsed in 1900..currentYear) {
-            onYearChange(parsed)
-          }
-        },
-        onFocusChange = { isYearFocused = it },
-        onFocusLost = {
-          val parsed = yearInputText.toIntOrNull()
-          val validYear = if (parsed != null && parsed in 1900..currentYear) parsed else selectedYear
-          onYearChange(validYear)
-          yearInputText = validYear.toString()
-        },
-        focusRequester = yearFocusRequester,
-        imeAction = ImeAction.Done,
-        onImeAction = {
-          haptics.confirm()
-          focusManager.clearFocus()
-        },
-        metrics = metrics,
-        testTag = "dob_year_selector",
-        modifier = Modifier.weight(0.96f),
+    // Unified Architectural DOB Block (matching Step 02 Height/Weight blocks)
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .writingFloatingBorder(isFocused = isAnyDobActive, cornerRadiusDp = 12.dp)
+        .padding(horizontal = 12.dp, vertical = 11.dp),
+      verticalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        // 1. DAY: Direct Numeric Input Cell
+        DirectNumberDobField(
+          label = stringResource(R.string.calib_dob_day),
+          value = dayInputText,
+          placeholder = "DD",
+          unitHint = "01-31",
+          onValueChange = { raw ->
+            haptics.tick()
+            val digits = raw.filter { it.isDigit() }.take(2)
+            dayInputText = digits
+            val parsed = digits.toIntOrNull()
+            if (parsed != null && parsed in 1..31) {
+              onDayChange(parsed)
+            }
+          },
+          onFocusChange = { isDayFocused = it },
+          onFocusLost = {
+            val parsed = dayInputText.toIntOrNull()
+            val validDay = (parsed ?: selectedDay).coerceIn(1, 31)
+            onDayChange(validDay)
+            dayInputText = validDay.toString().padStart(2, '0')
+          },
+          focusRequester = dayFocusRequester,
+          imeAction = ImeAction.Next,
+          onImeAction = {
+            haptics.selection()
+            focusManager.clearFocus()
+            showMonthPopup = true
+          },
+          metrics = metrics,
+          testTag = "dob_day_selector",
+          modifier = Modifier.weight(0.90f),
+        )
+
+        // 2. MONTH: Opens Realistic Floating 3D Monochrome Month Picker Modal
+        MonthPopupTriggerField(
+          label = stringResource(R.string.calib_dob_month),
+          selectedMonthZeroBased = selectedMonth,
+          isPopupOpen = showMonthPopup,
+          onClick = {
+            haptics.selection()
+            focusManager.clearFocus()
+            showMonthPopup = true
+          },
+          metrics = metrics,
+          testTag = "dob_month_selector",
+          modifier = Modifier.weight(1.18f),
+        )
+
+        // 3. YEAR: Direct Numeric Input Cell
+        DirectNumberDobField(
+          label = stringResource(R.string.calib_dob_year),
+          value = yearInputText,
+          placeholder = "YYYY",
+          unitHint = "YEAR",
+          onValueChange = { raw ->
+            haptics.tick()
+            val digits = raw.filter { it.isDigit() }.take(4)
+            yearInputText = digits
+            val parsed = digits.toIntOrNull()
+            if (digits.length == 4 && parsed != null && parsed in 1900..currentYear) {
+              onYearChange(parsed)
+            }
+          },
+          onFocusChange = { isYearFocused = it },
+          onFocusLost = {
+            val parsed = yearInputText.toIntOrNull()
+            val validYear = if (parsed != null && parsed in 1900..currentYear) parsed else selectedYear
+            onYearChange(validYear)
+            yearInputText = validYear.toString()
+          },
+          focusRequester = yearFocusRequester,
+          imeAction = ImeAction.Done,
+          onImeAction = {
+            haptics.confirm()
+            focusManager.clearFocus()
+          },
+          metrics = metrics,
+          testTag = "dob_year_selector",
+          modifier = Modifier.weight(0.98f),
+        )
+      }
+
+      // Integrated Bottom Chronometric Vernier Scale Strip (mirrors Height & Weight blocks)
+      DobChronometricScaleStrip(
+        progress = dayOfYearProgress,
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(10.dp),
       )
     }
   }
@@ -1487,6 +1847,91 @@ private fun DateOfBirthSelectorRow(
       metrics = metrics,
     )
   }
+}
+
+@Composable
+private fun DobChronometricScaleStrip(
+  progress: Float,
+  modifier: Modifier = Modifier,
+) {
+  val animatedProgress by animateFloatAsState(
+    targetValue = progress.coerceIn(0f, 1f),
+    animationSpec = tween(durationMillis = 240, easing = CalibrationEaseOut),
+    label = "dob_scale_progress",
+  )
+
+  Spacer(
+    modifier = modifier.drawWithCache {
+      val glowPaint = Paint().apply {
+        isAntiAlias = true
+        asFrameworkPaint().apply {
+          color = android.graphics.Color.argb(145, 255, 255, 255)
+          maskFilter = BlurMaskFilter(safeBlurRadius(4.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
+        }
+      }
+      onDrawBehind {
+        val w = size.width
+        val h = size.height
+        if (w <= 1f || h <= 1f) return@onDrawBehind
+
+        val tickCount = 24
+        val activeX = (w * animatedProgress).coerceIn(0f, w)
+
+        drawLine(
+          color = Zinc850,
+          start = Offset(0f, h * 0.55f),
+          end = Offset(w, h * 0.55f),
+          strokeWidth = 1.dp.toPx(),
+        )
+        if (activeX > 1f) {
+          drawLine(
+            brush = Brush.horizontalGradient(
+              colors = listOf(
+                Zinc600.copy(alpha = 0.45f),
+                Zinc300.copy(alpha = 0.85f),
+                PureWhite,
+              ),
+              startX = 0f,
+              endX = activeX,
+            ),
+            start = Offset(0f, h * 0.55f),
+            end = Offset(activeX, h * 0.55f),
+            strokeWidth = 1.3.dp.toPx(),
+            cap = StrokeCap.Round,
+          )
+        }
+
+        for (i in 0..tickCount) {
+          val x = (w / tickCount.toFloat()) * i
+          val isMajor = i % 6 == 0
+          val isPassed = x <= activeX + 0.5f
+          val tickH = if (isMajor) h * 0.72f else h * 0.38f
+          val topY = (h - tickH) * 0.55f
+          drawLine(
+            color = when {
+              isPassed && isMajor -> PureWhite.copy(alpha = 0.78f)
+              isPassed -> Zinc400.copy(alpha = 0.55f)
+              isMajor -> Zinc700
+              else -> Zinc800.copy(alpha = 0.65f)
+            },
+            start = Offset(x, topY),
+            end = Offset(x, topY + tickH),
+            strokeWidth = if (isMajor) 1.15.dp.toPx() else 0.85.dp.toPx(),
+            cap = StrokeCap.Round,
+          )
+        }
+
+        drawIntoCanvas { canvas ->
+          canvas.drawCircle(Offset(activeX, h * 0.55f), 2.8.dp.toPx(), glowPaint)
+        }
+        drawCircle(
+          color = PureWhite,
+          radius = 2.1.dp.toPx(),
+          center = Offset(activeX, h * 0.55f),
+        )
+      }
+    },
+  )
 }
 
 @Composable
@@ -1510,10 +1955,10 @@ private fun DirectNumberDobField(
   LaunchedEffect(isFocused) {
     onFocusChange(isFocused)
   }
-  val fieldFontSize = metrics.spScaled(13f, 11.2f, 15f)
+  val fieldFontSize = metrics.spScaled(14.2f, 12.4f, 16.5f)
   val centeredMonoStyle = remember(fieldFontSize) {
     TextStyle(
-      color = Zinc100,
+      color = PureWhite,
       fontFamily = JetBrainsMonoFontFamily,
       fontWeight = FontWeight.SemiBold,
       fontSize = fieldFontSize,
@@ -1525,82 +1970,98 @@ private fun DirectNumberDobField(
       ),
     )
   }
+  val cellShape = RoundedCornerShape(9.dp)
+  val cellBorderColor by animateColorAsState(
+    targetValue = if (isFocused) PureWhite.copy(alpha = 0.85f) else Zinc700.copy(alpha = 0.68f),
+    animationSpec = tween(durationMillis = 160),
+    label = "dob_cell_border_$label",
+  )
 
-  Column(modifier = modifier) {
-    Text(
-      text = label,
-      color = Zinc400,
-      fontFamily = JetBrainsMonoFontFamily,
-      fontWeight = FontWeight.Medium,
-      fontSize = metrics.spScaled(10f, 8.5f, 11.5f),
-      letterSpacing = 0.5.sp,
-    )
-    Spacer(modifier = Modifier.height(5.dp))
-
-    BasicTextField(
-      value = value,
-      onValueChange = onValueChange,
-      singleLine = true,
-      cursorBrush = SolidColor(PureWhite),
-      keyboardOptions = KeyboardOptions(
-        keyboardType = KeyboardType.Number,
-        imeAction = imeAction,
-      ),
-      keyboardActions = KeyboardActions(
-        onNext = { onImeAction() },
-        onDone = { onImeAction() },
-      ),
-      textStyle = centeredMonoStyle,
-      decorationBox = { innerTextField ->
+  BasicTextField(
+    value = value,
+    onValueChange = onValueChange,
+    singleLine = true,
+    cursorBrush = SolidColor(PureWhite),
+    keyboardOptions = KeyboardOptions(
+      keyboardType = KeyboardType.Number,
+      imeAction = imeAction,
+    ),
+    keyboardActions = KeyboardActions(
+      onNext = { onImeAction() },
+      onDone = { onImeAction() },
+    ),
+    textStyle = centeredMonoStyle,
+    decorationBox = { innerTextField ->
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(cellShape)
+          .background(
+            brush = Brush.verticalGradient(
+              colors = listOf(
+                if (isFocused) Color(0xFF1D1D25) else Color(0xFF17171D),
+                Color(0xFF0D0D11),
+              ),
+            ),
+          )
+          .border(width = 1.dp, color = cellBorderColor, shape = cellShape)
+          .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+      ) {
         Row(
-          modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 11.dp),
-          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
         ) {
-          Box(
-            modifier = Modifier.weight(1f),
-            contentAlignment = Alignment.CenterStart,
-          ) {
-            if (value.isEmpty()) {
-              Text(
-                text = placeholder,
-                style = centeredMonoStyle.copy(
-                  color = Zinc600,
-                  fontWeight = FontWeight.Normal,
-                ),
-                maxLines = 1,
-              )
-            }
-            innerTextField()
-          }
-
+          Text(
+            text = label,
+            color = if (isFocused) PureWhite else Zinc400,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = metrics.spScaled(8.8f, 7.8f, 10f),
+            letterSpacing = 0.5.sp,
+          )
           Text(
             text = unitHint,
-            color = if (isFocused) Zinc400 else Zinc700,
+            color = if (isFocused) Zinc300 else Zinc600,
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.Normal,
-            fontSize = metrics.spScaled(8.8f, 7.5f, 10f),
+            fontSize = metrics.spScaled(8.0f, 7.0f, 9.2f),
           )
         }
-      },
-      modifier = Modifier
-        .fillMaxWidth()
-        .height(metrics.selectHeight)
-        .writingFloatingBorder(isFocused = isFocused, cornerRadiusDp = 8.dp)
-        .focusRequester(focusRequester)
-        .onFocusChanged { state ->
-          isFocused = state.isFocused
-          if (state.isFocused) {
-            hadFocus = true
-          } else if (hadFocus) {
-            onFocusLost()
+
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 22.dp),
+          contentAlignment = Alignment.CenterStart,
+        ) {
+          if (value.isEmpty()) {
+            Text(
+              text = placeholder,
+              style = centeredMonoStyle.copy(
+                color = Zinc600,
+                fontWeight = FontWeight.Normal,
+              ),
+              maxLines = 1,
+            )
           }
+          innerTextField()
         }
-        .testTag(testTag),
-    )
-  }
+      }
+    },
+    modifier = modifier
+      .focusRequester(focusRequester)
+      .onFocusChanged { state ->
+        isFocused = state.isFocused
+        if (state.isFocused) {
+          hadFocus = true
+        } else if (hadFocus) {
+          onFocusLost()
+        }
+      }
+      .testTag(testTag),
+  )
 }
 
 @Composable
@@ -1614,60 +2075,77 @@ private fun MonthPopupTriggerField(
   modifier: Modifier = Modifier,
 ) {
   val safeIdx = selectedMonthZeroBased.coerceIn(0, 11)
-  val displayText = "${MonthShortNames[safeIdx]} (${(safeIdx + 1).toString().padStart(2, '0')})"
-  val boxShape = RoundedCornerShape(8.dp)
+  val monthShort = MonthShortNames[safeIdx]
+  val monthNum = (safeIdx + 1).toString().padStart(2, '0')
+  val boxShape = RoundedCornerShape(9.dp)
 
   val borderColor by animateColorAsState(
-    targetValue = if (isPopupOpen) PureWhite.copy(alpha = 0.90f) else Zinc700,
+    targetValue = if (isPopupOpen) PureWhite.copy(alpha = 0.90f) else Zinc600.copy(alpha = 0.80f),
     animationSpec = tween(durationMillis = 150),
     label = "month_trigger_border",
   )
 
-  Column(modifier = modifier) {
-    Text(
-      text = label,
-      color = Zinc400,
-      fontFamily = JetBrainsMonoFontFamily,
-      fontWeight = FontWeight.Medium,
-      fontSize = metrics.spScaled(10f, 8.5f, 11.5f),
-      letterSpacing = 0.5.sp,
-    )
-    Spacer(modifier = Modifier.height(5.dp))
+  Column(
+    modifier = modifier
+      .clip(boxShape)
+      .background(
+        brush = Brush.verticalGradient(
+          colors = listOf(
+            if (isPopupOpen) Color(0xFF202029) else Color(0xFF191920),
+            Color(0xFF0E0E13),
+          ),
+        ),
+      )
+      .border(width = 1.dp, color = borderColor, shape = boxShape)
+      .clickable(
+        role = Role.DropdownList,
+        onClick = onClick,
+      )
+      .padding(horizontal = 10.dp, vertical = 7.dp)
+      .testTag(testTag),
+    verticalArrangement = Arrangement.spacedBy(3.dp),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        text = label,
+        color = if (isPopupOpen) PureWhite else Zinc400,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = metrics.spScaled(8.8f, 7.8f, 10f),
+        letterSpacing = 0.5.sp,
+      )
+      Text(
+        text = "M-$monthNum",
+        color = Zinc400,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = metrics.spScaled(8.2f, 7.2f, 9.4f),
+      )
+    }
+
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .height(metrics.selectHeight)
-        .clip(boxShape)
-        .background(
-          brush = Brush.verticalGradient(
-            colors = listOf(
-              Color(0xFF141418),
-              ObsidianBlack,
-            ),
-          ),
-        )
-        .border(width = 1.dp, color = borderColor, shape = boxShape)
-        .clickable(
-          role = Role.DropdownList,
-          onClick = onClick,
-        )
-        .padding(horizontal = 11.dp)
-        .testTag(testTag),
+        .heightIn(min = 22.dp),
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.SpaceBetween,
     ) {
       Text(
-        text = displayText,
+        text = "$monthShort ($monthNum)",
         color = PureWhite,
         fontFamily = JetBrainsMonoFontFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = metrics.spScaled(12.5f, 11f, 14.5f),
+        fontSize = metrics.spScaled(13.5f, 11.8f, 15.6f),
         maxLines = 1,
       )
 
       UnfoldMoreIcon(
         color = if (isPopupOpen) PureWhite else Zinc300,
-        size = (16f * metrics.scale).coerceIn(14f, 19f).dp,
+        size = (15f * metrics.scale).coerceIn(13.5f, 18f).dp,
       )
     }
   }

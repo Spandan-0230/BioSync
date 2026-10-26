@@ -57,6 +57,7 @@
     <string name="personal_height_label">Height</string>
     <string name="personal_unit_cm">CM</string>
     <string name="personal_unit_inch">INCH</string>
+    <string name="personal_unit_feet">FEET</string>
     <string name="personal_weight_label">Weight</string>
     <string name="personal_weight_unit">kg</string>
     <string name="personal_bmi_header">BIOMETRIC MASS INDEX</string>
@@ -64,6 +65,6 @@
     <string name="personal_bmi_unit">kg/m²</string>
     <string name="personal_ideal_weight">OPTIMAL MASS RANGE</string>
     <string name="personal_resting_bmr">RESTING METABOLIC RATE</string>
-    <string name="personal_bmr_accuracy_note">70–85% estimated accuracy • Consult a fitness coach or medical professional for clinical precision</string>
+    <string name="personal_bmr_accuracy_note">Disclaimer: Resting Metabolic Rate (RMR) estimate has 70–85% accuracy. Consult a fitness coach or medical professional for clinical precision.</string>
     <string name="cd_back_to_profile">Return to Profile Section</string>
 </resources>
