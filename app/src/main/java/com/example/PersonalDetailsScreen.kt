@@ -57,6 +57,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -83,7 +84,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
@@ -105,25 +105,16 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.CaloriesEnd
-import com.example.ui.theme.CaloriesMid
-import com.example.ui.theme.CaloriesStart
-import com.example.ui.theme.CarbsEnd
 import com.example.ui.theme.CarbsMid
 import com.example.ui.theme.CarbsStart
 import com.example.ui.theme.CyberCyan
-import com.example.ui.theme.FatsEnd
 import com.example.ui.theme.FatsMid
-import com.example.ui.theme.FatsStart
-import com.example.ui.theme.HydrationEnd
-import com.example.ui.theme.HydrationMid
 import com.example.ui.theme.HydrationStart
 import com.example.ui.theme.InterFontFamily
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.ObsidianBlack
 import com.example.ui.theme.ProteinStart
 import com.example.ui.theme.PureWhite
-import com.example.ui.theme.StepsEnd
-import com.example.ui.theme.StepsMid
 import com.example.ui.theme.StepsStart
 import java.text.NumberFormat
 import java.util.Locale
@@ -133,6 +124,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -159,7 +151,7 @@ private enum class PersonalActiveEditSection {
   WEIGHT,
 }
 
-// Base Monochrome Obsidian, Zinc, Platinum & Pure White Palette
+// Strictly Monochrome Black, Zinc, Platinum & Pure White Palette (Matching Step 01 Profile Section)
 private val Zinc100 = Color(0xFFF4F4F5)
 private val Zinc200 = Color(0xFFE4E4E7)
 private val Zinc300 = Color(0xFFD4D4D8)
@@ -173,45 +165,31 @@ private val Zinc900 = Color(0xFF18181B)
 private val Zinc950 = Color(0xFF09090B)
 private val CardBgTop = Color(0xFF141417)
 private val CardBgBottom = Color(0xFF0A0A0C)
-private val MonochromeTrack = Color(0xFF151820)
-private val MonochromeTrackBorder = Color(0xFF282D3A)
+private val MonochromeTrack = Color(0xFF1A1A1E)
+private val MonochromeTrackBorder = Color(0xFF2E2E34)
 
-// Welcome Screen Progress Bar Color Spectrums Mapped to BMI Classification Zones:
-// 1. UNDERWEIGHT (<18.5): Welcome Screen Hydration / Protein Luminous Sky-Cyan -> Azure Blue
-private val BmiUnderweightPrimary = HydrationStart // #5BC0FF
-private val BmiUnderweightSecondary = ProteinStart // #7BE3FF
-private val BmiUnderweightDeep = HydrationMid // #0B76E0
-
-// 2. OPTIMAL (18.5–24.9): Welcome Screen Steps Luminous Mint -> Vibrant Emerald -> Cyber Cyan
-private val BmiOptimalPrimary = StepsStart // #7BF1A8
-private val BmiOptimalSecondary = StepsMid // #10B981
-private val BmiOptimalDeep = CyberCyan // #00F5D4
-
-// 3. OVERWEIGHT (25.0–29.9): Welcome Screen Carbs / Calories Lemon-Gold -> Rich Amber -> Solar Orange
-private val BmiOverweightPrimary = CarbsStart // #FFE97D
-private val BmiOverweightSecondary = CarbsMid // #FBBF24
-private val BmiOverweightDeep = CaloriesMid // #FF7A29
-
-// 4. OBESE (30.0+): Welcome Screen Calories / Fats Coral-Pink -> Vibrant Magenta-Coral -> Deep Ruby
-private val BmiObesePrimary = FatsStart // #FFA6C1
-private val BmiObeseSecondary = FatsMid // #FB4570
-private val BmiObeseDeep = CaloriesEnd // #FF2E63
-
-// Full-spectrum horizontal gradient across the BMI gauge bar using Welcome Screen progress bar colors
-private val WelcomeBmiSpectrumGradient = listOf(
-  HydrationEnd,      // 0.00 - Deep Royal Cobalt
-  HydrationMid,      // 0.12 - Rich Azure
-  HydrationStart,    // 0.22 - Luminous Sky Cyan (Underweight crest)
-  StepsStart,        // 0.30 - Luminous Mint (Optimal entry)
-  StepsMid,          // 0.45 - Vibrant Emerald (Optimal core)
-  CyberCyan,         // 0.56 - Cyber Cyan (Optimal ceiling)
-  CaloriesStart,     // 0.64 - Luminous Gold (Overweight entry)
-  CarbsMid,          // 0.72 - Rich Amber
-  CaloriesMid,       // 0.79 - Solar Orange (Overweight ceiling)
-  FatsMid,           // 0.88 - Vibrant Coral-Pink (Obese entry)
-  CaloriesEnd,       // 0.95 - Vibrant Coral-Magenta
-  FatsEnd,           // 1.00 - Deep Ruby-Crimson
+// Multi-Tone White / Liquid Chrome / Pearl Variant Gradient (Matches Step 01 Profile Section Progress Bar)
+private val WhiteVariantMulticolorGradient = listOf(
+  Color(0xFF7A7F87), // Gunmetal Platinum
+  Color(0xFFAEC0CE), // Cool Liquid Silver
+  Color(0xFFE6E9EF), // Satin Ice White
+  Color(0xFFF7EFE6), // Warm Pearl Champagne Highlight
+  Color(0xFFFFFFFF), // Pure Brilliant White Crest
 )
+
+// Solid Opaque Welcome-Screen Progress Bar Colors Used EXCLUSIVELY for the BMI Category Badge Box:
+// 1. UNDERWEIGHT (<18.5): Solid Hydration Sky-Blue -> Protein Cyan
+private val BadgeUnderweightStart = HydrationStart // #5BC0FF
+private val BadgeUnderweightEnd = ProteinStart     // #7BE3FF
+// 2. OPTIMAL RANGE (18.5–24.9): Solid Steps Mint-Emerald -> Cyber Cyan
+private val BadgeOptimalStart = StepsStart         // #7BF1A8
+private val BadgeOptimalEnd = CyberCyan            // #00F5D4
+// 3. OVERWEIGHT (25.0–29.9): Solid Carbs Lemon-Gold -> Rich Amber
+private val BadgeOverweightStart = CarbsStart      // #FFE97D
+private val BadgeOverweightEnd = CarbsMid          // #FBBF24
+// 4. OBESE CLASS (30.0+): Solid Fats Coral-Rose -> Calories Vibrant Crimson
+private val BadgeObeseStart = FatsMid              // #FB4570
+private val BadgeObeseEnd = CaloriesEnd            // #FF2E63
 
 private val PersonalEaseOut = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
 
@@ -225,17 +203,14 @@ private data class BmiTelemetryResult(
   val zone: BmiZone,
   val categoryLabel: String,
   val categoryCode: String,
-  val statusSummary: String,
   val gaugeProgress: Float,
   val idealMinKg: Float,
   val idealMaxKg: Float,
-  val deltaFromOptimalKg: Float,
   val restingBmrKcal: Int,
-  val estimatedTdeeKcal: Int,
   val sexCalibrationLabel: String,
-  val zonePrimaryColor: Color,
-  val zoneSecondaryColor: Color,
-  val zoneDeepColor: Color,
+  val badgeSolidStart: Color,
+  val badgeSolidEnd: Color,
+  val badgeTextColor: Color,
 )
 
 /**
@@ -264,8 +239,6 @@ private fun calculateBmiTelemetry(
 
   val idealMinKg = ((18.5f * heightM * heightM) * 10f).roundToInt() / 10f
   val idealMaxKg = ((24.9f * heightM * heightM) * 10f).roundToInt() / 10f
-  val optimalCenterKg = 21.7f * heightM * heightM
-  val deltaFromOptimalKg = ((safeKg - optimalCenterKg) * 10f).roundToInt() / 10f
 
   // Map BMI [13.5 .. 37.0] onto normalized [0.04 .. 0.96] spectrum gauge
   // Zone thresholds on gauge:
@@ -292,47 +265,42 @@ private fun calculateBmiTelemetry(
   val zone: BmiZone
   val categoryLabel: String
   val categoryCode: String
-  val statusSummary: String
-  val zonePrimaryColor: Color
-  val zoneSecondaryColor: Color
-  val zoneDeepColor: Color
+  val badgeSolidStart: Color
+  val badgeSolidEnd: Color
+  val badgeTextColor: Color
 
   when {
     bmiRaw < 18.5f -> {
       zone = BmiZone.UNDERWEIGHT
       categoryLabel = "UNDERWEIGHT"
       categoryCode = "SUB-OPTIMAL MASS"
-      statusSummary = "Below baseline mass density • +${formatOneDecimal(idealMinKg - safeKg)} kg to optimal floor"
-      zonePrimaryColor = BmiUnderweightPrimary
-      zoneSecondaryColor = BmiUnderweightSecondary
-      zoneDeepColor = BmiUnderweightDeep
+      badgeSolidStart = BadgeUnderweightStart
+      badgeSolidEnd = BadgeUnderweightEnd
+      badgeTextColor = ObsidianBlack
     }
     bmiRaw < 25.0f -> {
       zone = BmiZone.OPTIMAL
       categoryLabel = "OPTIMAL RANGE"
       categoryCode = "PEAK CALIBRATION"
-      statusSummary = "Somatic mass balanced within peak metabolic efficiency corridor"
-      zonePrimaryColor = BmiOptimalPrimary
-      zoneSecondaryColor = BmiOptimalSecondary
-      zoneDeepColor = BmiOptimalDeep
+      badgeSolidStart = BadgeOptimalStart
+      badgeSolidEnd = BadgeOptimalEnd
+      badgeTextColor = ObsidianBlack
     }
     bmiRaw < 30.0f -> {
       zone = BmiZone.OVERWEIGHT
       categoryLabel = "OVERWEIGHT"
       categoryCode = "ELEVATED MASS"
-      statusSummary = "Above baseline corridor • -${formatOneDecimal(safeKg - idealMaxKg)} kg to optimal ceiling"
-      zonePrimaryColor = BmiOverweightPrimary
-      zoneSecondaryColor = BmiOverweightSecondary
-      zoneDeepColor = BmiOverweightDeep
+      badgeSolidStart = BadgeOverweightStart
+      badgeSolidEnd = BadgeOverweightEnd
+      badgeTextColor = ObsidianBlack
     }
     else -> {
       zone = BmiZone.OBESE
       categoryLabel = "OBESE CLASS"
       categoryCode = "HIGH MASS INDEX"
-      statusSummary = "Elevated somatic load • -${formatOneDecimal(safeKg - idealMaxKg)} kg to optimal ceiling"
-      zonePrimaryColor = BmiObesePrimary
-      zoneSecondaryColor = BmiObeseSecondary
-      zoneDeepColor = BmiObeseDeep
+      badgeSolidStart = BadgeObeseStart
+      badgeSolidEnd = BadgeObeseEnd
+      badgeTextColor = PureWhite
     }
   }
 
@@ -349,7 +317,6 @@ private fun calculateBmiTelemetry(
   }
   val bmrRaw = (10f * safeKg) + (6.25f * safeCm) - (5f * safeAge) + sexConstant
   val bmr = bmrRaw.roundToInt().coerceAtLeast(if (isMale) 1050 else 880)
-  val estimatedTdeeKcal = (bmr * 1.375f).roundToInt()
 
   return BmiTelemetryResult(
     bmi = bmi,
@@ -358,17 +325,14 @@ private fun calculateBmiTelemetry(
     zone = zone,
     categoryLabel = categoryLabel,
     categoryCode = categoryCode,
-    statusSummary = statusSummary,
     gaugeProgress = gaugeProgress,
     idealMinKg = idealMinKg,
     idealMaxKg = idealMaxKg,
-    deltaFromOptimalKg = deltaFromOptimalKg,
     restingBmrKcal = bmr,
-    estimatedTdeeKcal = estimatedTdeeKcal,
     sexCalibrationLabel = sexCalibrationLabel,
-    zonePrimaryColor = zonePrimaryColor,
-    zoneSecondaryColor = zoneSecondaryColor,
-    zoneDeepColor = zoneDeepColor,
+    badgeSolidStart = badgeSolidStart,
+    badgeSolidEnd = badgeSolidEnd,
+    badgeTextColor = badgeTextColor,
   )
 }
 
@@ -481,13 +445,13 @@ private fun computePersonalMetrics(
     formFieldGap = formFieldGap,
     sectionToCardGap = sectionToCardGap,
     cardToCtaGap = cardToCtaGap,
-    unifiedBlockMinHeight = (96f * rawScale).coerceIn(86f, 110f).dp,
+    unifiedBlockMinHeight = (72f * rawScale).coerceIn(66f, 84f).dp,
     bmiCardMinHeight = (h * 0.31f).coerceIn(242f, 324f).dp,
     bmiCardPadding = (19f * rawScale).coerceIn(16f, 25f).dp,
     bmiSectionSpacing = (14f * rawScale).coerceIn(11f, 18f).dp,
     bmiPrimaryFontSize = scaledSp(41f, 32f, 49f),
     bmiUnitFontSize = scaledSp(13.5f, 11f, 16f),
-    bmiBarHeight = (12.5f * rawScale).coerceIn(10.5f, 15f).dp,
+    bmiBarHeight = (11.5f * rawScale).coerceIn(9.5f, 14f).dp,
     secondaryStatFontSize = scaledSp(16.5f, 13.8f, 19.5f),
     ctaHeight = (49f * rawScale).coerceIn(45f, 56f).dp,
   )
@@ -495,12 +459,12 @@ private fun computePersonalMetrics(
 
 /**
  * Floating dull border flash modifier while actively writing in Height or Weight inputs.
- * Matches the exact tactile behavior of Step 01 Profile Section inputs.
+ * Matches the exact tactile monochrome behavior of Step 01 Profile Section inputs.
  */
 @Composable
 private fun Modifier.personalWritingFloatingBorder(
   isFocused: Boolean,
-  cornerRadiusDp: Dp = 12.dp,
+  cornerRadiusDp: Dp = 10.dp,
 ): Modifier {
   val focusWeight by animateFloatAsState(
     targetValue = if (isFocused) 1f else 0f,
@@ -583,12 +547,7 @@ private fun Modifier.personalWritingFloatingBorder(
       }
 
       drawRoundRect(
-        brush = Brush.verticalGradient(
-          colors = listOf(
-            Color(0xFF141419),
-            Color(0xFF0A0A0D),
-          ),
-        ),
+        color = ObsidianBlack,
         topLeft = Offset.Zero,
         size = size,
         cornerRadius = cornerRadius,
@@ -597,8 +556,8 @@ private fun Modifier.personalWritingFloatingBorder(
         drawRoundRect(
           brush = Brush.verticalGradient(
             colors = listOf(
-              Color(0xFF1A1A22).copy(alpha = 0.90f * fw),
-              Color(0xFF0C0C10).copy(alpha = 0.90f * fw),
+              Color(0xFF141418).copy(alpha = 0.85f * fw),
+              Color(0xFF0B0B0E).copy(alpha = 0.85f * fw),
             ),
           ),
           topLeft = Offset.Zero,
@@ -610,13 +569,7 @@ private fun Modifier.personalWritingFloatingBorder(
       drawContent()
 
       drawRoundRect(
-        brush = Brush.verticalGradient(
-          colors = listOf(
-            PureWhite.copy(alpha = 0.16f),
-            Zinc700.copy(alpha = 0.72f),
-            Zinc850,
-          ),
-        ),
+        color = Zinc800,
         topLeft = Offset.Zero,
         size = size,
         cornerRadius = cornerRadius,
@@ -657,7 +610,7 @@ private fun Modifier.personalWritingFloatingBorder(
           topLeft = Offset.Zero,
           size = size,
           cornerRadius = cornerRadius,
-          style = Stroke(width = 1.4.dp.toPx()),
+          style = Stroke(width = 1.35.dp.toPx()),
         )
       }
     }
@@ -858,31 +811,14 @@ fun PersonalDetailsScreen(
         Column(
           modifier = Modifier.fillMaxWidth(),
         ) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            Text(
-              text = stringResource(R.string.personal_eyebrow),
-              color = Zinc400,
-              fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.Medium,
-              fontSize = metrics.spScaled(11.2f, 9.5f, 13f),
-              letterSpacing = 1.6.sp,
-            )
-            if (subjectName.isNotBlank()) {
-              Text(
-                text = "${subjectName.uppercase(Locale.US)} • ${selectedSex.uppercase(Locale.US)} • ${ageYears}Y",
-                color = Zinc500,
-                fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.Medium,
-                fontSize = metrics.spScaled(9.8f, 8.2f, 11.2f),
-                letterSpacing = 0.7.sp,
-                maxLines = 1,
-              )
-            }
-          }
+          Text(
+            text = stringResource(R.string.personal_eyebrow),
+            color = Zinc400,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = metrics.spScaled(11.2f, 9.5f, 13f),
+            letterSpacing = 1.6.sp,
+          )
           Spacer(modifier = Modifier.height((4f * metrics.scale).dp))
           Text(
             text = stringResource(R.string.personal_title),
@@ -907,7 +843,7 @@ fun PersonalDetailsScreen(
 
         Spacer(modifier = Modifier.height(metrics.titleToFirstFieldGap))
 
-        // 2. Single Unified Height Card (Primary Editable Metric + Clickable Bottom Conversion Swap)
+        // 2. Single Unified Height Block (Primary Editable Metric + Small Clickable Conversion Line Below + Hold-to-Repeat Steppers)
         HeightUnifiedCardSection(
           heightCm = heightCm,
           selectedUnit = selectedHeightUnit,
@@ -933,7 +869,7 @@ fun PersonalDetailsScreen(
 
         Spacer(modifier = Modifier.height(metrics.formFieldGap))
 
-        // 3. Single Unified Weight Card (Primary Editable Metric + Clickable Bottom Conversion Swap + Lively Steppers)
+        // 3. Single Unified Weight Block (Primary Editable Metric + Small Clickable Conversion Line Below + Hold-to-Repeat Steppers)
         WeightUnifiedCardSection(
           weightKg = weightKg,
           selectedUnit = selectedWeightUnit,
@@ -959,7 +895,8 @@ fun PersonalDetailsScreen(
 
         Spacer(modifier = Modifier.height(metrics.sectionToCardGap))
 
-        // 4. Impressive Animated BMI & Scientific Metabolic Calculation Card (with Welcome Screen Progress Colors)
+        // 4. Impressive Animated BMI & Scientific Metabolic Calculation Card
+        // (Strictly Black & White like Profile Section, with SOLID Welcome-Screen Progress Bar Color ONLY on the Category Badge)
         BiometricMassIndexCard(
           telemetry = bmiTelemetry,
           animatedBmi = animatedBmiValue,
@@ -1066,13 +1003,12 @@ private fun PersonalHeaderBar(
       )
     }
 
-    // Right Luminous Status Dot
+    // Right Luminous Status Dot (PureWhite matching BioSync header title)
     Box(
       modifier = Modifier.size(48.dp),
       contentAlignment = Alignment.CenterEnd,
     ) {
-      PersonalLuminousColorDot(
-        color = PureWhite,
+      PersonalLuminousWhiteDot(
         size = (8.5f * metrics.scale).coerceIn(7f, 10.5f).dp,
       )
     }
@@ -1080,8 +1016,7 @@ private fun PersonalHeaderBar(
 }
 
 @Composable
-private fun PersonalLuminousColorDot(
-  color: Color,
+private fun PersonalLuminousWhiteDot(
   size: Dp,
   modifier: Modifier = Modifier,
 ) {
@@ -1089,13 +1024,12 @@ private fun PersonalLuminousColorDot(
     modifier = modifier
       .size(size)
       .drawWithCache {
-        val argb = color.copy(alpha = 0.65f).toArgb()
         val glowPaint = Paint().apply {
           isAntiAlias = true
           asFrameworkPaint().apply {
-            this.color = argb
+            color = android.graphics.Color.argb(140, 255, 255, 255)
             maskFilter = BlurMaskFilter(
-              safeBlurRadius(this@drawWithCache.size.minDimension * 0.72f),
+              safeBlurRadius(this@drawWithCache.size.minDimension * 0.65f),
               BlurMaskFilter.Blur.NORMAL,
             )
           }
@@ -1103,10 +1037,10 @@ private fun PersonalLuminousColorDot(
         onDrawBehind {
           val r = (this.size.minDimension / 2f).coerceAtLeast(1f)
           drawIntoCanvas { canvas ->
-            canvas.drawCircle(center, r * 1.25f, glowPaint)
+            canvas.drawCircle(center, r * 1.15f, glowPaint)
           }
           drawCircle(
-            color = color,
+            color = PureWhite,
             radius = r,
             center = center,
           )
@@ -1234,13 +1168,14 @@ private fun StepTwoShinyGlowBar(
 }
 
 /**
- * Single Unified Height Section:
- * - Everything lives in ONE sleek block (no extra side-by-side conversion block, no external toggle bar,
- *   and no "FOCUS: INCH • LIVE CM" text).
- * - When CM is active (default), the primary top input edits CM (with lively - / + steppers),
- *   and the small bottom portion displays the converted feet/inches & inches (e.g. "5' 07.7" • 67.7 in").
- * - Tapping that small bottom portion swaps the active editable metric to INCH at the top,
- *   while CM ("172.0 cm • 1.72 m") moves down into the small clickable portion below.
+ * Single Unified Height Block:
+ * - Everything is inside ONE single sleek block (no separate conversion block or external toggle buttons,
+ *   and no "Focus: Inch Live CM" label).
+ * - Top line: Primary editable height number + unit badge (`cm` by default, or `in` when swapped).
+ * - Small secondary line directly underneath in `Zinc400` monospace: shows the converted feet/inches (`5' 07.7" • 67.7 in`)
+ *   when CM is active. Tapping that small text portion swaps the active editable metric to INCH at the top,
+ *   and brings CM (`172.0 cm • 1.72 m`) down into that small text line.
+ * - Right side: Tactile `-` / `+` buttons that update lively on tap AND continuously update while held down.
  */
 @Composable
 private fun HeightUnifiedCardSection(
@@ -1257,6 +1192,8 @@ private fun HeightUnifiedCardSection(
   val focusRequester = remember { FocusRequester() }
   var isHeightFocused by remember { mutableStateOf(false) }
   var hadFocus by remember { mutableStateOf(false) }
+  val latestHeightCm by rememberUpdatedState(heightCm)
+  val latestSelectedUnit by rememberUpdatedState(selectedUnit)
 
   LaunchedEffect(isHeightFocused) {
     onFocusChange(isHeightFocused)
@@ -1282,12 +1219,17 @@ private fun HeightUnifiedCardSection(
     }
   }
 
-  // Helper for stepper buttons so BOTH heightCm and inputText update immediately (even while focused)
-  val applyHeightStep: (Float) -> Unit = { deltaCm ->
+  // Stepper handler using latestHeightCm so holding down + / - continuously updates live
+  val stepHeightBy: (Boolean) -> Unit = { isIncrement ->
     haptics.step()
-    val updatedCm = (heightCm + deltaCm).coerceIn(100f, 240f)
+    val unit = latestSelectedUnit
+    val deltaCm = when (unit) {
+      HeightUnit.CM -> if (isIncrement) 1.0f else -1.0f
+      HeightUnit.INCH -> if (isIncrement) (0.5f * 2.54f) else (-0.5f * 2.54f)
+    }
+    val updatedCm = (latestHeightCm + deltaCm).coerceIn(100f, 240f)
     onHeightCmChange(updatedCm)
-    inputText = formatHeightForUnit(updatedCm, selectedUnit)
+    inputText = formatHeightForUnit(updatedCm, unit)
   }
 
   val commitHeightInput: () -> Unit = {
@@ -1304,12 +1246,12 @@ private fun HeightUnifiedCardSection(
     }
   }
 
-  val primaryFontSize = metrics.spScaled(24f, 20f, 28f)
+  val primaryFontSize = metrics.spScaled(22f, 18.5f, 26f)
   val centeredPrimaryStyle = remember(primaryFontSize) {
     TextStyle(
       color = PureWhite,
       fontFamily = JetBrainsMonoFontFamily,
-      fontWeight = FontWeight.Bold,
+      fontWeight = FontWeight.SemiBold,
       fontSize = primaryFontSize,
       lineHeight = primaryFontSize * 1.12f,
       letterSpacing = (-0.5).sp,
@@ -1327,55 +1269,35 @@ private fun HeightUnifiedCardSection(
   } else {
     "${formatOneDecimal(heightCm)} cm  •  ${String.format(Locale.US, "%.2f", heightCm / 100f)} m"
   }
-  val bottomSwapHint = if (selectedUnit == HeightUnit.CM) {
-    "⇌ TAP FOR INCH"
-  } else {
-    "⇌ TAP FOR CM"
-  }
 
   Column(
     modifier = modifier.fillMaxWidth(),
     verticalArrangement = Arrangement.spacedBy(metrics.labelToBoxGap),
   ) {
-    // Clean Section Label Row (Removed "FOCUS: INCH • LIVE CM" clutter)
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Text(
-        text = stringResource(R.string.personal_height_label),
-        color = Zinc200,
-        fontFamily = InterFontFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = metrics.spScaled(12.5f, 11f, 14.5f),
-      )
-      Text(
-        text = if (selectedUnit == HeightUnit.CM) "METRIC • CM" else "IMPERIAL • INCH",
-        color = Zinc500,
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = metrics.spScaled(9.6f, 8.4f, 11f),
-        letterSpacing = 0.8.sp,
-      )
-    }
+    // Clean Section Label (matches Full Name / Biological Sex / Date of Birth on Step 01)
+    Text(
+      text = stringResource(R.string.personal_height_label),
+      color = Zinc300,
+      fontFamily = InterFontFamily,
+      fontWeight = FontWeight.Medium,
+      fontSize = metrics.spScaled(12.2f, 11f, 14.5f),
+    )
 
     // ONE SINGLE UNIFIED HEIGHT BLOCK
-    Column(
+    Row(
       modifier = Modifier
         .fillMaxWidth()
         .heightIn(min = metrics.unifiedBlockMinHeight)
-        .personalWritingFloatingBorder(isFocused = isHeightFocused, cornerRadiusDp = 12.dp)
-        .padding(horizontal = 15.dp, vertical = 11.dp),
-      verticalArrangement = Arrangement.SpaceBetween,
+        .personalWritingFloatingBorder(isFocused = isHeightFocused, cornerRadiusDp = 10.dp)
+        .padding(horizontal = 14.dp, vertical = 10.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-      // Top Row: Primary Editable Input + Active Unit Badge + Lively - / + Steppers
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+      // Left Column: Primary Editable Value on Top + Small Clickable Conversion Text Directly Underneath
+      Column(
+        modifier = Modifier.weight(1f),
+        verticalArrangement = Arrangement.Center,
       ) {
-        // Left: Primary Editable Height Value + Active Unit Pill
         BasicTextField(
           value = inputText,
           onValueChange = { raw ->
@@ -1410,13 +1332,8 @@ private fun HeightUnifiedCardSection(
             Row(
               verticalAlignment = Alignment.CenterVertically,
             ) {
-              PersonalLuminousColorDot(
-                color = if (isHeightFocused) CyberCyan else PureWhite,
-                size = 6.dp,
-              )
-              Spacer(modifier = Modifier.width(10.dp))
               Box(
-                modifier = Modifier.widthIn(min = 58.dp, max = 128.dp),
+                modifier = Modifier.widthIn(min = 52.dp, max = 118.dp),
                 contentAlignment = Alignment.CenterStart,
               ) {
                 if (inputText.isEmpty()) {
@@ -1431,26 +1348,18 @@ private fun HeightUnifiedCardSection(
                 }
                 innerTextField()
               }
-              Spacer(modifier = Modifier.width(8.dp))
-              Box(
-                modifier = Modifier
-                  .clip(RoundedCornerShape(6.dp))
-                  .background(PureWhite.copy(alpha = 0.12f))
-                  .border(0.8.dp, PureWhite.copy(alpha = 0.34f), RoundedCornerShape(6.dp))
-                  .padding(horizontal = 8.dp, vertical = 3.dp),
-              ) {
-                Text(
-                  text = primaryUnitSuffix,
-                  color = PureWhite,
-                  fontFamily = JetBrainsMonoFontFamily,
-                  fontWeight = FontWeight.SemiBold,
-                  fontSize = metrics.spScaled(11.8f, 10f, 13.8f),
-                )
-              }
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = primaryUnitSuffix,
+                color = Zinc400,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = metrics.spScaled(13f, 11f, 15f),
+              )
             }
           },
           modifier = Modifier
-            .weight(1f)
+            .fillMaxWidth()
             .focusRequester(focusRequester)
             .onFocusChanged { state ->
               isHeightFocused = state.isFocused
@@ -1463,81 +1372,63 @@ private fun HeightUnifiedCardSection(
             .testTag("height_primary_input"),
         )
 
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
-        // Right: Precision Tactile - / + Steppers (Lively updates both CM and INCH immediately)
+        // Small secondary conversion text directly below the primary number inside the same block:
+        // Clicking this small portion swaps the active editable metric and brings the other metric down here.
         Row(
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .clickable(
+              role = Role.Button,
+              onClick = {
+                val nextUnit = if (selectedUnit == HeightUnit.CM) HeightUnit.INCH else HeightUnit.CM
+                onSelectUnit(nextUnit)
+                inputText = formatHeightForUnit(heightCm, nextUnit)
+              },
+            )
+            .padding(vertical = 2.dp, horizontal = 2.dp)
+            .testTag("height_secondary_conversion_card"),
           verticalAlignment = Alignment.CenterVertically,
         ) {
-          MicroStepperButton(
-            symbol = "−",
-            onClick = {
-              val deltaCm = if (selectedUnit == HeightUnit.CM) -1f else -1.27f
-              applyHeightStep(deltaCm)
-            },
-            metrics = metrics,
-            testTag = "height_decrement_button",
+          Text(
+            text = bottomConvertedReadout,
+            color = Zinc400,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = metrics.spScaled(10.6f, 9.2f, 12.2f),
+            letterSpacing = 0.2.sp,
+            modifier = Modifier.testTag("height_converted_value_text"),
           )
-          MicroStepperButton(
-            symbol = "+",
-            onClick = {
-              val deltaCm = if (selectedUnit == HeightUnit.CM) 1f else 1.27f
-              applyHeightStep(deltaCm)
-            },
-            metrics = metrics,
-            testTag = "height_increment_button",
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(
+            text = "⇅",
+            color = Zinc500,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = metrics.spScaled(10.5f, 9f, 12f),
           )
         }
       }
 
-      Spacer(modifier = Modifier.height(8.dp))
+      Spacer(modifier = Modifier.width(12.dp))
 
-      HorizontalDivider(
-        thickness = 0.8.dp,
-        color = Zinc800.copy(alpha = 0.75f),
-      )
-
-      Spacer(modifier = Modifier.height(7.dp))
-
-      // Bottom Clickable Conversion Portion (Exact text size & color section where feet/inches is shown;
-      // clicking this small portion swaps the active unit so the user can edit in that metric and the other comes down)
-      val swapRowShape = RoundedCornerShape(6.dp)
+      // Right Side: Tactile Monochrome - / + Steppers (Tap or Hold to Continuously Update)
       Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(swapRowShape)
-          .background(Color(0xFF121318).copy(alpha = 0.75f))
-          .border(0.7.dp, Zinc800.copy(alpha = 0.9f), swapRowShape)
-          .clickable(
-            role = Role.Button,
-            onClick = {
-              val nextUnit = if (selectedUnit == HeightUnit.CM) HeightUnit.INCH else HeightUnit.CM
-              onSelectUnit(nextUnit)
-              inputText = formatHeightForUnit(heightCm, nextUnit)
-            },
-          )
-          .padding(horizontal = 10.dp, vertical = 6.dp)
-          .testTag("height_secondary_conversion_card"),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        Text(
-          text = bottomConvertedReadout,
-          color = Zinc300,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.Medium,
-          fontSize = metrics.spScaled(10.8f, 9.4f, 12.4f),
-          letterSpacing = 0.2.sp,
-          modifier = Modifier.testTag("height_converted_value_text"),
+        HoldableStepperButton(
+          symbol = "−",
+          onStep = { stepHeightBy(false) },
+          metrics = metrics,
+          testTag = "height_decrement_button",
         )
-        Text(
-          text = bottomSwapHint,
-          color = Zinc400,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.SemiBold,
-          fontSize = metrics.spScaled(9.2f, 8f, 10.6f),
-          letterSpacing = 0.6.sp,
+        HoldableStepperButton(
+          symbol = "+",
+          onStep = { stepHeightBy(true) },
+          metrics = metrics,
+          testTag = "height_increment_button",
         )
       }
     }
@@ -1545,12 +1436,13 @@ private fun HeightUnifiedCardSection(
 }
 
 /**
- * Single Unified Weight Section:
- * - Redesigned to match the sleek, high-contrast single-block architecture of Height.
- * - Supports primary KG (default) with live converted LBS & stones in the small clickable bottom portion.
- * - Tapping the small bottom conversion portion swaps LBS to the primary editable top field and moves KG down.
- * - Fixes the - / + stepper buttons so clicking - or + lively and immediately updates BOTH the primary weight input text
- *   and the secondary conversion readout (even while the input field is focused).
+ * Single Unified Weight Block:
+ * - Redesigned to match the exact sleek single-block layout of Height.
+ * - Top line: Primary editable weight number (`62.0 kg` by default, or `lbs` when swapped).
+ * - Small secondary line directly underneath in `Zinc400` monospace: shows live converted `136.7 lbs • 9 st 9.7 lb`
+ *   (and clicking it swaps between editing in `kg` and `lbs`).
+ * - Right side: Tactile `-` / `+` buttons that update BOTH the primary weight and the converted readout
+ *   lively on tap AND continuously when held down.
  */
 @Composable
 private fun WeightUnifiedCardSection(
@@ -1567,6 +1459,8 @@ private fun WeightUnifiedCardSection(
   val focusRequester = remember { FocusRequester() }
   var isWeightFocused by remember { mutableStateOf(false) }
   var hadFocus by remember { mutableStateOf(false) }
+  val latestWeightKg by rememberUpdatedState(weightKg)
+  val latestSelectedUnit by rememberUpdatedState(selectedUnit)
 
   LaunchedEffect(isWeightFocused) {
     onFocusChange(isWeightFocused)
@@ -1592,18 +1486,23 @@ private fun WeightUnifiedCardSection(
     }
   }
 
-  // Lively stepper helper: immediately updates BOTH weightKg state AND weightInputText even while focused
-  val applyWeightStep: (Float) -> Unit = { deltaInSelectedUnit ->
+  // Stepper handler using latestWeightKg so holding down + / - continuously updates BOTH weight and lbs live
+  val stepWeightBy: (Boolean) -> Unit = { isIncrement ->
     haptics.step()
-    val updatedKg = when (selectedUnit) {
-      WeightUnit.KG -> (weightKg + deltaInSelectedUnit).coerceIn(25f, 260f)
+    val unit = latestSelectedUnit
+    val updatedKg = when (unit) {
+      WeightUnit.KG -> {
+        val deltaKg = if (isIncrement) 0.5f else -0.5f
+        (latestWeightKg + deltaKg).coerceIn(25f, 260f)
+      }
       WeightUnit.LBS -> {
-        val nextLbs = (weightKg * 2.20462f) + deltaInSelectedUnit
+        val deltaLbs = if (isIncrement) 1.0f else -1.0f
+        val nextLbs = (latestWeightKg * 2.20462f) + deltaLbs
         (nextLbs / 2.20462f).coerceIn(25f, 260f)
       }
     }
     onWeightKgChange(updatedKg)
-    weightInputText = formatWeightForUnit(updatedKg, selectedUnit)
+    weightInputText = formatWeightForUnit(updatedKg, unit)
   }
 
   val commitWeightInput: () -> Unit = {
@@ -1620,12 +1519,12 @@ private fun WeightUnifiedCardSection(
     }
   }
 
-  val primaryFontSize = metrics.spScaled(24f, 20f, 28f)
+  val primaryFontSize = metrics.spScaled(22f, 18.5f, 26f)
   val centeredWeightStyle = remember(primaryFontSize) {
     TextStyle(
       color = PureWhite,
       fontFamily = JetBrainsMonoFontFamily,
-      fontWeight = FontWeight.Bold,
+      fontWeight = FontWeight.SemiBold,
       fontSize = primaryFontSize,
       lineHeight = primaryFontSize * 1.12f,
       letterSpacing = (-0.5).sp,
@@ -1643,53 +1542,34 @@ private fun WeightUnifiedCardSection(
   } else {
     "${formatOneDecimal(weightKg)} kg  •  ${formatStonesPounds(weightLbs)}"
   }
-  val bottomSwapHint = if (selectedUnit == WeightUnit.KG) {
-    "⇌ TAP FOR LBS"
-  } else {
-    "⇌ TAP FOR KG"
-  }
 
   Column(
     modifier = modifier.fillMaxWidth(),
     verticalArrangement = Arrangement.spacedBy(metrics.labelToBoxGap),
   ) {
-    // Section Label Row
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Text(
-        text = stringResource(R.string.personal_weight_label),
-        color = Zinc200,
-        fontFamily = InterFontFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = metrics.spScaled(12.5f, 11f, 14.5f),
-      )
-      Text(
-        text = if (selectedUnit == WeightUnit.KG) "METRIC • KG" else "IMPERIAL • LBS",
-        color = Zinc500,
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = metrics.spScaled(9.6f, 8.4f, 11f),
-        letterSpacing = 0.8.sp,
-      )
-    }
+    // Clean Section Label
+    Text(
+      text = stringResource(R.string.personal_weight_label),
+      color = Zinc300,
+      fontFamily = InterFontFamily,
+      fontWeight = FontWeight.Medium,
+      fontSize = metrics.spScaled(12.2f, 11f, 14.5f),
+    )
 
     // ONE SINGLE UNIFIED WEIGHT BLOCK
-    Column(
+    Row(
       modifier = Modifier
         .fillMaxWidth()
         .heightIn(min = metrics.unifiedBlockMinHeight)
-        .personalWritingFloatingBorder(isFocused = isWeightFocused, cornerRadiusDp = 12.dp)
-        .padding(horizontal = 15.dp, vertical = 11.dp),
-      verticalArrangement = Arrangement.SpaceBetween,
+        .personalWritingFloatingBorder(isFocused = isWeightFocused, cornerRadiusDp = 10.dp)
+        .padding(horizontal = 14.dp, vertical = 10.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-      // Top Row: Primary Editable Weight Input + Active Unit Pill + Lively - / + Steppers
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+      // Left Column: Primary Editable Weight on Top + Small Clickable Conversion Line Directly Underneath
+      Column(
+        modifier = Modifier.weight(1f),
+        verticalArrangement = Arrangement.Center,
       ) {
         BasicTextField(
           value = weightInputText,
@@ -1725,13 +1605,8 @@ private fun WeightUnifiedCardSection(
             Row(
               verticalAlignment = Alignment.CenterVertically,
             ) {
-              PersonalLuminousColorDot(
-                color = if (isWeightFocused) CyberCyan else PureWhite,
-                size = 6.dp,
-              )
-              Spacer(modifier = Modifier.width(10.dp))
               Box(
-                modifier = Modifier.widthIn(min = 58.dp, max = 128.dp),
+                modifier = Modifier.widthIn(min = 52.dp, max = 118.dp),
                 contentAlignment = Alignment.CenterStart,
               ) {
                 if (weightInputText.isEmpty()) {
@@ -1746,26 +1621,18 @@ private fun WeightUnifiedCardSection(
                 }
                 innerTextField()
               }
-              Spacer(modifier = Modifier.width(8.dp))
-              Box(
-                modifier = Modifier
-                  .clip(RoundedCornerShape(6.dp))
-                  .background(PureWhite.copy(alpha = 0.12f))
-                  .border(0.8.dp, PureWhite.copy(alpha = 0.34f), RoundedCornerShape(6.dp))
-                  .padding(horizontal = 8.dp, vertical = 3.dp),
-              ) {
-                Text(
-                  text = primaryUnitSuffix,
-                  color = PureWhite,
-                  fontFamily = JetBrainsMonoFontFamily,
-                  fontWeight = FontWeight.SemiBold,
-                  fontSize = metrics.spScaled(11.8f, 10f, 13.8f),
-                )
-              }
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = primaryUnitSuffix,
+                color = Zinc400,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = metrics.spScaled(13f, 11f, 15f),
+              )
             }
           },
           modifier = Modifier
-            .weight(1f)
+            .fillMaxWidth()
             .focusRequester(focusRequester)
             .onFocusChanged { state ->
               isWeightFocused = state.isFocused
@@ -1778,135 +1645,162 @@ private fun WeightUnifiedCardSection(
             .testTag("weight_kg_input"),
         )
 
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
-        // Right: Precision - / + Steppers (Immediately updates both primary input text & converted readout)
+        // Small secondary conversion text directly below the primary weight number inside the same block
         Row(
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .clickable(
+              role = Role.Button,
+              onClick = {
+                val nextUnit = if (selectedUnit == WeightUnit.KG) WeightUnit.LBS else WeightUnit.KG
+                onSelectUnit(nextUnit)
+                weightInputText = formatWeightForUnit(weightKg, nextUnit)
+              },
+            )
+            .padding(vertical = 2.dp, horizontal = 2.dp)
+            .testTag("weight_lbs_conversion_text"),
           verticalAlignment = Alignment.CenterVertically,
         ) {
-          MicroStepperButton(
-            symbol = "−",
-            onClick = {
-              val stepDelta = if (selectedUnit == WeightUnit.KG) -0.5f else -1.0f
-              applyWeightStep(stepDelta)
-            },
-            metrics = metrics,
-            testTag = "weight_decrement_button",
+          Text(
+            text = bottomConvertedReadout,
+            color = Zinc400,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = metrics.spScaled(10.6f, 9.2f, 12.2f),
+            letterSpacing = 0.2.sp,
           )
-          MicroStepperButton(
-            symbol = "+",
-            onClick = {
-              val stepDelta = if (selectedUnit == WeightUnit.KG) 0.5f else 1.0f
-              applyWeightStep(stepDelta)
-            },
-            metrics = metrics,
-            testTag = "weight_increment_button",
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(
+            text = "⇅",
+            color = Zinc500,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = metrics.spScaled(10.5f, 9f, 12f),
           )
         }
       }
 
-      Spacer(modifier = Modifier.height(8.dp))
+      Spacer(modifier = Modifier.width(12.dp))
 
-      HorizontalDivider(
-        thickness = 0.8.dp,
-        color = Zinc800.copy(alpha = 0.75f),
-      )
-
-      Spacer(modifier = Modifier.height(7.dp))
-
-      // Bottom Clickable Conversion Portion (Swaps between KG and LBS when clicked)
-      val swapRowShape = RoundedCornerShape(6.dp)
+      // Right Side: Tactile Monochrome - / + Steppers (Tap or Hold to Continuously Update)
       Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(swapRowShape)
-          .background(Color(0xFF121318).copy(alpha = 0.75f))
-          .border(0.7.dp, Zinc800.copy(alpha = 0.9f), swapRowShape)
-          .clickable(
-            role = Role.Button,
-            onClick = {
-              val nextUnit = if (selectedUnit == WeightUnit.KG) WeightUnit.LBS else WeightUnit.KG
-              onSelectUnit(nextUnit)
-              weightInputText = formatWeightForUnit(weightKg, nextUnit)
-            },
-          )
-          .padding(horizontal = 10.dp, vertical = 6.dp)
-          .testTag("weight_lbs_conversion_text"),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        Text(
-          text = bottomConvertedReadout,
-          color = Zinc300,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.Medium,
-          fontSize = metrics.spScaled(10.8f, 9.4f, 12.4f),
-          letterSpacing = 0.2.sp,
+        HoldableStepperButton(
+          symbol = "−",
+          onStep = { stepWeightBy(false) },
+          metrics = metrics,
+          testTag = "weight_decrement_button",
         )
-        Text(
-          text = bottomSwapHint,
-          color = Zinc400,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.SemiBold,
-          fontSize = metrics.spScaled(9.2f, 8f, 10.6f),
-          letterSpacing = 0.6.sp,
+        HoldableStepperButton(
+          symbol = "+",
+          onStep = { stepWeightBy(true) },
+          metrics = metrics,
+          testTag = "weight_increment_button",
         )
       }
     }
   }
 }
 
+/**
+ * Tactile Monochrome Stepper Button with Press-and-Hold Continuous Acceleration:
+ * - Single tap fires `onStep()` immediately.
+ * - Holding down on `+` or `−` continuously updates the value with accelerating cadence.
+ */
 @Composable
-private fun MicroStepperButton(
+private fun HoldableStepperButton(
   symbol: String,
-  onClick: () -> Unit,
+  onStep: () -> Unit,
   metrics: PersonalResponsiveMetrics,
   testTag: String,
 ) {
   val interactionSource = remember { MutableInteractionSource() }
   val isPressed by interactionSource.collectIsPressedAsState()
-  val shape = RoundedCornerShape(7.dp)
+  val currentOnStep by rememberUpdatedState(onStep)
+  var didRepeatWhileHeld by remember { mutableStateOf(false) }
+
+  LaunchedEffect(isPressed) {
+    if (isPressed) {
+      didRepeatWhileHeld = false
+      delay(300L)
+      var ticks = 0
+      while (isPressed) {
+        didRepeatWhileHeld = true
+        currentOnStep()
+        ticks++
+        val stepInterval = when {
+          ticks > 18 -> 42L
+          ticks > 8 -> 65L
+          else -> 95L
+        }
+        delay(stepInterval)
+      }
+    }
+  }
+
+  val btnSize = (34f * metrics.scale).coerceIn(30f, 38f).dp
+  val shape = RoundedCornerShape(8.dp)
   Box(
     modifier = Modifier
-      .size((28f * metrics.scale).coerceIn(24f, 32f).dp)
+      .size(btnSize)
       .clip(shape)
       .background(
-        if (isPressed) PureWhite.copy(alpha = 0.22f) else Zinc900,
+        brush = if (isPressed) {
+          Brush.verticalGradient(
+            colors = listOf(
+              PureWhite,
+              Color(0xFFE4E4E7),
+            ),
+          )
+        } else {
+          Brush.verticalGradient(
+            colors = listOf(
+              Color(0xFF1A1A20),
+              Color(0xFF101014),
+            ),
+          )
+        },
       )
       .border(
         width = 1.dp,
-        color = if (isPressed) PureWhite.copy(alpha = 0.65f) else Zinc700,
+        color = if (isPressed) PureWhite else Zinc700,
         shape = shape,
       )
       .clickable(
         interactionSource = interactionSource,
         indication = ripple(color = PureWhite),
         role = Role.Button,
-        onClick = onClick,
+        onClick = {
+          if (!didRepeatWhileHeld) {
+            currentOnStep()
+          }
+          didRepeatWhileHeld = false
+        },
       )
       .testTag(testTag),
     contentAlignment = Alignment.Center,
   ) {
     Text(
       text = symbol,
-      color = PureWhite,
+      color = if (isPressed) ObsidianBlack else PureWhite,
       fontFamily = JetBrainsMonoFontFamily,
-      fontWeight = FontWeight.Bold,
-      fontSize = metrics.spScaled(14f, 12f, 16.5f),
+      fontWeight = FontWeight.SemiBold,
+      fontSize = metrics.spScaled(15.5f, 13.5f, 18f),
     )
   }
 }
 
 /**
  * Impressive Animated BMI & Scientific Metabolic Calculation Card:
- * - Uses the Welcome Screen's progress bar colors (Hydration Sky-Cyan for Underweight,
- *   Steps Mint-Emerald & CyberCyan for Optimal, Carbs/Calories Gold-Orange for Overweight,
- *   Calories/Fats Coral-Magenta-Crimson for Obese) across the spectrum gauge, category badge,
- *   reticle, and zone indicators.
- * - Features a crystal-clear Optimal Mass Range pill presentation (Min TO Max) without an ambiguous "-" dash.
- * - Computes sex-calibrated Resting Metabolic Rate (Mifflin-St Jeor for Male +5 / Female -161)
- *   and displays the 70–85% accuracy & fitness coach / medical professional consultation note.
+ * - Strictly Monochrome Black, Zinc & Liquid-Chrome White across the card, progress bar, numbers,
+ *   Optimal Mass Range, and Resting Metabolic Rate — matching the Profile Section page.
+ * - EXCLUSIVELY colors the Category Badge Box (`bmi_category_badge`, where OPTIMAL RANGE, UNDERWEIGHT,
+ *   OVERWEIGHT, OBESE CLASS are written) with SOLID (non-translucent) colors from the Welcome screen's
+ *   progress bar and high-contrast text color for maximum visibility and attractiveness.
  */
 @Composable
 private fun BiometricMassIndexCard(
@@ -1934,15 +1828,21 @@ private fun BiometricMassIndexCard(
     label = "bmi_live_pulse",
   )
 
-  val animatedZonePrimary by animateColorAsState(
-    targetValue = telemetry.zonePrimaryColor,
-    animationSpec = tween(durationMillis = 360),
-    label = "bmi_zone_primary_color",
+  // Solid Welcome-Screen Progress Bar Colors animated ONLY for the Category Badge Box
+  val animatedBadgeStart by animateColorAsState(
+    targetValue = telemetry.badgeSolidStart,
+    animationSpec = tween(durationMillis = 320),
+    label = "bmi_badge_solid_start",
   )
-  val animatedZoneSecondary by animateColorAsState(
-    targetValue = telemetry.zoneSecondaryColor,
-    animationSpec = tween(durationMillis = 360),
-    label = "bmi_zone_secondary_color",
+  val animatedBadgeEnd by animateColorAsState(
+    targetValue = telemetry.badgeSolidEnd,
+    animationSpec = tween(durationMillis = 320),
+    label = "bmi_badge_solid_end",
+  )
+  val animatedBadgeText by animateColorAsState(
+    targetValue = telemetry.badgeTextColor,
+    animationSpec = tween(durationMillis = 280),
+    label = "bmi_badge_text_color",
   )
 
   val displayBmi by remember(animatedBmi, entryPhaseProvider) {
@@ -1984,10 +1884,10 @@ private fun BiometricMassIndexCard(
             maskFilter = BlurMaskFilter(safeBlurRadius(26.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
           }
         }
-        val zoneAmbientShadowPaint = Paint().apply {
+        val silverAmbientShadowPaint = Paint().apply {
           isAntiAlias = true
           asFrameworkPaint().apply {
-            color = animatedZonePrimary.copy(alpha = 0.16f).toArgb()
+            color = android.graphics.Color.argb(46, 225, 230, 240)
             maskFilter = BlurMaskFilter(safeBlurRadius(20.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
           }
         }
@@ -1999,8 +1899,8 @@ private fun BiometricMassIndexCard(
           }
         }
         val baseBorderBrush = Brush.verticalGradient(
-          0.0f to animatedZonePrimary.copy(alpha = 0.42f),
-          0.32f to Zinc700.copy(alpha = 0.65f),
+          0.0f to PureWhite.copy(alpha = 0.30f),
+          0.28f to Zinc700.copy(alpha = 0.65f),
           0.75f to Zinc850,
           1.0f to Zinc950,
         )
@@ -2013,7 +1913,7 @@ private fun BiometricMassIndexCard(
             0f
           }
 
-          // 1. Deep 3D Floating Shadow + Category-Tinted Ambient Aura
+          // 1. Deep 3D Floating Shadow + One-Time Traveling Rear Backlight Flash (Monochrome)
           drawIntoCanvas { canvas ->
             canvas.drawRoundRect(
               6.dp.toPx(),
@@ -2031,7 +1931,7 @@ private fun BiometricMassIndexCard(
               size.height + 6.dp.toPx(),
               cornerPx,
               cornerPx,
-              zoneAmbientShadowPaint,
+              silverAmbientShadowPaint,
             )
 
             if (flashEnvelope > 0.01f) {
@@ -2055,7 +1955,7 @@ private fun BiometricMassIndexCard(
           // 2. Card Content
           drawContent()
 
-          // 3. Base Architectural Border with Subtle Zone Accent Rim
+          // 3. Base Architectural Monochrome Border
           val baseBorderAlpha = (1f - 0.38f * flashEnvelope).coerceIn(0.42f, 1f)
           drawRoundRect(
             brush = baseBorderBrush,
@@ -2066,7 +1966,7 @@ private fun BiometricMassIndexCard(
             style = Stroke(width = 1.25.dp.toPx()),
           )
 
-          // 4. One-Time Traveling Border Flash & Reflection Wave
+          // 4. One-Time Traveling Border Flash & Liquid-Chrome Reflection Wave
           if (flashEnvelope > 0.01f) {
             val diagW = size.width.coerceAtLeast(1f)
             val diagH = size.height.coerceAtLeast(1f)
@@ -2079,9 +1979,9 @@ private fun BiometricMassIndexCard(
               brush = Brush.linearGradient(
                 colors = listOf(
                   Color.Transparent,
-                  animatedZonePrimary.copy(alpha = 0.08f * flashEnvelope),
-                  PureWhite.copy(alpha = 0.14f * flashEnvelope),
-                  animatedZoneSecondary.copy(alpha = 0.08f * flashEnvelope),
+                  Zinc300.copy(alpha = 0.05f * flashEnvelope),
+                  PureWhite.copy(alpha = 0.12f * flashEnvelope),
+                  Color(0xFFF7EFE6).copy(alpha = 0.06f * flashEnvelope),
                   Color.Transparent,
                 ),
                 start = Offset(centerX - bandSpanX, centerY - bandSpanY),
@@ -2096,10 +1996,10 @@ private fun BiometricMassIndexCard(
               brush = Brush.linearGradient(
                 colors = listOf(
                   Color.Transparent,
-                  animatedZoneSecondary.copy(alpha = 0.55f * flashEnvelope),
-                  animatedZonePrimary.copy(alpha = 0.90f * flashEnvelope),
+                  Zinc500.copy(alpha = 0.40f * flashEnvelope),
+                  Color(0xFFD4D8E2).copy(alpha = 0.85f * flashEnvelope),
                   PureWhite.copy(alpha = 1.0f * flashEnvelope),
-                  animatedZonePrimary.copy(alpha = 0.90f * flashEnvelope),
+                  Color(0xFFF7EFE6).copy(alpha = 0.90f * flashEnvelope),
                   Zinc400.copy(alpha = 0.55f * flashEnvelope),
                   Color.Transparent,
                 ),
@@ -2127,7 +2027,7 @@ private fun BiometricMassIndexCard(
       .testTag("bmi_calculation_card"),
     verticalArrangement = Arrangement.SpaceBetween,
   ) {
-    // 1. Header Row: Category-Colored Luminous Dot + BIOMETRIC MASS INDEX + Color-Coded Classification Pill
+    // 1. Header Row: Luminous White Dot + BIOMETRIC MASS INDEX + SOLID Welcome-Screen-Colored Category Badge
     Column {
       Row(
         modifier = Modifier
@@ -2139,8 +2039,7 @@ private fun BiometricMassIndexCard(
         Row(
           verticalAlignment = Alignment.CenterVertically,
         ) {
-          PersonalLuminousColorDot(
-            color = animatedZonePrimary,
+          PersonalLuminousWhiteDot(
             size = (8.5f * metrics.scale).coerceIn(7f, 10.5f).dp,
           )
           Spacer(modifier = Modifier.width(10.dp))
@@ -2154,45 +2053,36 @@ private fun BiometricMassIndexCard(
           )
         }
 
-        // Dynamic Welcome-Screen-Colored Category Badge Pill
+        // EXCLUSIVELY COLORED BLOCK: Solid Opaque Welcome-Screen Progress Bar Color Badge
+        // (No translucency — 100% solid fill with high-visibility contrast text)
+        val badgeShape = RoundedCornerShape(6.dp)
         Box(
           modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(badgeShape)
             .background(
               brush = Brush.horizontalGradient(
                 colors = listOf(
-                  animatedZonePrimary.copy(alpha = 0.18f),
-                  animatedZoneSecondary.copy(alpha = 0.12f),
+                  animatedBadgeStart,
+                  animatedBadgeEnd,
                 ),
               ),
             )
             .border(
               width = 1.dp,
-              color = animatedZonePrimary.copy(alpha = 0.55f + 0.28f * livePulse),
-              shape = RoundedCornerShape(6.dp),
+              color = animatedBadgeStart,
+              shape = badgeShape,
             )
-            .padding(horizontal = 9.dp, vertical = 4.dp)
+            .padding(horizontal = 10.dp, vertical = 4.5.dp)
             .testTag("bmi_category_badge"),
         ) {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-          ) {
-            Box(
-              modifier = Modifier
-                .size(5.dp)
-                .clip(CircleShape)
-                .background(animatedZonePrimary),
-            )
-            Text(
-              text = telemetry.categoryLabel,
-              color = animatedZonePrimary,
-              fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.Bold,
-              fontSize = metrics.spScaled(9.6f, 8.4f, 11.2f),
-              letterSpacing = 0.8.sp,
-            )
-          }
+          Text(
+            text = telemetry.categoryLabel,
+            color = animatedBadgeText,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(9.8f, 8.6f, 11.4f),
+            letterSpacing = 0.8.sp,
+          )
         }
       }
 
@@ -2204,7 +2094,7 @@ private fun BiometricMassIndexCard(
 
     Spacer(modifier = Modifier.height(metrics.bmiSectionSpacing))
 
-    // 2. Primary Live BMI Readout + Somatic Index Telemetry + Welcome-Screen-Colored Spectrum Gauge
+    // 2. Primary Live BMI Readout + Somatic Index Telemetry + Monochrome Liquid-Chrome Spectrum Gauge
     Column(
       modifier = Modifier
         .fillMaxWidth()
@@ -2225,9 +2115,9 @@ private fun BiometricMassIndexCard(
         )
         Text(
           text = telemetry.categoryCode,
-          color = animatedZonePrimary,
+          color = Zinc400,
           fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.SemiBold,
+          fontWeight = FontWeight.Medium,
           fontSize = metrics.spScaled(10f, 8.5f, 11.5f),
           letterSpacing = 0.9.sp,
         )
@@ -2240,7 +2130,7 @@ private fun BiometricMassIndexCard(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.Bottom,
       ) {
-        // Enormous Animated BMI Score
+        // Enormous Animated BMI Score (PureWhite Monochrome)
         Row(
           verticalAlignment = Alignment.Bottom,
         ) {
@@ -2265,7 +2155,7 @@ private fun BiometricMassIndexCard(
           )
         }
 
-        // Right-side Live BMI Prime & Ponderal Readout
+        // Right-side Live BMI Prime & Ponderal Readout (Monochrome)
         Column(
           horizontalAlignment = Alignment.End,
           modifier = Modifier.padding(bottom = 3.dp),
@@ -2280,9 +2170,9 @@ private fun BiometricMassIndexCard(
             )
             Text(
               text = String.format(Locale.US, "%.2f", displayPrime),
-              color = animatedZonePrimary,
+              color = PureWhite,
               fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.Bold,
+              fontWeight = FontWeight.SemiBold,
               fontSize = metrics.spScaled(13.5f, 11.5f, 15.5f),
               modifier = Modifier.testTag("bmi_prime_text"),
             )
@@ -2300,59 +2190,62 @@ private fun BiometricMassIndexCard(
 
       Spacer(modifier = Modifier.height((12f * metrics.scale).coerceIn(9f, 16f).dp))
 
-      // Lively Multi-Zone Welcome-Screen-Colored BMI Spectrum Bar with Gliding Reticle Marker
+      // Monochrome Liquid-Chrome BMI Spectrum Bar (Matches Step 01 Profile Section Progress Bar)
       AnimatedBmiSpectrumGauge(
         progressProvider = {
           animatedGaugeProgress * entryPhaseProvider().coerceIn(0f, 1f)
         },
         livePulseProvider = { livePulse },
         shimmerBoostProvider = borderFlashProvider,
-        spectrumColors = WelcomeBmiSpectrumGradient,
-        activeMarkerColor = animatedZonePrimary,
+        gradientColors = WhiteVariantMulticolorGradient,
         barHeight = metrics.bmiBarHeight,
         modifier = Modifier
           .fillMaxWidth()
           .testTag("bmi_spectrum_gauge"),
       )
 
-      Spacer(modifier = Modifier.height((8f * metrics.scale).coerceIn(6f, 11f).dp))
+      Spacer(modifier = Modifier.height((7f * metrics.scale).coerceIn(5f, 10f).dp))
 
-      // Color-Coded Welcome Screen Spectrum Zone Legend Pills (Underweight, Optimal, Overweight, Obese)
+      // Calibrated Monochrome Spectrum Threshold Labels
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        BmiZoneScaleItem(
-          label = "<18.5 UNDER",
-          dotColor = BmiUnderweightPrimary,
-          isActive = telemetry.zone == BmiZone.UNDERWEIGHT,
-          metrics = metrics,
+        Text(
+          text = "<18.5 UNDER",
+          color = if (telemetry.zone == BmiZone.UNDERWEIGHT) PureWhite else Zinc500,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = if (telemetry.zone == BmiZone.UNDERWEIGHT) FontWeight.SemiBold else FontWeight.Normal,
+          fontSize = metrics.spScaled(8.8f, 7.6f, 10.2f),
         )
-        BmiZoneScaleItem(
-          label = "18.5–24.9 OPTIMAL",
-          dotColor = BmiOptimalPrimary,
-          isActive = telemetry.zone == BmiZone.OPTIMAL,
-          metrics = metrics,
+        Text(
+          text = "18.5–24.9 OPTIMAL",
+          color = if (telemetry.zone == BmiZone.OPTIMAL) PureWhite else Zinc500,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = if (telemetry.zone == BmiZone.OPTIMAL) FontWeight.SemiBold else FontWeight.Normal,
+          fontSize = metrics.spScaled(8.8f, 7.6f, 10.2f),
         )
-        BmiZoneScaleItem(
-          label = "25–29.9 OVER",
-          dotColor = BmiOverweightSecondary,
-          isActive = telemetry.zone == BmiZone.OVERWEIGHT,
-          metrics = metrics,
+        Text(
+          text = "25–29.9 OVER",
+          color = if (telemetry.zone == BmiZone.OVERWEIGHT) PureWhite else Zinc500,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = if (telemetry.zone == BmiZone.OVERWEIGHT) FontWeight.SemiBold else FontWeight.Normal,
+          fontSize = metrics.spScaled(8.8f, 7.6f, 10.2f),
         )
-        BmiZoneScaleItem(
-          label = "30+ OBESE",
-          dotColor = BmiObeseSecondary,
-          isActive = telemetry.zone == BmiZone.OBESE,
-          metrics = metrics,
+        Text(
+          text = "30+ OBESE",
+          color = if (telemetry.zone == BmiZone.OBESE) PureWhite else Zinc500,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = if (telemetry.zone == BmiZone.OBESE) FontWeight.SemiBold else FontWeight.Normal,
+          fontSize = metrics.spScaled(8.8f, 7.6f, 10.2f),
         )
       }
     }
 
     Spacer(modifier = Modifier.height(metrics.bmiSectionSpacing))
 
-    // 3. Secondary Somatic Metrics Grid (Distinct Optimal Mass Range & Scientific Sex-Calibrated Metabolic Rate)
+    // 3. Secondary Somatic Metrics Grid (Crystal-Clear Optimal Mass Range & Sex-Calibrated Metabolic Rate)
     Column(
       modifier = Modifier.fillMaxWidth(),
     ) {
@@ -2368,7 +2261,7 @@ private fun BiometricMassIndexCard(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.Top,
       ) {
-        // Left: Optimal Mass Range (Structured Min -> TO -> Max Badges without an ambiguous "-" dash)
+        // Left: Optimal Mass Range (Clearly Differentiated Min & Max Pills in Monochrome)
         Column(
           modifier = Modifier.weight(1.08f),
           verticalArrangement = Arrangement.spacedBy((6f * metrics.scale).coerceIn(4.5f, 8f).dp),
@@ -2382,59 +2275,48 @@ private fun BiometricMassIndexCard(
             letterSpacing = 0.8.sp,
           )
 
-          // Clear Visual Differentiation of Lower and Upper Optimal Mass Bounds
+          // Distinct Min and Max Badges so the range is effortlessly readable
           Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp),
             modifier = Modifier.testTag("bmi_ideal_weight_range_text"),
           ) {
-            // Min Bound Badge
             Box(
               modifier = Modifier
                 .clip(RoundedCornerShape(6.dp))
-                .background(Color(0xFF14181F))
-                .border(0.8.dp, BmiOptimalPrimary.copy(alpha = 0.40f), RoundedCornerShape(6.dp))
-                .padding(horizontal = 7.dp, vertical = 3.5.dp),
+                .background(Zinc900)
+                .border(0.8.dp, Zinc700, RoundedCornerShape(6.dp))
+                .padding(horizontal = 7.dp, vertical = 3.dp),
             ) {
               Text(
                 text = formatOneDecimal(telemetry.idealMinKg),
                 color = PureWhite,
                 fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.SemiBold,
                 fontSize = metrics.spScaled(14.5f, 12.2f, 17f),
               )
             }
 
-            // Distinct "TO" Connector Pill instead of ambiguous "-" dash
-            Box(
-              modifier = Modifier
-                .clip(RoundedCornerShape(4.dp))
-                .background(BmiOptimalPrimary.copy(alpha = 0.14f))
-                .padding(horizontal = 4.5.dp, vertical = 2.dp),
-            ) {
-              Text(
-                text = "TO",
-                color = BmiOptimalPrimary,
-                fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = metrics.spScaled(8.6f, 7.5f, 10f),
-                letterSpacing = 0.5.sp,
-              )
-            }
+            Text(
+              text = "to",
+              color = Zinc400,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Medium,
+              fontSize = metrics.spScaled(10.5f, 9f, 12f),
+            )
 
-            // Max Bound Badge
             Box(
               modifier = Modifier
                 .clip(RoundedCornerShape(6.dp))
-                .background(Color(0xFF14181F))
-                .border(0.8.dp, BmiOptimalPrimary.copy(alpha = 0.40f), RoundedCornerShape(6.dp))
-                .padding(horizontal = 7.dp, vertical = 3.5.dp),
+                .background(Zinc900)
+                .border(0.8.dp, Zinc700, RoundedCornerShape(6.dp))
+                .padding(horizontal = 7.dp, vertical = 3.dp),
             ) {
               Text(
                 text = formatOneDecimal(telemetry.idealMaxKg),
                 color = PureWhite,
                 fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.SemiBold,
                 fontSize = metrics.spScaled(14.5f, 12.2f, 17f),
               )
             }
@@ -2443,24 +2325,24 @@ private fun BiometricMassIndexCard(
               text = stringResource(R.string.personal_weight_unit),
               color = Zinc400,
               fontFamily = InterFontFamily,
-              fontWeight = FontWeight.SemiBold,
-              fontSize = metrics.spScaled(11.5f, 10f, 13.5f),
+              fontWeight = FontWeight.Medium,
+              fontSize = metrics.spScaled(11.8f, 10f, 13.8f),
             )
           }
 
           Text(
-            text = "BMI 18.5 TO 24.9 TARGET",
+            text = "MIN ${formatOneDecimal(telemetry.idealMinKg)} • MAX ${formatOneDecimal(telemetry.idealMaxKg)} KG",
             color = Zinc500,
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.Normal,
-            fontSize = metrics.spScaled(8.8f, 7.6f, 10.2f),
+            fontSize = metrics.spScaled(8.6f, 7.5f, 10f),
             letterSpacing = 0.4.sp,
           )
         }
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        // Right: Scientifically Calibrated Resting Metabolic Rate (Men / Women Mifflin-St Jeor)
+        // Right: Scientifically Calibrated Resting Metabolic Rate (Men +5 / Women -161 Mifflin-St Jeor)
         Column(
           modifier = Modifier.weight(0.96f),
           horizontalAlignment = Alignment.End,
@@ -2482,25 +2364,25 @@ private fun BiometricMassIndexCard(
               text = NumberFormat.getIntegerInstance(Locale.US).format(displayBmr),
               color = PureWhite,
               fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.Bold,
+              fontWeight = FontWeight.SemiBold,
               fontSize = metrics.secondaryStatFontSize,
               modifier = Modifier.testTag("bmi_resting_bmr_text"),
             )
             Spacer(modifier = Modifier.width(5.dp))
             Text(
               text = "kcal/d",
-              color = CaloriesStart,
+              color = Zinc400,
               fontFamily = InterFontFamily,
-              fontWeight = FontWeight.SemiBold,
+              fontWeight = FontWeight.Medium,
               fontSize = metrics.spScaled(11.8f, 10f, 13.8f),
               modifier = Modifier.padding(bottom = 1.dp),
             )
           }
           Text(
             text = telemetry.sexCalibrationLabel,
-            color = Zinc400,
+            color = Zinc500,
             fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Medium,
+            fontWeight = FontWeight.Normal,
             fontSize = metrics.spScaled(8.6f, 7.5f, 10f),
             letterSpacing = 0.3.sp,
             textAlign = TextAlign.End,
@@ -2511,20 +2393,13 @@ private fun BiometricMassIndexCard(
 
       Spacer(modifier = Modifier.height((12f * metrics.scale).coerceIn(9f, 15f).dp))
 
-      // 4. Scientific Accuracy (70–85%) & Fitness Coach / Medical Consultation Banner
+      // 4. Monochrome Scientific Accuracy (70–85%) & Fitness Coach / Medical Consultation Banner
       val advisoryShape = RoundedCornerShape(8.dp)
       Row(
         modifier = Modifier
           .fillMaxWidth()
           .clip(advisoryShape)
-          .background(
-            brush = Brush.horizontalGradient(
-              colors = listOf(
-                Color(0xFF13161E),
-                Color(0xFF0E1016),
-              ),
-            ),
-          )
+          .background(Zinc950)
           .border(
             width = 0.8.dp,
             color = Zinc800,
@@ -2538,15 +2413,15 @@ private fun BiometricMassIndexCard(
         Box(
           modifier = Modifier
             .clip(RoundedCornerShape(4.dp))
-            .background(CaloriesStart.copy(alpha = 0.14f))
-            .border(0.7.dp, CaloriesStart.copy(alpha = 0.45f), RoundedCornerShape(4.dp))
+            .background(Zinc850)
+            .border(0.7.dp, Zinc600, RoundedCornerShape(4.dp))
             .padding(horizontal = 6.dp, vertical = 2.5.dp),
         ) {
           Text(
             text = "70–85% ACCURACY",
-            color = CaloriesStart,
+            color = PureWhite,
             fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.SemiBold,
             fontSize = metrics.spScaled(8.4f, 7.4f, 9.6f),
             letterSpacing = 0.4.sp,
           )
@@ -2554,11 +2429,11 @@ private fun BiometricMassIndexCard(
 
         Text(
           text = "Consult a fitness coach or medical professional for best clinical precision.",
-          color = Zinc300,
+          color = Zinc400,
           fontFamily = InterFontFamily,
           fontWeight = FontWeight.Normal,
-          fontSize = metrics.spScaled(9.8f, 8.6f, 11.2f),
-          lineHeight = metrics.spScaled(13.2f, 11.5f, 15f),
+          fontSize = metrics.spScaled(9.6f, 8.4f, 11f),
+          lineHeight = metrics.spScaled(13f, 11.2f, 14.8f),
           modifier = Modifier.weight(1f),
         )
       }
@@ -2566,46 +2441,17 @@ private fun BiometricMassIndexCard(
   }
 }
 
-@Composable
-private fun BmiZoneScaleItem(
-  label: String,
-  dotColor: Color,
-  isActive: Boolean,
-  metrics: PersonalResponsiveMetrics,
-) {
-  Row(
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(4.dp),
-  ) {
-    Box(
-      modifier = Modifier
-        .size(if (isActive) 6.dp else 4.5.dp)
-        .clip(CircleShape)
-        .background(if (isActive) dotColor else dotColor.copy(alpha = 0.45f)),
-    )
-    Text(
-      text = label,
-      color = if (isActive) dotColor else Zinc400,
-      fontFamily = JetBrainsMonoFontFamily,
-      fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-      fontSize = metrics.spScaled(8.7f, 7.5f, 10.2f),
-    )
-  }
-}
-
 /**
- * Lively Multi-Zone BMI Spectrum Gauge using the Welcome Screen's Progress Bar Colors:
- * - Subtle full-width recessed 4-zone color track so Underweight (Cyan-Blue), Optimal (Mint-Emerald),
- *   Overweight (Gold-Orange), and Obese (Coral-Crimson) zones are always visually distinguishable.
- * - Vibrant lit multicolor fill up to the live BMI coordinate with category-colored glowing reticle.
+ * Monochrome Multi-Tone White / Liquid-Chrome BMI Spectrum Gauge
+ * (Matches Step 01 Profile Section's CalculatedAgeProgressBar in black & white,
+ * with zone dividers and a glowing PureWhite marker reticle).
  */
 @Composable
 private fun AnimatedBmiSpectrumGauge(
   progressProvider: () -> Float,
   livePulseProvider: () -> Float,
   shimmerBoostProvider: () -> Float,
-  spectrumColors: List<Color>,
-  activeMarkerColor: Color,
+  gradientColors: List<Color>,
   barHeight: Dp,
   modifier: Modifier = Modifier,
 ) {
@@ -2619,32 +2465,31 @@ private fun AnimatedBmiSpectrumGauge(
         val cornerRadius = CornerRadius(radius, radius)
         val trackBorderBrush = Brush.horizontalGradient(
           colors = listOf(
-            BmiUnderweightPrimary.copy(alpha = 0.30f),
-            BmiOptimalPrimary.copy(alpha = 0.35f),
-            BmiOverweightSecondary.copy(alpha = 0.30f),
-            BmiObeseSecondary.copy(alpha = 0.32f),
+            Zinc600.copy(alpha = 0.35f),
+            MonochromeTrackBorder,
+            PureWhite.copy(alpha = 0.25f),
           ),
         )
-        val recessedSpectrumBrush = Brush.horizontalGradient(
-          colors = spectrumColors.map { it.copy(alpha = 0.22f) },
-        )
-        val fullSpectrumBrush = Brush.horizontalGradient(
-          colors = spectrumColors,
-          startX = 0f,
-          endX = size.width.coerceAtLeast(1f),
-        )
         val verticalLightingBrush = Brush.verticalGradient(
-          0.0f to PureWhite.copy(alpha = 0.32f),
+          0.0f to PureWhite.copy(alpha = 0.38f),
           0.42f to Color.Transparent,
-          1.0f to ObsidianBlack.copy(alpha = 0.22f),
+          1.0f to ObsidianBlack.copy(alpha = 0.24f),
           startY = 0f,
           endY = trackHeight,
+        )
+        val topRimBrush = Brush.verticalGradient(
+          colors = listOf(
+            PureWhite.copy(alpha = 0.45f),
+            Color.Transparent,
+          ),
+          startY = 0f,
+          endY = (trackHeight * 0.65f).coerceAtLeast(1f),
         )
         val markerHaloPaint = Paint().apply {
           isAntiAlias = true
           asFrameworkPaint().apply {
-            color = activeMarkerColor.toArgb()
-            maskFilter = BlurMaskFilter(safeBlurRadius(trackHeight * 1.25f), BlurMaskFilter.Blur.NORMAL)
+            color = android.graphics.Color.argb(180, 255, 255, 255)
+            maskFilter = BlurMaskFilter(safeBlurRadius(trackHeight * 1.15f), BlurMaskFilter.Blur.NORMAL)
           }
         }
         val fillPath = Path()
@@ -2655,15 +2500,9 @@ private fun AnimatedBmiSpectrumGauge(
           val pulse = livePulseProvider().coerceIn(0f, 1f)
           val boost = shimmerBoostProvider().coerceIn(0f, 1f)
 
-          // 1. Track Chassis with Subtle Welcome-Screen-Colored Zone Preview
+          // 1. Monochrome Track Chassis
           drawRoundRect(
             color = MonochromeTrack,
-            topLeft = Offset.Zero,
-            size = Size(size.width, trackHeight),
-            cornerRadius = cornerRadius,
-          )
-          drawRoundRect(
-            brush = recessedSpectrumBrush,
             topLeft = Offset.Zero,
             size = Size(size.width, trackHeight),
             cornerRadius = cornerRadius,
@@ -2676,7 +2515,7 @@ private fun AnimatedBmiSpectrumGauge(
             style = Stroke(width = 1.dp.toPx()),
           )
 
-          // 2. Vibrant Welcome-Screen-Colored Spectrum Fill up to current BMI position
+          // 2. Liquid-Chrome Monochrome Fill up to current BMI position
           if (progress > 0.002f) {
             val minFill = (trackHeight * 0.5f).coerceAtMost(size.width)
             val fillWidth = (size.width * progress).coerceIn(minFill, size.width)
@@ -2690,7 +2529,11 @@ private fun AnimatedBmiSpectrumGauge(
 
             drawPath(
               path = fillPath,
-              brush = fullSpectrumBrush,
+              brush = Brush.horizontalGradient(
+                colors = gradientColors,
+                startX = 0f,
+                endX = fillWidth.coerceAtLeast(1f),
+              ),
             )
 
             clipPath(fillPath) {
@@ -2708,7 +2551,7 @@ private fun AnimatedBmiSpectrumGauge(
                   colors = listOf(
                     Color.Transparent,
                     PureWhite.copy(alpha = 0.36f),
-                    Color(0xFFF7EFE6).copy(alpha = 0.20f),
+                    Color(0xFFF7EFE6).copy(alpha = 0.22f),
                     Color.Transparent,
                   ),
                   start = Offset(sheenCenter - sheenSpan, 0f),
@@ -2718,6 +2561,17 @@ private fun AnimatedBmiSpectrumGauge(
                 size = Size(fillWidth, trackHeight),
               )
             }
+
+            drawRoundRect(
+              brush = topRimBrush,
+              topLeft = Offset(0.5.dp.toPx(), 0.5.dp.toPx()),
+              size = Size(
+                (fillWidth - 1.dp.toPx()).coerceAtLeast(1f),
+                (trackHeight - 1.dp.toPx()).coerceAtLeast(1f),
+              ),
+              cornerRadius = cornerRadius,
+              style = Stroke(width = 0.85.dp.toPx()),
+            )
           }
 
           // 3. Zone Divider Tick Notches (18.5 at 25%, 25.0 at 58%, 30.0 at 80%)
@@ -2725,36 +2579,31 @@ private fun AnimatedBmiSpectrumGauge(
           zoneFractions.forEach { frac ->
             val tickX = size.width * frac
             drawLine(
-              color = ObsidianBlack.copy(alpha = 0.78f),
+              color = ObsidianBlack.copy(alpha = 0.72f),
               start = Offset(tickX, 0f),
               end = Offset(tickX, trackHeight),
-              strokeWidth = 1.5.dp.toPx(),
+              strokeWidth = 1.3.dp.toPx(),
             )
           }
 
-          // 4. Lively Glowing Category-Colored BMI Marker Reticle at Fill Crest
+          // 4. Lively Glowing PureWhite BMI Marker Reticle at Fill Crest
           if (progress > 0.002f) {
             val minFill = (trackHeight * 0.5f).coerceAtMost(size.width)
             val fillWidth = (size.width * progress).coerceIn(minFill, size.width)
             val markerX = fillWidth.coerceIn(radius, size.width - radius)
             val markerCenter = Offset(markerX, trackHeight / 2f)
-            markerHaloPaint.asFrameworkPaint().alpha = (150f + 85f * pulse).roundToInt().coerceIn(110, 240)
+            markerHaloPaint.asFrameworkPaint().alpha = (135f + 85f * pulse).roundToInt().coerceIn(100, 235)
             drawIntoCanvas { canvas ->
-              canvas.drawCircle(markerCenter, trackHeight * 0.82f, markerHaloPaint)
+              canvas.drawCircle(markerCenter, trackHeight * 0.75f, markerHaloPaint)
             }
             drawCircle(
               color = PureWhite,
-              radius = (trackHeight * 0.46f).coerceAtLeast(2f),
-              center = markerCenter,
-            )
-            drawCircle(
-              color = activeMarkerColor,
-              radius = (trackHeight * 0.28f).coerceAtLeast(1.4f),
+              radius = (trackHeight * 0.44f).coerceAtLeast(2f),
               center = markerCenter,
             )
             drawCircle(
               color = ObsidianBlack,
-              radius = (trackHeight * 0.12f).coerceAtLeast(0.8f),
+              radius = (trackHeight * 0.18f).coerceAtLeast(1f),
               center = markerCenter,
             )
           }
