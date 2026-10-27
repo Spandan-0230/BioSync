@@ -86,11 +86,11 @@
 
     <string name="blueprint_objective_section_label">Objective</string>
     <string name="blueprint_objective_lose_fat_title">Lose Fat</string>
-    <string name="blueprint_objective_lose_fat_sub">Caloric deficit &amp; lean preservation</string>
+    <string name="blueprint_objective_lose_fat_sub">Lean deficit</string>
     <string name="blueprint_objective_maintain_title">Maintain</string>
-    <string name="blueprint_objective_maintain_sub">Isocaloric homeostasis &amp; vitality</string>
+    <string name="blueprint_objective_maintain_sub">Body balance</string>
     <string name="blueprint_objective_build_muscle_title">Build Muscle</string>
-    <string name="blueprint_objective_build_muscle_sub">Anabolic surplus &amp; hypertrophy</string>
+    <string name="blueprint_objective_build_muscle_sub">Lean surplus</string>
 
     <string name="blueprint_streak_section_label">Daily Streak Completion</string>
     <string name="blueprint_streak_section_subtitle">Select the percentage of overall daily goals (Calories, Protein, Carbs, Fats, Hydration &amp; Steps) required to earn 1 Daily Streak.</string>

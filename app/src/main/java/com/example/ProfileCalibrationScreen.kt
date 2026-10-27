@@ -1472,14 +1472,19 @@ private fun BiologicalSexSelector(
         Triple("FEMALE", R.string.calib_sex_female, "XX • SOMATIC"),
       )
       options.forEach { (key, labelRes, bioCode) ->
+        val isMale = key == "MALE"
         val isSelected = selectedSex == key
+        val accentStart = if (isMale) Color(0xFF7BE3FF) else Color(0xFFFFA6C1)
+        val accentEnd = if (isMale) Color(0xFF0EA5E9) else Color(0xFFFB4570)
+        val accentSolid = if (isMale) Color(0xFF38BDF8) else Color(0xFFFB7185)
+
         val bgColor by animateColorAsState(
           targetValue = if (isSelected) PureWhite else Color(0xFF121216),
           animationSpec = tween(durationMillis = 180),
           label = "sex_bg_$key",
         )
         val borderColor by animateColorAsState(
-          targetValue = if (isSelected) PureWhite else Zinc800.copy(alpha = 0.75f),
+          targetValue = if (isSelected) PureWhite else accentSolid.copy(alpha = 0.28f),
           animationSpec = tween(durationMillis = 180),
           label = "sex_border_$key",
         )
@@ -1489,17 +1494,12 @@ private fun BiologicalSexSelector(
           label = "sex_text_$key",
         )
         val subTextColor by animateColorAsState(
-          targetValue = if (isSelected) Color(0xFF32323A) else Zinc500,
+          targetValue = if (isSelected) accentEnd else Zinc500,
           animationSpec = tween(durationMillis = 180),
           label = "sex_subtext_$key",
         )
-        val emblemBgColor by animateColorAsState(
-          targetValue = if (isSelected) ObsidianBlack.copy(alpha = 0.10f) else Color(0xFF1B1B22),
-          animationSpec = tween(durationMillis = 180),
-          label = "sex_emblem_bg_$key",
-        )
         val emblemIconColor by animateColorAsState(
-          targetValue = if (isSelected) ObsidianBlack else Zinc300,
+          targetValue = if (isSelected) PureWhite else accentStart,
           animationSpec = tween(durationMillis = 180),
           label = "sex_emblem_icon_$key",
         )
@@ -1524,21 +1524,32 @@ private fun BiologicalSexSelector(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
           ) {
-            // Geometric Biometric Emblem Box
+            // Geometric Biometric Emblem Box with Male (Sky-Blue) / Female (Rose-Coral) color identity
             Box(
               modifier = Modifier
                 .size((30f * metrics.scale).coerceIn(27f, 34f).dp)
                 .clip(emblemShape)
-                .background(emblemBgColor)
+                .background(
+                  brush = if (isSelected) {
+                    Brush.linearGradient(colors = listOf(accentStart, accentEnd))
+                  } else {
+                    Brush.verticalGradient(
+                      colors = listOf(
+                        accentSolid.copy(alpha = 0.16f),
+                        accentEnd.copy(alpha = 0.08f),
+                      ),
+                    )
+                  },
+                )
                 .border(
-                  width = 0.8.dp,
-                  color = if (isSelected) ObsidianBlack.copy(alpha = 0.18f) else Zinc700.copy(alpha = 0.65f),
+                  width = 0.85.dp,
+                  color = if (isSelected) accentEnd else accentSolid.copy(alpha = 0.45f),
                   shape = emblemShape,
                 ),
               contentAlignment = Alignment.Center,
             ) {
               BiologicalSexSymbolIcon(
-                isMale = key == "MALE",
+                isMale = isMale,
                 color = emblemIconColor,
                 size = (15f * metrics.scale).coerceIn(13.5f, 17.5f).dp,
               )
@@ -1559,7 +1570,7 @@ private fun BiologicalSexSelector(
                 text = bioCode,
                 color = subTextColor,
                 fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.Medium,
+                fontWeight = FontWeight.SemiBold,
                 fontSize = metrics.spScaled(8.4f, 7.4f, 9.5f),
                 letterSpacing = 0.5.sp,
                 maxLines = 1,
@@ -1567,12 +1578,12 @@ private fun BiologicalSexSelector(
             }
           }
 
-          // Active Status Indicator Dot
+          // Active Status Indicator Dot synced with Male / Female color
           Box(
             modifier = Modifier
-              .size(6.5.dp)
+              .size(7.dp)
               .clip(CircleShape)
-              .background(if (isSelected) ObsidianBlack else Zinc700),
+              .background(if (isSelected) accentEnd else accentSolid.copy(alpha = 0.40f)),
           )
         }
       }

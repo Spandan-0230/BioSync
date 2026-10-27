@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -50,8 +51,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +74,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -85,10 +92,22 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.theme.CaloriesMid
+import com.example.ui.theme.CaloriesStart
+import com.example.ui.theme.CarbsMid
+import com.example.ui.theme.CarbsStart
+import com.example.ui.theme.FatsMid
+import com.example.ui.theme.FatsStart
+import com.example.ui.theme.HydrationMid
+import com.example.ui.theme.HydrationStart
 import com.example.ui.theme.InterFontFamily
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.ObsidianBlack
+import com.example.ui.theme.ProteinMid
+import com.example.ui.theme.ProteinStart
 import com.example.ui.theme.PureWhite
+import com.example.ui.theme.StepsMid
+import com.example.ui.theme.StepsStart
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -115,6 +134,8 @@ private fun safeBlurRadius(radius: Float): Float = radius.coerceAtLeast(0.5f)
 
 /**
  * Section 1 — Activity Level options (Single-select).
+ * Minimalist spectrum accents progress from light multi-color (Sky-Mint -> Mint-Citrine -> Amber-Gold -> Dense Burnished Gold)
+ * while the cards and typography stay crisp Obsidian Black & Pure White.
  */
 enum class ActivityLevelOption(
   val index: Int,
@@ -122,6 +143,9 @@ enum class ActivityLevelOption(
   val cadenceBadge: String,
   val activeBars: Int,
   val intensityFraction: Float,
+  val spectrumStart: Color,
+  val spectrumEnd: Color,
+  val accentColor: Color,
 ) {
   SEDENTARY(
     index = 1,
@@ -129,6 +153,9 @@ enum class ActivityLevelOption(
     cadenceBadge = "DESK / LOW",
     activeBars = 1,
     intensityFraction = 0.25f,
+    spectrumStart = Color(0xFF7BE3FF),
+    spectrumEnd = Color(0xFF7BF1A8),
+    accentColor = Color(0xFF7BE3FF),
   ),
   LIGHT(
     index = 2,
@@ -136,6 +163,9 @@ enum class ActivityLevelOption(
     cadenceBadge = "1–3 DAYS/WK",
     activeBars = 2,
     intensityFraction = 0.50f,
+    spectrumStart = Color(0xFF7BF1A8),
+    spectrumEnd = Color(0xFFFDE68A),
+    accentColor = Color(0xFF6EE7B7),
   ),
   MODERATE(
     index = 3,
@@ -143,6 +173,9 @@ enum class ActivityLevelOption(
     cadenceBadge = "3–5 DAYS/WK",
     activeBars = 3,
     intensityFraction = 0.75f,
+    spectrumStart = Color(0xFFFDE047),
+    spectrumEnd = Color(0xFFF59E0B),
+    accentColor = Color(0xFFFBBF24),
   ),
   VERY_ACTIVE(
     index = 4,
@@ -150,70 +183,107 @@ enum class ActivityLevelOption(
     cadenceBadge = "6–7 DAYS/WK",
     activeBars = 4,
     intensityFraction = 1.00f,
+    spectrumStart = Color(0xFFFFD700),
+    spectrumEnd = Color(0xFFD97706),
+    accentColor = Color(0xFFFFC300),
   ),
 }
 
 /**
  * Section 2 — Primary Metabolic Objective options (Single-select).
+ * Monochrome cards with dense/solid category color badges for Lose Fat, Maintain, Build Muscle.
  */
 enum class BlueprintObjectiveOption(
   val index: Int,
   val codeLabel: String,
   val vectorBadge: String,
   val protocolSummary: String,
+  val primaryColor: Color,
+  val secondaryColor: Color,
 ) {
   LOSE_FAT(
     index = 1,
     codeLabel = "01",
     vectorBadge = "DEFICIT VECTOR",
     protocolSummary = "Prioritizes adipose mobilization while safeguarding lean tissue.",
+    primaryColor = Color(0xFFFF6B35),
+    secondaryColor = Color(0xFFE11D48),
   ),
   MAINTAIN(
     index = 2,
     codeLabel = "02",
     vectorBadge = "EQUILIBRIUM",
     protocolSummary = "Sustains baseline mass with balanced energy and recovery.",
+    primaryColor = Color(0xFF10B981),
+    secondaryColor = Color(0xFF059669),
   ),
   BUILD_MUSCLE(
     index = 3,
     codeLabel = "03",
     vectorBadge = "SURPLUS VECTOR",
     protocolSummary = "Drives lean tissue accretion and progressive performance.",
+    primaryColor = Color(0xFF8B5CF6),
+    secondaryColor = Color(0xFF6D28D9),
   ),
 }
 
 /**
  * Section 3 — Daily Streak Completion Threshold options (Single-select: 100%, 95%, 90%, 85%, 80%).
+ * Each percentage option has a distinct minimalist color accent synced with the tier pill and progress bar.
  */
 enum class StreakThresholdOption(
   val percentage: Int,
   val tierTitle: String,
   val tierDescriptor: String,
+  val barFillFraction: Float,
+  val colorStart: Color,
+  val colorEnd: Color,
+  val accentColor: Color,
 ) {
   PERCENT_100(
     percentage = 100,
     tierTitle = "ABSOLUTE PRECISION",
     tierDescriptor = "Requires 100% completion across daily macro, hydration & step targets to earn +1 Streak.",
+    barFillFraction = 1.00f,
+    colorStart = Color(0xFFFFE169),
+    colorEnd = Color(0xFFF59E0B),
+    accentColor = Color(0xFFFFD166),
   ),
   PERCENT_95(
     percentage = 95,
     tierTitle = "ELITE DISCIPLINE",
     tierDescriptor = "Requires at least 95% of overall daily goals completed to count as +1 Streak.",
+    barFillFraction = 0.80f,
+    colorStart = Color(0xFFFF8E53),
+    colorEnd = Color(0xFFFF2E63),
+    accentColor = Color(0xFFFF7A29),
   ),
   PERCENT_90(
     percentage = 90,
     tierTitle = "OPTIMAL CONSISTENCY",
     tierDescriptor = "Requires at least 90% of overall daily goals completed to count as +1 Streak.",
+    barFillFraction = 0.60f,
+    colorStart = Color(0xFF6EE7B7),
+    colorEnd = Color(0xFF10B981),
+    accentColor = Color(0xFF34D399),
   ),
   PERCENT_85(
     percentage = 85,
     tierTitle = "HIGH MOMENTUM",
     tierDescriptor = "Requires at least 85% of overall daily goals completed to count as +1 Streak.",
+    barFillFraction = 0.40f,
+    colorStart = Color(0xFF7BE3FF),
+    colorEnd = Color(0xFF0B76E0),
+    accentColor = Color(0xFF5BC0FF),
   ),
   PERCENT_80(
     percentage = 80,
     tierTitle = "SUSTAINABLE RHYTHM",
     tierDescriptor = "Requires at least 80% of overall daily goals completed to count as +1 Streak.",
+    barFillFraction = 0.20f,
+    colorStart = Color(0xFFC084FC),
+    colorEnd = Color(0xFF7C3AED),
+    accentColor = Color(0xFFB794F4),
   ),
   ;
 
@@ -222,6 +292,25 @@ enum class StreakThresholdOption(
       entries.firstOrNull { it.percentage == percent } ?: PERCENT_90
   }
 }
+
+/**
+ * Welcome-Screen category accent colors for the 6 tracked daily pillars.
+ */
+@Immutable
+private data class WelcomePillarSpec(
+  val label: String,
+  val dotColor: Color,
+  val borderTint: Color,
+)
+
+private val WelcomeDailyPillars = listOf(
+  WelcomePillarSpec("CAL", CaloriesStart, CaloriesMid),
+  WelcomePillarSpec("PRO", ProteinStart, ProteinMid),
+  WelcomePillarSpec("CARB", CarbsStart, CarbsMid),
+  WelcomePillarSpec("FAT", FatsStart, FatsMid),
+  WelcomePillarSpec("H2O", HydrationStart, HydrationMid),
+  WelcomePillarSpec("STEPS", StepsStart, StepsMid),
+)
 
 @Immutable
 private data class BlueprintResponsiveMetrics(
@@ -355,6 +444,22 @@ fun BlueprintScreen(
       }
       val scrollState = rememberScrollState()
 
+      // Track section Y positions inside the scrollable Column for smooth scroll-to-section
+      var activitySectionY by remember { mutableIntStateOf(0) }
+      var objectiveSectionY by remember { mutableIntStateOf(0) }
+      var streakSectionY by remember { mutableIntStateOf(0) }
+
+      val scrollToSection: (Int) -> Unit = { targetY ->
+        haptics.selection()
+        coroutineScope.launch {
+          val offset = (targetY - 18).coerceAtLeast(0)
+          scrollState.animateScrollTo(
+            value = offset,
+            animationSpec = tween(durationMillis = 520, easing = BlueprintEaseOut),
+          )
+        }
+      }
+
       LaunchedEffect(Unit) {
         scrollState.scrollTo(0)
       }
@@ -422,60 +527,87 @@ fun BlueprintScreen(
 
         Spacer(modifier = Modifier.height(metrics.titleToFirstFieldGap))
 
-        // 2. Section 1: Activity Level (Single-select from 4 options)
-        ActivityLevelSection(
-          selectedLevel = selectedActivityLevel,
-          onSelectLevel = { level ->
-            if (level != selectedActivityLevel) {
-              haptics.selection()
-              onSelectActivityLevel(level)
-            } else {
-              haptics.tick()
-            }
-          },
-          metrics = metrics,
-        )
+        // 2. Section 1: Activity Level (Black & white cards with minimalist spectrum bar & badge accents)
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { coords ->
+              activitySectionY = coords.positionInParent().y.roundToInt()
+            },
+        ) {
+          ActivityLevelSection(
+            selectedLevel = selectedActivityLevel,
+            onSelectLevel = { level ->
+              if (level != selectedActivityLevel) {
+                haptics.selection()
+                onSelectActivityLevel(level)
+              } else {
+                haptics.tick()
+              }
+            },
+            metrics = metrics,
+          )
+        }
 
         Spacer(modifier = Modifier.height(metrics.sectionGap))
 
-        // 3. Section 2: Objective (Single-select from 3 options: Lose Fat, Maintain, Build Muscle)
-        ObjectiveSection(
-          selectedObjective = selectedObjective,
-          onSelectObjective = { objective ->
-            if (objective != selectedObjective) {
-              haptics.selection()
-              onSelectObjective(objective)
-            } else {
-              haptics.tick()
-            }
-          },
-          metrics = metrics,
-        )
+        // 3. Section 2: Objective (Monochrome cards with solid/dense colored badges)
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { coords ->
+              objectiveSectionY = coords.positionInParent().y.roundToInt()
+            },
+        ) {
+          ObjectiveSection(
+            selectedObjective = selectedObjective,
+            onSelectObjective = { objective ->
+              if (objective != selectedObjective) {
+                haptics.selection()
+                onSelectObjective(objective)
+              } else {
+                haptics.tick()
+              }
+            },
+            metrics = metrics,
+          )
+        }
 
         Spacer(modifier = Modifier.height(metrics.sectionGap))
 
         // 4. Section 3: Daily Streak Completion Threshold (100% / 95% / 90% / 85% / 80%)
-        StreakThresholdSection(
-          selectedThreshold = selectedStreakThreshold,
-          onSelectThreshold = { threshold ->
-            if (threshold != selectedStreakThreshold) {
-              haptics.selection()
-              onSelectStreakThreshold(threshold)
-            } else {
-              haptics.tick()
-            }
-          },
-          metrics = metrics,
-        )
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { coords ->
+              streakSectionY = coords.positionInParent().y.roundToInt()
+            },
+        ) {
+          StreakThresholdSection(
+            selectedThreshold = selectedStreakThreshold,
+            onSelectThreshold = { threshold ->
+              if (threshold != selectedStreakThreshold) {
+                haptics.selection()
+                onSelectStreakThreshold(threshold)
+              } else {
+                haptics.tick()
+              }
+            },
+            metrics = metrics,
+          )
+        }
 
         Spacer(modifier = Modifier.height(metrics.sectionGap))
 
-        // 5. Live Blueprint Protocol Matrix Summary Card
+        // 5. Live Blueprint Protocol Matrix Summary Card (Clickable tiles scroll to sections)
         BlueprintSummaryMatrixCard(
           subjectName = subjectName,
           selectedActivityLevel = selectedActivityLevel,
           selectedObjective = selectedObjective,
           selectedStreakThreshold = selectedStreakThreshold,
+          onClickActivityTile = { scrollToSection(activitySectionY) },
+          onClickObjectiveTile = { scrollToSection(objectiveSectionY) },
+          onClickStreakTile = { scrollToSection(streakSectionY) },
           borderFlashProvider = borderFlashProvider,
           metrics = metrics,
         )
@@ -662,7 +794,6 @@ private fun StepThreeShinyGlowBar(
         onDrawBehind {
           if (size.width <= 1f || size.height <= 0.5f) return@onDrawBehind
           val p = phaseProvider().coerceIn(0f, 1f)
-          // Animates from Step 2 (0.68f) to Step 3 (1.00f) on page transition
           val activeFraction = 0.68f + (1.00f - 0.68f) * p
 
           drawRoundRect(
@@ -721,7 +852,6 @@ private fun StepThreeShinyGlowBar(
               cornerRadius = radius,
             )
 
-            // Subtle step divider ticks at 01 and 02
             drawLine(
               color = ObsidianBlack.copy(alpha = 0.32f),
               start = Offset(step1X, 0f),
@@ -740,18 +870,17 @@ private fun StepThreeShinyGlowBar(
   )
 }
 
-// ─── Shared Section Header ──────────────────────────────────────────────────
+// ─── Shared Section Header (Monochrome Pure White Dot & Title) ──────────────
 
 @Composable
 private fun BlueprintSectionHeaderRow(
   label: String,
-  statusPillText: String,
   metrics: BlueprintResponsiveMetrics,
 ) {
   Row(
     modifier = Modifier.fillMaxWidth(),
     verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.SpaceBetween,
+    horizontalArrangement = Arrangement.Start,
   ) {
     Row(
       verticalAlignment = Alignment.CenterVertically,
@@ -772,28 +901,10 @@ private fun BlueprintSectionHeaderRow(
         letterSpacing = (-0.15).sp,
       )
     }
-
-    Box(
-      modifier = Modifier
-        .clip(RoundedCornerShape(6.dp))
-        .background(Zinc900)
-        .border(0.8.dp, Zinc800, RoundedCornerShape(6.dp))
-        .padding(horizontal = 8.dp, vertical = 3.dp),
-      contentAlignment = Alignment.Center,
-    ) {
-      Text(
-        text = statusPillText,
-        color = Zinc300,
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = metrics.spScaled(9.4f, 8.2f, 10.8f),
-        letterSpacing = 0.8.sp,
-      )
-    }
   }
 }
 
-// ─── Section 1: Activity Level (Single-select from 4 options) ───────────────
+// ─── Section 1: Activity Level (Monochrome Base + Minimalist Spectrum Bar/Badges) ─
 
 @Composable
 private fun ActivityLevelSection(
@@ -807,11 +918,15 @@ private fun ActivityLevelSection(
     animationSpec = tween(durationMillis = 380, easing = BlueprintEaseOut),
     label = "activity_intensity_bar",
   )
+  val animatedAccent by animateColorAsState(
+    targetValue = selectedLevel.accentColor,
+    animationSpec = tween(durationMillis = 280),
+    label = "activity_spectrum_accent",
+  )
 
   Column(modifier = Modifier.fillMaxWidth()) {
     BlueprintSectionHeaderRow(
       label = stringResource(R.string.blueprint_activity_section_label),
-      statusPillText = selectedLevel.tierCode,
       metrics = metrics,
     )
 
@@ -855,7 +970,7 @@ private fun ActivityLevelSection(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy((8f * metrics.scale).coerceIn(6.5f, 10.5f).dp),
       ) {
-        // Top Kinetic Output Spectrum Bar inside the Activity card
+        // Top Kinetic Output Spectrum Header inside the Activity card
         Row(
           modifier = Modifier
             .fillMaxWidth()
@@ -871,23 +986,31 @@ private fun ActivityLevelSection(
             fontSize = metrics.spScaled(9.4f, 8.2f, 10.8f),
             letterSpacing = 1.0.sp,
           )
-          Text(
-            text = "0${selectedLevel.index} / 04 SELECTED",
-            color = PureWhite,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = metrics.spScaled(9.6f, 8.5f, 11f),
-            letterSpacing = 0.7.sp,
-          )
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.5.dp),
+          ) {
+            Canvas(modifier = Modifier.size(5.5.dp)) {
+              drawCircle(color = animatedAccent)
+            }
+            Text(
+              text = selectedLevel.cadenceBadge,
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.SemiBold,
+              fontSize = metrics.spScaled(9.4f, 8.4f, 10.8f),
+              letterSpacing = 0.7.sp,
+            )
+          }
         }
 
-        // Animated 4-segment kinetic bar
+        // Animated 4-segment kinetic bar progressing from light multi-color to dense gold
         KineticSpectrumGauge(
           progress = animatedIntensity,
           activeSegments = selectedLevel.activeBars,
           modifier = Modifier
             .fillMaxWidth()
-            .height((5.5f * metrics.scale).coerceIn(4.5f, 7f).dp),
+            .height((6f * metrics.scale).coerceIn(5f, 7.5f).dp),
         )
 
         Spacer(modifier = Modifier.height((2f * metrics.scale).dp))
@@ -937,22 +1060,29 @@ private fun ActivityLevelSection(
   }
 }
 
+/**
+ * 4-segment Kinetic Output Spectrum bar that transitions from light multi-color
+ * (Sky-Mint -> Mint-Citrine -> Amber-Gold -> Dense Burnished Gold) on a clean monochrome track.
+ */
 @Composable
 private fun KineticSpectrumGauge(
   progress: Float,
   activeSegments: Int,
   modifier: Modifier = Modifier,
 ) {
+  val levels = remember { ActivityLevelOption.entries }
   Spacer(
     modifier = modifier.drawWithCache {
-      val glowPaint = Paint().apply {
-        isAntiAlias = true
-        asFrameworkPaint().apply {
-          color = android.graphics.Color.argb(135, 255, 255, 255)
-          maskFilter = BlurMaskFilter(
-            safeBlurRadius(size.height * 1.4f),
-            BlurMaskFilter.Blur.NORMAL,
-          )
+      val segmentGlowPaints = levels.map { level ->
+        Paint().apply {
+          isAntiAlias = true
+          asFrameworkPaint().apply {
+            color = level.accentColor.copy(alpha = 0.55f).toArgb()
+            maskFilter = BlurMaskFilter(
+              safeBlurRadius(size.height * 1.35f),
+              BlurMaskFilter.Blur.NORMAL,
+            )
+          }
         }
       }
       onDrawBehind {
@@ -962,11 +1092,12 @@ private fun KineticSpectrumGauge(
         val r = CornerRadius(size.height / 2f, size.height / 2f)
 
         for (i in 0 until 4) {
+          val level = levels[i]
           val startX = i * (segWidth + gap)
           val segStartFraction = i * 0.25f
           val localFill = ((progress - segStartFraction) / 0.25f).coerceIn(0f, 1f)
 
-          // Base track segment
+          // Clean monochrome base track segment
           drawRoundRect(
             color = Zinc850,
             topLeft = Offset(startX, 0f),
@@ -991,12 +1122,12 @@ private fun KineticSpectrumGauge(
                 size.height,
                 r.x,
                 r.y,
-                glowPaint,
+                segmentGlowPaints[i],
               )
             }
             drawRoundRect(
               brush = Brush.horizontalGradient(
-                colors = listOf(Zinc200, PureWhite),
+                colors = listOf(level.spectrumStart, level.spectrumEnd),
                 startX = startX,
                 endX = startX + fillW,
               ),
@@ -1061,7 +1192,7 @@ private fun ActivityOptionRow(
         }
         onDrawBehind {
           val p = selectionProgress.coerceIn(0f, 1f)
-          // Row surface
+          // Monochrome obsidian/zinc row surface
           drawRoundRect(
             brush = Brush.horizontalGradient(
               colors = listOf(
@@ -1089,7 +1220,7 @@ private fun ActivityOptionRow(
             }
           }
 
-          // Border
+          // Monochrome PureWhite / Zinc border
           drawRoundRect(
             brush = Brush.verticalGradient(
               0.0f to PureWhite.copy(alpha = 0.08f + 0.68f * p),
@@ -1101,12 +1232,17 @@ private fun ActivityOptionRow(
             style = Stroke(width = (0.9f + 0.45f * p).dp.toPx()),
           )
 
-          // Left vertical luminous accent bar when selected
+          // Minimalist left vertical spectrum accent bar when selected
           if (p > 0.01f) {
-            val barH = size.height * (0.46f * p)
+            val barH = size.height * (0.48f * p)
             val barW = 3.dp.toPx()
             drawRoundRect(
-              color = PureWhite.copy(alpha = p),
+              brush = Brush.verticalGradient(
+                colors = listOf(
+                  option.spectrumStart.copy(alpha = p),
+                  option.spectrumEnd.copy(alpha = p),
+                ),
+              ),
               topLeft = Offset(0f, (size.height - barH) / 2f),
               size = Size(barW, barH),
               cornerRadius = CornerRadius(barW, barW),
@@ -1136,16 +1272,28 @@ private fun ActivityOptionRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy((11f * metrics.scale).coerceIn(9f, 14f).dp),
       ) {
-        // Left Architectural Signal Box (4 ascending bars showing the activity level)
+        // Left Architectural Signal Box synced with this Activity Level's spectrum color
+        val badgeCorner = (9f * metrics.scale).coerceIn(7.5f, 11f).dp
+        val badgeShape = RoundedCornerShape(badgeCorner)
         Box(
           modifier = Modifier
             .size((38f * metrics.scale).coerceIn(34f, 44f).dp)
-            .clip(RoundedCornerShape((9f * metrics.scale).coerceIn(7.5f, 11f).dp))
-            .background(if (isSelected) PureWhite else Zinc900)
+            .clip(badgeShape)
+            .background(
+              brush = if (isSelected) {
+                Brush.linearGradient(
+                  colors = listOf(option.spectrumStart, option.spectrumEnd),
+                )
+              } else {
+                Brush.verticalGradient(
+                  colors = listOf(Zinc900, Zinc950),
+                )
+              },
+            )
             .border(
               width = 1.dp,
-              color = if (isSelected) PureWhite else Zinc700.copy(alpha = 0.7f),
-              shape = RoundedCornerShape((9f * metrics.scale).coerceIn(7.5f, 11f).dp),
+              color = if (isSelected) option.spectrumStart else option.accentColor.copy(alpha = 0.40f),
+              shape = badgeShape,
             ),
           contentAlignment = Alignment.Center,
         ) {
@@ -1167,7 +1315,7 @@ private fun ActivityOptionRow(
               val barColor = when {
                 isSelected && isBarLit -> ObsidianBlack
                 isSelected && !isBarLit -> ObsidianBlack.copy(alpha = 0.22f)
-                !isSelected && isBarLit -> PureWhite
+                !isSelected && isBarLit -> option.accentColor
                 else -> Zinc700
               }
               drawRoundRect(
@@ -1180,48 +1328,21 @@ private fun ActivityOptionRow(
           }
         }
 
-        // Title + Subtitle ("Sedentary" / "Work, Little exercise", etc.)
+        // Clean Black & White Title + Subtitle (01/02/03/04 blocks removed)
         Column(
           modifier = Modifier.weight(1f),
           verticalArrangement = Arrangement.Center,
         ) {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-          ) {
-            Text(
-              text = title,
-              color = titleColor,
-              fontFamily = InterFontFamily,
-              fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-              fontSize = metrics.spScaled(14.5f, 13f, 16.5f),
-              letterSpacing = (-0.2).sp,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
-            )
-
-            // Cadence pill badge
-            Box(
-              modifier = Modifier
-                .clip(RoundedCornerShape(4.dp))
-                .background(if (isSelected) PureWhite.copy(alpha = 0.14f) else Zinc900)
-                .border(
-                  width = 0.6.dp,
-                  color = if (isSelected) PureWhite.copy(alpha = 0.35f) else Zinc800,
-                  shape = RoundedCornerShape(4.dp),
-                )
-                .padding(horizontal = 5.5.dp, vertical = 1.5.dp),
-            ) {
-              Text(
-                text = "0${option.index}",
-                color = if (isSelected) PureWhite else Zinc500,
-                fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = metrics.spScaled(8.6f, 7.6f, 10f),
-                letterSpacing = 0.5.sp,
-              )
-            }
-          }
+          Text(
+            text = title,
+            color = titleColor,
+            fontFamily = InterFontFamily,
+            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+            fontSize = metrics.spScaled(14.5f, 13f, 16.5f),
+            letterSpacing = (-0.2).sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
 
           Spacer(modifier = Modifier.height(2.dp))
 
@@ -1239,9 +1360,10 @@ private fun ActivityOptionRow(
 
       Spacer(modifier = Modifier.width(8.dp))
 
-      // Right Precision Radio Indicator
+      // Right Precision Radio Indicator (White outer ring, synced spectrum inner dot)
       BlueprintRadioLockIndicator(
         selectionProgress = selectionProgress,
+        activeColor = option.accentColor,
         size = (20f * metrics.scale).coerceIn(18f, 23f).dp,
       )
     }
@@ -1251,13 +1373,14 @@ private fun ActivityOptionRow(
 @Composable
 private fun BlueprintRadioLockIndicator(
   selectionProgress: Float,
+  activeColor: Color,
   size: Dp,
 ) {
   Canvas(modifier = Modifier.size(size)) {
     val r = this.size.minDimension / 2f
     val p = selectionProgress.coerceIn(0f, 1f)
 
-    // Outer ring
+    // Monochrome outer ring
     drawCircle(
       color = if (p > 0.5f) PureWhite else Zinc600,
       radius = r - 1.dp.toPx(),
@@ -1265,17 +1388,17 @@ private fun BlueprintRadioLockIndicator(
     )
 
     if (p > 0.02f) {
-      // Inner filled precision core
+      // Minimalist spectrum-synced inner core
       drawCircle(
-        color = PureWhite.copy(alpha = p),
-        radius = (r * 0.54f) * p,
+        color = activeColor.copy(alpha = p),
+        radius = (r * 0.52f) * p,
         center = center,
       )
     }
   }
 }
 
-// ─── Section 2: Objective (Single-select from 3 options) ────────────────────
+// ─── Section 2: Objective (Monochrome Cards + Solid/Dense Colored Badges) ───
 
 @Composable
 private fun ObjectiveSection(
@@ -1284,11 +1407,20 @@ private fun ObjectiveSection(
   metrics: BlueprintResponsiveMetrics,
 ) {
   val cardShape = RoundedCornerShape(metrics.cardCornerRadius)
+  val animatedPrimary by animateColorAsState(
+    targetValue = selectedObjective.primaryColor,
+    animationSpec = tween(durationMillis = 260),
+    label = "objective_primary_color",
+  )
+  val animatedSecondary by animateColorAsState(
+    targetValue = selectedObjective.secondaryColor,
+    animationSpec = tween(durationMillis = 260),
+    label = "objective_secondary_color",
+  )
 
   Column(modifier = Modifier.fillMaxWidth()) {
     BlueprintSectionHeaderRow(
       label = stringResource(R.string.blueprint_objective_section_label),
-      statusPillText = selectedObjective.vectorBadge,
       metrics = metrics,
     )
 
@@ -1371,16 +1503,18 @@ private fun ObjectiveSection(
           )
         }
 
-        // Live Selected Objective Telemetry Strip
+        // Monochrome Telemetry Strip with solid colored category badge
+        val stripCorner = (8.5f * metrics.scale).coerceIn(7f, 10.5f).dp
+        val stripShape = RoundedCornerShape(stripCorner)
         Row(
           modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape((8.5f * metrics.scale).coerceIn(7f, 10.5f).dp))
+            .clip(stripShape)
             .background(Zinc950)
             .border(
               width = 0.8.dp,
               color = Zinc800,
-              shape = RoundedCornerShape((8.5f * metrics.scale).coerceIn(7f, 10.5f).dp),
+              shape = stripShape,
             )
             .padding(
               horizontal = (11f * metrics.scale).coerceIn(9f, 14f).dp,
@@ -1392,16 +1526,20 @@ private fun ObjectiveSection(
           Box(
             modifier = Modifier
               .clip(RoundedCornerShape(4.dp))
-              .background(PureWhite)
-              .padding(horizontal = 6.dp, vertical = 2.dp),
+              .background(
+                brush = Brush.horizontalGradient(
+                  colors = listOf(animatedPrimary, animatedSecondary),
+                ),
+              )
+              .padding(horizontal = 6.5.dp, vertical = 2.5.dp),
           ) {
             Text(
-              text = "ACTIVE",
-              color = ObsidianBlack,
+              text = selectedObjective.vectorBadge,
+              color = PureWhite,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.Bold,
-              fontSize = metrics.spScaled(8.6f, 7.6f, 9.8f),
-              letterSpacing = 0.6.sp,
+              fontSize = metrics.spScaled(8.0f, 7.2f, 9.2f),
+              letterSpacing = 0.5.sp,
             )
           }
 
@@ -1445,7 +1583,7 @@ private fun ObjectiveTileCard(
 
   Box(
     modifier = modifier
-      .heightIn(min = (126f * metrics.scale).coerceIn(112f, 146f).dp)
+      .heightIn(min = (118f * metrics.scale).coerceIn(106f, 136f).dp)
       .clip(tileShape)
       .drawWithCache {
         val cornerPx = tileCorner.toPx()
@@ -1453,17 +1591,17 @@ private fun ObjectiveTileCard(
         val glowPaint = Paint().apply {
           isAntiAlias = true
           asFrameworkPaint().apply {
-            color = android.graphics.Color.argb(75, 255, 255, 255)
-            maskFilter = BlurMaskFilter(safeBlurRadius(12.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
+            color = android.graphics.Color.argb(65, 255, 255, 255)
+            maskFilter = BlurMaskFilter(safeBlurRadius(11.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
           }
         }
         onDrawBehind {
           val p = selectionProgress.coerceIn(0f, 1f)
-          // Card fill: transitions from deep zinc to luminous platinum-tinted obsidian
+          // Clean Obsidian/Zinc card surface
           drawRoundRect(
             brush = Brush.verticalGradient(
               colors = listOf(
-                Color(0xFF1D1D23).copy(alpha = 0.55f + 0.45f * p),
+                Color(0xFF1C1C22).copy(alpha = 0.60f + 0.40f * p),
                 Color(0xFF0E0E12).copy(alpha = 0.80f + 0.20f * p),
               ),
             ),
@@ -1473,7 +1611,7 @@ private fun ObjectiveTileCard(
           )
 
           if (p > 0.02f) {
-            glowPaint.asFrameworkPaint().alpha = (65 * p).roundToInt().coerceIn(0, 85)
+            glowPaint.asFrameworkPaint().alpha = (60 * p).roundToInt().coerceIn(0, 80)
             drawIntoCanvas { canvas ->
               canvas.drawRoundRect(
                 0f,
@@ -1487,26 +1625,32 @@ private fun ObjectiveTileCard(
             }
           }
 
-          // Top specular highlight line when selected
+          // Minimalist category-colored top accent line when selected
           if (p > 0.01f) {
-            val topSpanW = size.width * (0.55f * p)
+            val topSpanW = size.width * (0.58f * p)
             drawRoundRect(
-              color = PureWhite.copy(alpha = p),
+              brush = Brush.horizontalGradient(
+                colors = listOf(
+                  option.primaryColor.copy(alpha = p),
+                  option.secondaryColor.copy(alpha = p),
+                ),
+              ),
               topLeft = Offset((size.width - topSpanW) / 2f, 0f),
-              size = Size(topSpanW, 2.4.dp.toPx()),
+              size = Size(topSpanW, 2.5.dp.toPx()),
               cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
             )
           }
 
+          // Monochrome PureWhite / Zinc border
           drawRoundRect(
             brush = Brush.verticalGradient(
-              0.0f to PureWhite.copy(alpha = 0.10f + 0.78f * p),
-              1.0f to Zinc700.copy(alpha = 0.45f + 0.45f * p),
+              0.0f to PureWhite.copy(alpha = 0.12f + 0.72f * p),
+              1.0f to Zinc700.copy(alpha = 0.45f + 0.40f * p),
             ),
             topLeft = Offset.Zero,
             size = size,
             cornerRadius = cornerRadius,
-            style = Stroke(width = (0.95f + 0.55f * p).dp.toPx()),
+            style = Stroke(width = (0.95f + 0.50f * p).dp.toPx()),
           )
         }
       }
@@ -1516,8 +1660,8 @@ private fun ObjectiveTileCard(
       )
       .semantics { selected = isSelected }
       .padding(
-        horizontal = (10f * metrics.scale).coerceIn(8f, 13f).dp,
-        vertical = (11f * metrics.scale).coerceIn(9f, 14f).dp,
+        horizontal = (10f * metrics.scale).coerceIn(8.5f, 13f).dp,
+        vertical = (11f * metrics.scale).coerceIn(9.5f, 14f).dp,
       )
       .testTag(testTag),
   ) {
@@ -1525,44 +1669,57 @@ private fun ObjectiveTileCard(
       modifier = Modifier.fillMaxWidth(),
       verticalArrangement = Arrangement.SpaceBetween,
     ) {
-      // Top row: Vector Icon Box + Index Number ("01", "02", "03")
+      // Top row: Solid/Dense Colored Vector Icon Box + Minimalist Status Dot
       Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
       ) {
+        val iconCorner = (8.5f * metrics.scale).coerceIn(7f, 10f).dp
+        val iconShape = RoundedCornerShape(iconCorner)
         Box(
           modifier = Modifier
-            .size((32f * metrics.scale).coerceIn(28f, 36f).dp)
-            .clip(RoundedCornerShape((8f * metrics.scale).coerceIn(6.5f, 9.5f).dp))
-            .background(if (isSelected) PureWhite else Zinc900)
+            .size((34f * metrics.scale).coerceIn(30f, 38f).dp)
+            .clip(iconShape)
+            .background(
+              brush = Brush.linearGradient(
+                colors = listOf(option.primaryColor, option.secondaryColor),
+              ),
+            )
             .border(
-              width = 0.9.dp,
-              color = if (isSelected) PureWhite else Zinc700,
-              shape = RoundedCornerShape((8f * metrics.scale).coerceIn(6.5f, 9.5f).dp),
+              width = 1.dp,
+              color = if (isSelected) PureWhite.copy(alpha = 0.75f) else option.primaryColor.copy(alpha = 0.55f),
+              shape = iconShape,
             ),
           contentAlignment = Alignment.Center,
         ) {
           ObjectiveVectorGlyph(
             option = option,
-            tint = if (isSelected) ObsidianBlack else PureWhite,
-            modifier = Modifier.size((16f * metrics.scale).coerceIn(14f, 18.5f).dp),
+            tint = PureWhite,
+            modifier = Modifier.size((17f * metrics.scale).coerceIn(14.5f, 19.5f).dp),
           )
         }
 
-        Text(
-          text = option.codeLabel,
-          color = if (isSelected) PureWhite else Zinc500,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.SemiBold,
-          fontSize = metrics.spScaled(10.2f, 9f, 11.5f),
-          letterSpacing = 0.6.sp,
-        )
+        // Minimalist status dot synced with category color
+        Canvas(modifier = Modifier.size((7.5f * metrics.scale).coerceIn(6.5f, 9f).dp)) {
+          val r = size.minDimension / 2f
+          if (isSelected) {
+            drawCircle(
+              color = option.primaryColor,
+              radius = r,
+            )
+          } else {
+            drawCircle(
+              color = Zinc700,
+              radius = r * 0.78f,
+            )
+          }
+        }
       }
 
-      Spacer(modifier = Modifier.height((12f * metrics.scale).coerceIn(8f, 15f).dp))
+      Spacer(modifier = Modifier.height((12f * metrics.scale).coerceIn(9f, 15f).dp))
 
-      // Bottom Title & Subtitle
+      // Clean Black & White Title & Concise Subtitle
       Column(modifier = Modifier.fillMaxWidth()) {
         Text(
           text = title,
@@ -1574,15 +1731,15 @@ private fun ObjectiveTileCard(
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
         )
-        Spacer(modifier = Modifier.height(3.dp))
+        Spacer(modifier = Modifier.height(2.5.dp))
         Text(
           text = subtitle,
-          color = if (isSelected) Zinc300 else Zinc500,
+          color = if (isSelected) Zinc300 else Zinc400,
           fontFamily = InterFontFamily,
           fontWeight = FontWeight.Normal,
-          fontSize = metrics.spScaled(10.4f, 9.2f, 11.8f),
-          lineHeight = metrics.spScaled(13.6f, 12f, 15.2f),
-          maxLines = 2,
+          fontSize = metrics.spScaled(11f, 9.8f, 12.4f),
+          lineHeight = metrics.spScaled(13.5f, 12f, 15f),
+          maxLines = 1,
           overflow = TextOverflow.Ellipsis,
         )
       }
@@ -1599,11 +1756,10 @@ private fun ObjectiveVectorGlyph(
   Canvas(modifier = modifier) {
     val w = size.width
     val h = size.height
-    val strokeW = (w * 0.115f).coerceAtLeast(1.5f)
+    val strokeW = (w * 0.12f).coerceAtLeast(1.6f)
 
     when (option) {
       BlueprintObjectiveOption.LOSE_FAT -> {
-        // Precision descending metabolic trend arrow with target baseline
         val path = Path().apply {
           moveTo(w * 0.16f, h * 0.24f)
           lineTo(w * 0.46f, h * 0.54f)
@@ -1619,7 +1775,7 @@ private fun ObjectiveVectorGlyph(
           style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round),
         )
         drawLine(
-          color = tint.copy(alpha = 0.55f),
+          color = tint.copy(alpha = 0.65f),
           start = Offset(w * 0.16f, h * 0.84f),
           end = Offset(w * 0.84f, h * 0.84f),
           strokeWidth = strokeW * 0.85f,
@@ -1628,7 +1784,6 @@ private fun ObjectiveVectorGlyph(
       }
 
       BlueprintObjectiveOption.MAINTAIN -> {
-        // Precision equilibrium balance / dual harmonic waves
         drawLine(
           color = tint,
           start = Offset(w * 0.15f, h * 0.36f),
@@ -1656,7 +1811,6 @@ private fun ObjectiveVectorGlyph(
       }
 
       BlueprintObjectiveOption.BUILD_MUSCLE -> {
-        // Ascending anabolic vector arrow with peak marker
         val path = Path().apply {
           moveTo(w * 0.16f, h * 0.74f)
           lineTo(w * 0.44f, h * 0.46f)
@@ -1672,7 +1826,7 @@ private fun ObjectiveVectorGlyph(
           style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round),
         )
         drawLine(
-          color = tint.copy(alpha = 0.55f),
+          color = tint.copy(alpha = 0.65f),
           start = Offset(w * 0.16f, h * 0.86f),
           end = Offset(w * 0.84f, h * 0.86f),
           strokeWidth = strokeW * 0.85f,
@@ -1683,7 +1837,7 @@ private fun ObjectiveVectorGlyph(
   }
 }
 
-// ─── Section 3: Daily Streak Completion Threshold (100% / 95% / 90% / 85% / 80%) ─
+// ─── Section 3: Daily Streak Completion Threshold (Monochrome + Targeted Color Accents) ─
 
 @Composable
 private fun StreakThresholdSection(
@@ -1697,11 +1851,33 @@ private fun StreakThresholdSection(
     animationSpec = tween(durationMillis = 360, easing = BlueprintEaseOut),
     label = "streak_threshold_percent",
   )
+  val animatedBarFraction by animateFloatAsState(
+    targetValue = selectedThreshold.barFillFraction,
+    animationSpec = spring(
+      dampingRatio = Spring.DampingRatioNoBouncy,
+      stiffness = Spring.StiffnessMediumLow,
+    ),
+    label = "streak_threshold_bar_fraction",
+  )
+  val animatedAccent by animateColorAsState(
+    targetValue = selectedThreshold.accentColor,
+    animationSpec = tween(durationMillis = 260),
+    label = "streak_threshold_accent",
+  )
+  val animatedStartColor by animateColorAsState(
+    targetValue = selectedThreshold.colorStart,
+    animationSpec = tween(durationMillis = 260),
+    label = "streak_threshold_start",
+  )
+  val animatedEndColor by animateColorAsState(
+    targetValue = selectedThreshold.colorEnd,
+    animationSpec = tween(durationMillis = 260),
+    label = "streak_threshold_end",
+  )
 
   Column(modifier = Modifier.fillMaxWidth()) {
     BlueprintSectionHeaderRow(
       label = stringResource(R.string.blueprint_streak_section_label),
-      statusPillText = "STREAK RULE • ${selectedThreshold.percentage}%",
       metrics = metrics,
     )
 
@@ -1743,77 +1919,79 @@ private fun StreakThresholdSection(
     ) {
       Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy((11f * metrics.scale).coerceIn(8.5f, 14f).dp),
+        verticalArrangement = Arrangement.spacedBy((11f * metrics.scale).coerceIn(9f, 14f).dp),
       ) {
-        // Top Header inside Streak Card: Flame Emblem + Live Readout + 6 Tracked Pillars
+        // Top Header inside Streak Card: Animated Fire Emblem + Synced Tier Badge + White Percentage Readout
         Row(
           modifier = Modifier.fillMaxWidth(),
-          verticalAlignment = Alignment.CenterVertically,
+          verticalAlignment = Alignment.Top,
           horizontalArrangement = Arrangement.SpaceBetween,
         ) {
           Row(
             modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy((11f * metrics.scale).coerceIn(9f, 13f).dp),
           ) {
-            // Left Streak Emblem Box
-            Box(
+            // Left Lively Animated Fire Streak Badge in an Obsidian frame
+            AnimatedFireStreakBadge(
               modifier = Modifier
-                .size((42f * metrics.scale).coerceIn(36f, 48f).dp)
-                .clip(RoundedCornerShape((10f * metrics.scale).coerceIn(8f, 12f).dp))
-                .background(PureWhite)
-                .border(
-                  width = 1.dp,
-                  color = PureWhite,
-                  shape = RoundedCornerShape((10f * metrics.scale).coerceIn(8f, 12f).dp),
-                ),
-              contentAlignment = Alignment.Center,
-            ) {
-              StreakFlameGlyph(
-                tint = ObsidianBlack,
-                modifier = Modifier.size((21f * metrics.scale).coerceIn(18f, 24f).dp),
-              )
-            }
+                .size((44f * metrics.scale).coerceIn(38f, 50f).dp)
+                .testTag("streak_fire_badge"),
+            )
 
             Column(modifier = Modifier.weight(1f)) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+              Text(
+                text = "+1 DAILY STREAK",
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = metrics.spScaled(11.8f, 10.2f, 13.2f),
+                letterSpacing = 0.8.sp,
+                maxLines = 1,
+              )
+
+              Spacer(modifier = Modifier.height(4.dp))
+
+              // Minimalist Tier Pill synced with the selected percentage block's color
+              Box(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(4.5.dp))
+                  .background(Zinc900)
+                  .border(
+                    width = 0.8.dp,
+                    color = animatedAccent.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(4.5.dp),
+                  )
+                  .padding(horizontal = 6.5.dp, vertical = 2.dp),
               ) {
-                Text(
-                  text = "+1 DAILY STREAK",
-                  color = PureWhite,
-                  fontFamily = JetBrainsMonoFontFamily,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = metrics.spScaled(11.5f, 10f, 13f),
-                  letterSpacing = 0.8.sp,
-                )
-                Box(
-                  modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Zinc850)
-                    .border(0.6.dp, Zinc700, RoundedCornerShape(4.dp))
-                    .padding(horizontal = 5.5.dp, vertical = 1.5.dp),
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
+                  Canvas(modifier = Modifier.size(5.dp)) {
+                    drawCircle(color = animatedAccent)
+                  }
                   Text(
                     text = selectedThreshold.tierTitle,
-                    color = Zinc200,
+                    color = animatedAccent,
                     fontFamily = JetBrainsMonoFontFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = metrics.spScaled(8.4f, 7.5f, 9.6f),
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = metrics.spScaled(8.6f, 7.6f, 9.8f),
                     letterSpacing = 0.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                   )
                 }
               }
 
-              Spacer(modifier = Modifier.height(3.dp))
+              Spacer(modifier = Modifier.height(5.dp))
 
               Text(
                 text = stringResource(R.string.blueprint_streak_section_subtitle),
                 color = Zinc400,
                 fontFamily = InterFontFamily,
                 fontWeight = FontWeight.Normal,
-                fontSize = metrics.spScaled(11.2f, 9.8f, 12.6f),
+                fontSize = metrics.spScaled(11.1f, 9.8f, 12.5f),
                 lineHeight = metrics.spScaled(15f, 13.2f, 17f),
               )
             }
@@ -1821,7 +1999,7 @@ private fun StreakThresholdSection(
 
           Spacer(modifier = Modifier.width(8.dp))
 
-          // Right Large Animated Percentage Display
+          // Right Large Animated Percentage Display in PureWhite
           Column(
             horizontalAlignment = Alignment.End,
           ) {
@@ -1845,7 +2023,7 @@ private fun StreakThresholdSection(
           }
         }
 
-        // 5-Option Single-Select Percentage Dock: 100% | 95% | 90% | 85% | 80%
+        // 5-Option Percentage Dock: 100% | 95% | 90% | 85% | 80%
         Row(
           modifier = Modifier
             .fillMaxWidth()
@@ -1871,57 +2049,86 @@ private fun StreakThresholdSection(
           }
         }
 
-        // Animated Threshold Calibration Bar + 6 Tracked Daily Goals Pills
+        // Full-Range Animated Threshold Calibration Bar (20% -> 40% -> 60% -> 80% -> 100% span)
         StreakThresholdPrecisionBar(
-          animatedPercent = animatedPercent,
+          animatedFraction = animatedBarFraction,
+          activeStartColor = animatedStartColor,
+          activeEndColor = animatedEndColor,
+          activeAccentColor = animatedAccent,
           modifier = Modifier
             .fillMaxWidth()
-            .height((8f * metrics.scale).coerceIn(6.5f, 10f).dp),
+            .height((8.5f * metrics.scale).coerceIn(7f, 10.5f).dp),
         )
 
-        // Tracked Daily Pillars row (Calories • Protein • Carbs • Fats • Hydration • Steps)
+        // Tracked Daily Pillars row (Minimalist monochrome pills with Welcome-screen colored dots)
         Row(
           modifier = Modifier.fillMaxWidth(),
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-          val pillars = remember {
-            listOf("CAL", "PRO", "CARB", "FAT", "H2O", "STEPS")
-          }
           Row(
             horizontalArrangement = Arrangement.spacedBy((4.5f * metrics.scale).coerceIn(3.5f, 6f).dp),
             verticalAlignment = Alignment.CenterVertically,
           ) {
-            pillars.forEach { pillar ->
-              Box(
-                modifier = Modifier
-                  .clip(RoundedCornerShape(4.dp))
-                  .background(Zinc900)
-                  .border(0.6.dp, Zinc800, RoundedCornerShape(4.dp))
-                  .padding(horizontal = 5.5.dp, vertical = 2.dp),
-              ) {
-                Text(
-                  text = pillar,
-                  color = Zinc300,
-                  fontFamily = JetBrainsMonoFontFamily,
-                  fontWeight = FontWeight.Medium,
-                  fontSize = metrics.spScaled(8.3f, 7.4f, 9.5f),
-                  letterSpacing = 0.4.sp,
-                )
-              }
+            WelcomeDailyPillars.forEach { pillar ->
+              WelcomeColoredPillarBadge(
+                spec = pillar,
+                metrics = metrics,
+              )
             }
           }
 
           Text(
-            text = "≥ ${selectedThreshold.percentage}% EACH DAY",
+            text = "≥ ${selectedThreshold.percentage}% DAILY",
             color = PureWhite,
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.SemiBold,
-            fontSize = metrics.spScaled(9.4f, 8.2f, 10.6f),
-            letterSpacing = 0.5.sp,
+            fontSize = metrics.spScaled(9.2f, 8.0f, 10.4f),
+            letterSpacing = 0.4.sp,
           )
         }
       }
+    }
+  }
+}
+
+/**
+ * Minimalist dark Zinc900 pill badge for CAL, PRO, CARB, FAT, H2O, STEPS
+ * featuring a crisp colored indicator dot from the Welcome screen palette.
+ */
+@Composable
+private fun WelcomeColoredPillarBadge(
+  spec: WelcomePillarSpec,
+  metrics: BlueprintResponsiveMetrics,
+) {
+  val pillShape = RoundedCornerShape(4.5.dp)
+  Box(
+    modifier = Modifier
+      .clip(pillShape)
+      .background(Zinc900)
+      .border(
+        width = 0.7.dp,
+        color = spec.borderTint.copy(alpha = 0.38f),
+        shape = pillShape,
+      )
+      .padding(horizontal = (5.5f * metrics.scale).coerceIn(4.5f, 6.5f).dp, vertical = 2.2.dp),
+    contentAlignment = Alignment.Center,
+  ) {
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(3.5.dp),
+    ) {
+      Canvas(modifier = Modifier.size(4.2.dp)) {
+        drawCircle(color = spec.dotColor)
+      }
+      Text(
+        text = spec.label,
+        color = Zinc200,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = metrics.spScaled(8.1f, 7.2f, 9.2f),
+        letterSpacing = 0.3.sp,
+      )
     }
   }
 }
@@ -1956,14 +2163,14 @@ private fun StreakPercentPillButton(
         val glowPaint = Paint().apply {
           isAntiAlias = true
           asFrameworkPaint().apply {
-            color = android.graphics.Color.argb(90, 255, 255, 255)
+            color = option.accentColor.copy(alpha = 0.45f).toArgb()
             maskFilter = BlurMaskFilter(safeBlurRadius(8.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
           }
         }
         onDrawBehind {
           val p = selectProgress.coerceIn(0f, 1f)
           if (p > 0.02f) {
-            glowPaint.asFrameworkPaint().alpha = (85 * p).roundToInt().coerceIn(0, 105)
+            glowPaint.asFrameworkPaint().alpha = (75 * p).roundToInt().coerceIn(0, 95)
             drawIntoCanvas { canvas ->
               canvas.drawRoundRect(
                 0f,
@@ -1975,32 +2182,52 @@ private fun StreakPercentPillButton(
                 glowPaint,
               )
             }
+            // Crisp PureWhite selected block with subtle bottom color bar
             drawRoundRect(
               brush = Brush.verticalGradient(
                 colors = listOf(
                   PureWhite.copy(alpha = p),
-                  Color(0xFFE4E6EB).copy(alpha = p),
+                  Color(0xFFE6E8EE).copy(alpha = p),
                 ),
               ),
               topLeft = Offset.Zero,
               size = size,
               cornerRadius = cornerRadius,
             )
+            drawRoundRect(
+              color = option.accentColor.copy(alpha = p),
+              topLeft = Offset.Zero,
+              size = size,
+              cornerRadius = cornerRadius,
+              style = Stroke(width = 1.2.dp.toPx()),
+            )
           } else {
             drawRoundRect(
-              color = Zinc900.copy(alpha = 0.65f),
+              color = Zinc900.copy(alpha = 0.75f),
               topLeft = Offset.Zero,
               size = size,
               cornerRadius = cornerRadius,
             )
             drawRoundRect(
-              color = Zinc800,
+              color = option.accentColor.copy(alpha = 0.28f),
               topLeft = Offset.Zero,
               size = size,
               cornerRadius = cornerRadius,
-              style = Stroke(width = 0.7.dp.toPx()),
+              style = Stroke(width = 0.75.dp.toPx()),
             )
           }
+
+          // Minimalist bottom indicator bar showing each block's distinct color
+          val barW = size.width * (0.42f + 0.18f * p)
+          val barH = 2.4.dp.toPx()
+          drawRoundRect(
+            brush = Brush.horizontalGradient(
+              colors = listOf(option.colorStart, option.colorEnd),
+            ),
+            topLeft = Offset((size.width - barW) / 2f, size.height - barH - 2.5.dp.toPx()),
+            size = Size(barW, barH),
+            cornerRadius = CornerRadius(barH, barH),
+          )
         }
       }
       .clickable(
@@ -2017,10 +2244,11 @@ private fun StreakPercentPillButton(
     Column(
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.Center,
+      modifier = Modifier.padding(bottom = 3.dp),
     ) {
       Text(
         text = "${option.percentage}%",
-        color = if (isSelected) ObsidianBlack else Zinc200,
+        color = if (isSelected) ObsidianBlack else Zinc100,
         fontFamily = JetBrainsMonoFontFamily,
         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
         fontSize = metrics.spScaled(13.2f, 11.5f, 15f),
@@ -2029,27 +2257,44 @@ private fun StreakPercentPillButton(
       Spacer(modifier = Modifier.height(1.dp))
       Text(
         text = if (isSelected) "ACTIVE" else "STREAK",
-        color = if (isSelected) ObsidianBlack.copy(alpha = 0.72f) else Zinc500,
+        color = if (isSelected) ObsidianBlack.copy(alpha = 0.75f) else option.accentColor,
         fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = metrics.spScaled(7.8f, 7f, 8.8f),
-        letterSpacing = 0.5.sp,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = metrics.spScaled(7.5f, 6.8f, 8.5f),
+        letterSpacing = 0.4.sp,
       )
     }
   }
 }
 
+/**
+ * Full-Range Progress Bar for 80%, 85%, 90%, 95%, 100%.
+ * Maps 80% -> 20%, 85% -> 40%, 90% -> 60%, 95% -> 80%, 100% -> 100% of the bar width
+ * on a clean monochrome track with a minimalist color-synced fill tip.
+ */
 @Composable
 private fun StreakThresholdPrecisionBar(
-  animatedPercent: Float,
+  animatedFraction: Float,
+  activeStartColor: Color,
+  activeEndColor: Color,
+  activeAccentColor: Color,
   modifier: Modifier = Modifier,
 ) {
+  val stops = remember {
+    listOf(
+      StreakThresholdOption.PERCENT_80,
+      StreakThresholdOption.PERCENT_85,
+      StreakThresholdOption.PERCENT_90,
+      StreakThresholdOption.PERCENT_95,
+      StreakThresholdOption.PERCENT_100,
+    )
+  }
   Spacer(
     modifier = modifier.drawWithCache {
       val glowPaint = Paint().apply {
         isAntiAlias = true
         asFrameworkPaint().apply {
-          color = android.graphics.Color.argb(145, 255, 255, 255)
+          color = activeAccentColor.copy(alpha = 0.50f).toArgb()
           maskFilter = BlurMaskFilter(
             safeBlurRadius(size.height * 1.3f),
             BlurMaskFilter.Blur.NORMAL,
@@ -2058,34 +2303,35 @@ private fun StreakThresholdPrecisionBar(
       }
       onDrawBehind {
         if (size.width <= 1f || size.height <= 1f) return@onDrawBehind
-        val trackH = size.height
+        val trackH = size.height * 0.74f
+        val trackTop = (size.height - trackH) / 2f
         val r = CornerRadius(trackH / 2f, trackH / 2f)
 
-        // Track background
+        // Monochrome track background
         drawRoundRect(
           color = Zinc850,
-          topLeft = Offset.Zero,
-          size = size,
+          topLeft = Offset(0f, trackTop),
+          size = Size(size.width, trackH),
           cornerRadius = r,
         )
         drawRoundRect(
           color = Zinc700.copy(alpha = 0.55f),
-          topLeft = Offset.Zero,
-          size = size,
+          topLeft = Offset(0f, trackTop),
+          size = Size(size.width, trackH),
           cornerRadius = r,
           style = Stroke(width = 0.8.dp.toPx()),
         )
 
-        // Fill width proportional to animatedPercent (mapped cleanly across the bar)
-        val normalized = (animatedPercent / 100f).coerceIn(0.80f, 1.00f)
+        // Wide, responsive fill width mapped from 0.20f (80%) to 1.00f (100%)
+        val normalized = animatedFraction.coerceIn(0.20f, 1.00f)
         val fillW = (size.width * normalized).coerceIn(trackH, size.width)
 
         drawIntoCanvas { canvas ->
           canvas.drawRoundRect(
             0f,
-            0f,
+            trackTop,
             fillW,
-            trackH,
+            trackTop + trackH,
             r.x,
             r.y,
             glowPaint,
@@ -2095,74 +2341,302 @@ private fun StreakThresholdPrecisionBar(
         drawRoundRect(
           brush = Brush.horizontalGradient(
             colors = listOf(
-              Color(0xFFB8BDC7),
-              Color(0xFFE8ECF2),
-              PureWhite,
+              PureWhite.copy(alpha = 0.90f),
+              activeStartColor,
+              activeEndColor,
             ),
             startX = 0f,
             endX = fillW,
           ),
-          topLeft = Offset.Zero,
+          topLeft = Offset(0f, trackTop),
           size = Size(fillW, trackH),
           cornerRadius = r,
         )
 
-        // Tick marks at 80%, 85%, 90%, 95%, 100%
-        val thresholds = floatArrayOf(0.80f, 0.85f, 0.90f, 0.95f, 1.00f)
-        thresholds.forEach { t ->
-          val tx = (size.width * t).coerceIn(trackH / 2f, size.width - trackH / 2f)
+        // 5 evenly spaced calibration stop markers at 20%, 40%, 60%, 80%, 100%
+        stops.forEach { stop ->
+          val stopX = (size.width * stop.barFillFraction).coerceIn(trackH / 2f, size.width - trackH / 2f)
+          val isReached = stop.barFillFraction <= normalized + 0.01f
           drawCircle(
-            color = if (t <= normalized + 0.005f) ObsidianBlack.copy(alpha = 0.55f) else Zinc600,
-            radius = (trackH * 0.22f).coerceAtLeast(1.2f),
-            center = Offset(tx, trackH / 2f),
+            color = if (isReached) ObsidianBlack.copy(alpha = 0.60f) else Zinc600,
+            radius = (trackH * 0.22f).coerceAtLeast(1.3f),
+            center = Offset(stopX, size.height / 2f),
           )
         }
+
+        // Crisp white leading indicator node with active accent core
+        val thumbX = fillW.coerceIn(size.height / 2f, size.width - size.height / 2f)
+        val thumbCenter = Offset(thumbX, size.height / 2f)
+        drawCircle(
+          color = PureWhite,
+          radius = size.height * 0.44f,
+          center = thumbCenter,
+        )
+        drawCircle(
+          color = activeAccentColor,
+          radius = size.height * 0.22f,
+          center = thumbCenter,
+        )
       }
     },
   )
 }
 
+/**
+ * Minimalist Obsidian Badge housing a Lively Animated Multi-Layered Fire Flame.
+ */
 @Composable
-private fun StreakFlameGlyph(
-  tint: Color,
+private fun AnimatedFireStreakBadge(
   modifier: Modifier = Modifier,
 ) {
-  Canvas(modifier = modifier) {
-    val w = size.width
-    val h = size.height
-    val strokeW = (w * 0.105f).coerceAtLeast(1.5f)
+  val infiniteTransition = rememberInfiniteTransition(label = "streak_fire_badge_animation")
+  val flameFlicker by infiniteTransition.animateFloat(
+    initialValue = 0f,
+    targetValue = 1f,
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 920, easing = FastOutSlowInEasing),
+      repeatMode = RepeatMode.Reverse,
+    ),
+    label = "flame_flicker",
+  )
+  val flameSway by infiniteTransition.animateFloat(
+    initialValue = -1f,
+    targetValue = 1f,
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 1280, easing = FastOutSlowInEasing),
+      repeatMode = RepeatMode.Reverse,
+    ),
+    label = "flame_sway",
+  )
+  val emberRise by infiniteTransition.animateFloat(
+    initialValue = 0f,
+    targetValue = 1f,
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 1550, easing = LinearEasing),
+      repeatMode = RepeatMode.Restart,
+    ),
+    label = "ember_rise",
+  )
 
-    // Sculpted geometric flame / streak bolt emblem
-    val outerFlame = Path().apply {
-      moveTo(w * 0.52f, h * 0.10f)
-      cubicTo(w * 0.58f, h * 0.28f, w * 0.84f, h * 0.38f, w * 0.80f, h * 0.63f)
-      cubicTo(w * 0.77f, h * 0.82f, w * 0.64f, h * 0.92f, w * 0.50f, h * 0.92f)
-      cubicTo(w * 0.34f, h * 0.92f, w * 0.20f, h * 0.79f, w * 0.21f, h * 0.60f)
-      cubicTo(w * 0.22f, h * 0.44f, w * 0.34f, h * 0.35f, w * 0.40f, h * 0.24f)
-      cubicTo(w * 0.44f, h * 0.18f, w * 0.48f, h * 0.14f, w * 0.52f, h * 0.10f)
-      close()
-    }
-    drawPath(
-      path = outerFlame,
-      color = tint,
-      style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round),
-    )
+  Spacer(
+    modifier = modifier.drawWithCache {
+      val cornerPx = (size.minDimension * 0.23f).coerceAtLeast(6f)
+      val cornerRadius = CornerRadius(cornerPx, cornerPx)
 
-    val innerCore = Path().apply {
-      moveTo(w * 0.50f, h * 0.46f)
-      cubicTo(w * 0.60f, h * 0.56f, w * 0.63f, h * 0.66f, w * 0.58f, h * 0.77f)
-      cubicTo(w * 0.55f, h * 0.83f, w * 0.45f, h * 0.83f, w * 0.42f, h * 0.77f)
-      cubicTo(w * 0.37f, h * 0.66f, w * 0.42f, h * 0.56f, w * 0.50f, h * 0.46f)
-      close()
-    }
-    drawPath(
-      path = innerCore,
-      color = tint,
-    )
-  }
+      val coreGlowPaint = Paint().apply {
+        isAntiAlias = true
+        asFrameworkPaint().apply {
+          color = Color(0xFFFF7A29).copy(alpha = 0.55f).toArgb()
+          maskFilter = BlurMaskFilter(
+            safeBlurRadius(size.minDimension * 0.20f),
+            BlurMaskFilter.Blur.NORMAL,
+          )
+        }
+      }
+
+      onDrawBehind {
+        val w = size.width
+        val h = size.height
+        val flicker = flameFlicker
+        val sway = flameSway
+
+        // Clean Obsidian/Zinc badge container matching the app's monochrome architecture
+        drawRoundRect(
+          brush = Brush.verticalGradient(
+            colors = listOf(Zinc900, Zinc950),
+          ),
+          topLeft = Offset.Zero,
+          size = size,
+          cornerRadius = cornerRadius,
+        )
+
+        drawRoundRect(
+          color = Zinc700,
+          topLeft = Offset.Zero,
+          size = size,
+          cornerRadius = cornerRadius,
+          style = Stroke(width = 1.dp.toPx()),
+        )
+
+        // Subtle warm glow behind the flame inside the dark box
+        drawIntoCanvas { canvas ->
+          canvas.drawCircle(Offset(w * 0.50f, h * 0.58f), w * (0.26f + 0.04f * flicker), coreGlowPaint)
+        }
+
+        // 1. Outer Crimson-Orange Dancing Flame Path
+        val tipX = w * (0.51f + 0.035f * sway)
+        val tipY = h * (0.15f - 0.035f * flicker)
+        val outerFlame = Path().apply {
+          moveTo(tipX, tipY)
+          cubicTo(
+            w * (0.62f + 0.02f * sway),
+            h * 0.26f,
+            w * (0.82f + 0.02f * flicker),
+            h * 0.42f,
+            w * 0.77f,
+            h * 0.65f,
+          )
+          cubicTo(
+            w * 0.73f,
+            h * 0.81f,
+            w * 0.63f,
+            h * 0.87f,
+            w * 0.50f,
+            h * 0.87f,
+          )
+          cubicTo(
+            w * 0.36f,
+            h * 0.87f,
+            w * 0.24f,
+            h * 0.78f,
+            w * 0.23f,
+            h * 0.61f,
+          )
+          cubicTo(
+            w * (0.22f - 0.02f * flicker),
+            h * 0.45f,
+            w * 0.34f,
+            h * 0.34f,
+            w * (0.41f + 0.02f * sway),
+            h * 0.24f,
+          )
+          cubicTo(
+            w * 0.45f,
+            h * 0.19f,
+            w * 0.48f,
+            h * 0.16f,
+            tipX,
+            tipY,
+          )
+          close()
+        }
+
+        drawPath(
+          path = outerFlame,
+          brush = Brush.verticalGradient(
+            colors = listOf(
+              Color(0xFFFFAA00),
+              Color(0xFFFF5500),
+              Color(0xFFE01E37),
+            ),
+            startY = tipY,
+            endY = h * 0.88f,
+          ),
+        )
+
+        // 2. Middle Solar Amber-Gold Flame Path
+        val midTipX = w * (0.50f - 0.025f * sway)
+        val midTipY = h * (0.30f - 0.03f * flicker)
+        val midFlame = Path().apply {
+          moveTo(midTipX, midTipY)
+          cubicTo(
+            w * 0.62f,
+            h * 0.42f,
+            w * 0.69f,
+            h * 0.55f,
+            w * 0.65f,
+            h * 0.72f,
+          )
+          cubicTo(
+            w * 0.62f,
+            h * 0.82f,
+            w * 0.56f,
+            h * 0.86f,
+            w * 0.50f,
+            h * 0.86f,
+          )
+          cubicTo(
+            w * 0.43f,
+            h * 0.86f,
+            w * 0.36f,
+            h * 0.80f,
+            w * 0.35f,
+            h * 0.69f,
+          )
+          cubicTo(
+            w * 0.34f,
+            h * 0.55f,
+            w * 0.41f,
+            h * 0.42f,
+            midTipX,
+            midTipY,
+          )
+          close()
+        }
+
+        drawPath(
+          path = midFlame,
+          brush = Brush.verticalGradient(
+            colors = listOf(
+              Color(0xFFFFEA79),
+              Color(0xFFFFB703),
+              Color(0xFFFF6B00),
+            ),
+            startY = midTipY,
+            endY = h * 0.86f,
+          ),
+        )
+
+        // 3. Hot White-Gold Inner Core Flame
+        val coreTipX = w * (0.50f + 0.015f * sway)
+        val coreTipY = h * (0.49f - 0.02f * flicker)
+        val innerCore = Path().apply {
+          moveTo(coreTipX, coreTipY)
+          cubicTo(
+            w * 0.58f,
+            h * 0.57f,
+            w * 0.60f,
+            h * 0.68f,
+            w * 0.56f,
+            h * 0.79f,
+          )
+          cubicTo(
+            w * 0.54f,
+            h * 0.84f,
+            w * 0.46f,
+            h * 0.84f,
+            w * 0.44f,
+            h * 0.79f,
+          )
+          cubicTo(
+            w * 0.40f,
+            h * 0.68f,
+            w * 0.42f,
+            h * 0.57f,
+            coreTipX,
+            coreTipY,
+          )
+          close()
+        }
+
+        drawPath(
+          path = innerCore,
+          brush = Brush.verticalGradient(
+            colors = listOf(
+              PureWhite,
+              Color(0xFFFFF3B0),
+              Color(0xFFFFD166),
+            ),
+            startY = coreTipY,
+            endY = h * 0.85f,
+          ),
+        )
+
+        // Rising ember sparks
+        val ember1Alpha = (1f - emberRise).coerceIn(0f, 1f)
+        val ember1Y = h * (0.36f - 0.19f * emberRise)
+        val ember1X = w * (0.34f + 0.04f * sway)
+        drawCircle(
+          color = Color(0xFFFFD166).copy(alpha = ember1Alpha * 0.80f),
+          radius = (w * 0.030f).coerceAtLeast(1f),
+          center = Offset(ember1X, ember1Y),
+        )
+      }
+    },
+  )
 }
 
-// ─── Live Blueprint Protocol Matrix Summary Card ────────────────────────────
+// ─── Live Blueprint Protocol Matrix Summary Card (Monochrome + Interactive Scroll) ─
 
 @Composable
 private fun BlueprintSummaryMatrixCard(
@@ -2170,6 +2644,9 @@ private fun BlueprintSummaryMatrixCard(
   selectedActivityLevel: ActivityLevelOption,
   selectedObjective: BlueprintObjectiveOption,
   selectedStreakThreshold: StreakThresholdOption,
+  onClickActivityTile: () -> Unit,
+  onClickObjectiveTile: () -> Unit,
+  onClickStreakTile: () -> Unit,
   borderFlashProvider: () -> Float,
   metrics: BlueprintResponsiveMetrics,
 ) {
@@ -2224,7 +2701,7 @@ private fun BlueprintSummaryMatrixCard(
       modifier = Modifier.fillMaxWidth(),
       verticalArrangement = Arrangement.spacedBy((10f * metrics.scale).coerceIn(8f, 13f).dp),
     ) {
-      // Top Row: Luminous Dot + BLUEPRINT PROTOCOL MATRIX + Subject Lock Pill
+      // Top Row: Luminous White Dot + BLUEPRINT PROTOCOL MATRIX + CALIBRATED Pill
       Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -2266,7 +2743,7 @@ private fun BlueprintSummaryMatrixCard(
 
       HorizontalDivider(color = Zinc850, thickness = 0.8.dp)
 
-      // 3-Column Live Telemetry Readout (Activity | Objective | Streak Rule)
+      // 3-Column Interactive Telemetry Readout (Monochrome tiles with minimalist indicator dot)
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy((8f * metrics.scale).coerceIn(6f, 10f).dp),
@@ -2275,30 +2752,39 @@ private fun BlueprintSummaryMatrixCard(
           label = "ACTIVITY",
           value = activityLabel,
           subValue = selectedActivityLevel.cadenceBadge,
+          dotColor = selectedActivityLevel.accentColor,
+          onClick = onClickActivityTile,
           metrics = metrics,
           modifier = Modifier.weight(1f),
+          testTag = "matrix_tile_activity",
         )
         SummaryMetricTile(
           label = "OBJECTIVE",
           value = objectiveLabel,
           subValue = selectedObjective.vectorBadge,
+          dotColor = selectedObjective.primaryColor,
+          onClick = onClickObjectiveTile,
           metrics = metrics,
           modifier = Modifier.weight(1f),
+          testTag = "matrix_tile_objective",
         )
         SummaryMetricTile(
           label = "STREAK RULE",
           value = "${selectedStreakThreshold.percentage}% GOAL",
           subValue = "+1 DAY STREAK",
+          dotColor = selectedStreakThreshold.accentColor,
+          onClick = onClickStreakTile,
           metrics = metrics,
           modifier = Modifier.weight(1f),
+          testTag = "matrix_tile_streak",
         )
       }
 
-      // Subject footer note
+      // Subject footer note ("STEP 03 / 03 READY" removed)
       Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.Start,
       ) {
         Text(
           text = "SUBJECT: ${subjectName.ifBlank { "UNVERIFIED" }.uppercase()}",
@@ -2309,15 +2795,6 @@ private fun BlueprintSummaryMatrixCard(
           letterSpacing = 0.6.sp,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
-          modifier = Modifier.weight(1f),
-        )
-        Text(
-          text = "STEP 03 / 03 READY",
-          color = Zinc300,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.SemiBold,
-          fontSize = metrics.spScaled(9.4f, 8.2f, 10.6f),
-          letterSpacing = 0.6.sp,
         )
       }
     }
@@ -2329,32 +2806,57 @@ private fun SummaryMetricTile(
   label: String,
   value: String,
   subValue: String,
+  dotColor: Color,
+  onClick: () -> Unit,
   metrics: BlueprintResponsiveMetrics,
   modifier: Modifier = Modifier,
+  testTag: String,
 ) {
+  val animatedDot by animateColorAsState(
+    targetValue = dotColor,
+    animationSpec = tween(durationMillis = 260),
+    label = "summary_tile_dot_$label",
+  )
+  val tileCorner = (8.5f * metrics.scale).coerceIn(7f, 10.5f).dp
+  val tileShape = RoundedCornerShape(tileCorner)
+
   Column(
     modifier = modifier
-      .clip(RoundedCornerShape((8.5f * metrics.scale).coerceIn(7f, 10.5f).dp))
+      .clip(tileShape)
       .background(Zinc950)
       .border(
         width = 0.8.dp,
         color = Zinc800,
-        shape = RoundedCornerShape((8.5f * metrics.scale).coerceIn(7f, 10.5f).dp),
+        shape = tileShape,
+      )
+      .clickable(
+        role = Role.Button,
+        onClick = onClick,
       )
       .padding(
         horizontal = (8.5f * metrics.scale).coerceIn(7f, 11f).dp,
         vertical = (8f * metrics.scale).coerceIn(6.5f, 10f).dp,
-      ),
+      )
+      .testTag(testTag),
   ) {
-    Text(
-      text = label,
-      color = Zinc500,
-      fontFamily = JetBrainsMonoFontFamily,
-      fontWeight = FontWeight.Medium,
-      fontSize = metrics.spScaled(8.4f, 7.4f, 9.6f),
-      letterSpacing = 0.7.sp,
-      maxLines = 1,
-    )
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Text(
+        text = label,
+        color = Zinc500,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = metrics.spScaled(8.2f, 7.2f, 9.4f),
+        letterSpacing = 0.6.sp,
+        maxLines = 1,
+      )
+      Canvas(modifier = Modifier.size(5.dp)) {
+        drawCircle(color = animatedDot)
+      }
+    }
     Spacer(modifier = Modifier.height(3.dp))
     Text(
       text = value,
@@ -2372,7 +2874,7 @@ private fun SummaryMetricTile(
       color = Zinc400,
       fontFamily = JetBrainsMonoFontFamily,
       fontWeight = FontWeight.Medium,
-      fontSize = metrics.spScaled(8.2f, 7.2f, 9.4f),
+      fontSize = metrics.spScaled(8.1f, 7.1f, 9.2f),
       letterSpacing = 0.4.sp,
       maxLines = 1,
       overflow = TextOverflow.Ellipsis,
