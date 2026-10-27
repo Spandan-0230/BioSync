@@ -2302,7 +2302,9 @@ private fun StreakThresholdPrecisionBar(
 }
 
 /**
- * Minimalist Obsidian Badge housing a Lively Animated Multi-Layered Fire Flame.
+ * Precision Obsidian-Glass Chamber housing a Realistic Volumetric Multi-Tongue Flame Emblem.
+ * Combines a micro-burner ignition base, subtle oxygen-blue ionization rim, deep crimson-amber
+ * aerodynamic S-curve mantle, solar-gold plasma body, incandescent white-hot heart, and rising micro-embers.
  */
 @Composable
 private fun AnimatedFireStreakBadge(
@@ -2313,7 +2315,7 @@ private fun AnimatedFireStreakBadge(
     initialValue = 0f,
     targetValue = 1f,
     animationSpec = infiniteRepeatable(
-      animation = tween(durationMillis = 920, easing = FastOutSlowInEasing),
+      animation = tween(durationMillis = 860, easing = FastOutSlowInEasing),
       repeatMode = RepeatMode.Reverse,
     ),
     label = "flame_flicker",
@@ -2322,16 +2324,25 @@ private fun AnimatedFireStreakBadge(
     initialValue = -1f,
     targetValue = 1f,
     animationSpec = infiniteRepeatable(
-      animation = tween(durationMillis = 1280, easing = FastOutSlowInEasing),
+      animation = tween(durationMillis = 1340, easing = FastOutSlowInEasing),
       repeatMode = RepeatMode.Reverse,
     ),
     label = "flame_sway",
+  )
+  val secondaryWave by infiniteTransition.animateFloat(
+    initialValue = -1f,
+    targetValue = 1f,
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 1020, easing = FastOutSlowInEasing),
+      repeatMode = RepeatMode.Reverse,
+    ),
+    label = "secondary_wave",
   )
   val emberRise by infiniteTransition.animateFloat(
     initialValue = 0f,
     targetValue = 1f,
     animationSpec = infiniteRepeatable(
-      animation = tween(durationMillis = 1550, easing = LinearEasing),
+      animation = tween(durationMillis = 1750, easing = LinearEasing),
       repeatMode = RepeatMode.Restart,
     ),
     label = "ember_rise",
@@ -2339,15 +2350,43 @@ private fun AnimatedFireStreakBadge(
 
   Spacer(
     modifier = modifier.drawWithCache {
-      val cornerPx = (size.minDimension * 0.23f).coerceAtLeast(6f)
+      val cornerPx = (size.minDimension * 0.24f).coerceAtLeast(7f)
       val cornerRadius = CornerRadius(cornerPx, cornerPx)
+      val badgeClipPath = Path().apply {
+        addRoundRect(
+          RoundRect(
+            rect = Rect(0f, 0f, size.width, size.height),
+            cornerRadius = cornerRadius,
+          ),
+        )
+      }
 
-      val coreGlowPaint = Paint().apply {
+      val outerCoronaPaint = Paint().apply {
         isAntiAlias = true
         asFrameworkPaint().apply {
-          color = Color(0xFFFF7A29).copy(alpha = 0.55f).toArgb()
+          color = Color(0xFFFF4500).copy(alpha = 0.42f).toArgb()
           maskFilter = BlurMaskFilter(
-            safeBlurRadius(size.minDimension * 0.20f),
+            safeBlurRadius(size.minDimension * 0.28f),
+            BlurMaskFilter.Blur.NORMAL,
+          )
+        }
+      }
+      val innerSolarBloomPaint = Paint().apply {
+        isAntiAlias = true
+        asFrameworkPaint().apply {
+          color = Color(0xFFFFAA00).copy(alpha = 0.58f).toArgb()
+          maskFilter = BlurMaskFilter(
+            safeBlurRadius(size.minDimension * 0.14f),
+            BlurMaskFilter.Blur.NORMAL,
+          )
+        }
+      }
+      val whiteHeartBloomPaint = Paint().apply {
+        isAntiAlias = true
+        asFrameworkPaint().apply {
+          color = Color(0xFFFFF6CC).copy(alpha = 0.72f).toArgb()
+          maskFilter = BlurMaskFilter(
+            safeBlurRadius(size.minDimension * 0.08f),
             BlurMaskFilter.Blur.NORMAL,
           )
         }
@@ -2356,199 +2395,487 @@ private fun AnimatedFireStreakBadge(
       onDrawBehind {
         val w = size.width
         val h = size.height
+        if (w <= 1f || h <= 1f) return@onDrawBehind
+
         val flicker = flameFlicker
         val sway = flameSway
+        val wave2 = secondaryWave
 
-        // Clean Obsidian/Zinc badge container matching the app's monochrome architecture
+        // 1. Deep Obsidian-Carbon Chamber Background
         drawRoundRect(
           brush = Brush.verticalGradient(
-            colors = listOf(Zinc900, Zinc950),
+            0.0f to Color(0xFF151519),
+            0.55f to Color(0xFF0E0D11),
+            1.0f to Color(0xFF181110),
           ),
           topLeft = Offset.Zero,
           size = size,
           cornerRadius = cornerRadius,
         )
 
+        clipPath(badgeClipPath) {
+          // Subtle ambient floor reflection from the combustion core
+          drawCircle(
+            brush = Brush.radialGradient(
+              colors = listOf(
+                Color(0xFFFF5500).copy(alpha = 0.26f + 0.06f * flicker),
+                Color(0xFFB91C1C).copy(alpha = 0.10f),
+                Color.Transparent,
+              ),
+              center = Offset(w * 0.50f, h * 0.82f),
+              radius = w * 0.58f,
+            ),
+            radius = w * 0.58f,
+            center = Offset(w * 0.50f, h * 0.82f),
+          )
+
+          // Precision instrument calibration ring in the background
+          drawCircle(
+            color = PureWhite.copy(alpha = 0.04f),
+            radius = w * 0.36f,
+            center = Offset(w * 0.50f, h * 0.54f),
+            style = Stroke(width = 0.7.dp.toPx()),
+          )
+
+          // Volumetric thermal bloom behind the flame
+          drawIntoCanvas { canvas ->
+            canvas.drawOval(
+              w * 0.20f,
+              h * 0.22f,
+              w * 0.80f,
+              h * 0.86f,
+              outerCoronaPaint,
+            )
+            canvas.drawCircle(
+              Offset(w * (0.50f + 0.015f * sway), h * 0.60f),
+              w * (0.21f + 0.025f * flicker),
+              innerSolarBloomPaint,
+            )
+          }
+
+          // 2. Sculpted Left Secondary Flame Tongue (peels off and curls upward)
+          val leftTipX = w * (0.25f - 0.020f * wave2)
+          val leftTipY = h * (0.37f - 0.030f * flicker)
+          val leftTongue = Path().apply {
+            moveTo(w * 0.44f, h * 0.78f)
+            cubicTo(
+              w * 0.30f,
+              h * 0.74f,
+              w * 0.19f,
+              h * 0.61f,
+              w * (0.21f + 0.015f * sway),
+              h * 0.48f,
+            )
+            cubicTo(
+              w * 0.22f,
+              h * 0.42f,
+              w * 0.24f,
+              h * 0.39f,
+              leftTipX,
+              leftTipY,
+            )
+            cubicTo(
+              w * 0.28f,
+              h * 0.43f,
+              w * 0.34f,
+              h * 0.48f,
+              w * 0.39f,
+              h * 0.56f,
+            )
+            close()
+          }
+          drawPath(
+            path = leftTongue,
+            brush = Brush.verticalGradient(
+              colors = listOf(
+                Color(0xFFFBBF24),
+                Color(0xFFEA580C),
+                Color(0xFF9F1239),
+              ),
+              startY = leftTipY,
+              endY = h * 0.79f,
+            ),
+          )
+
+          // 3. Sculpted Right Aerodynamic Crest Tongue
+          val rightTipX = w * (0.76f + 0.022f * sway)
+          val rightTipY = h * (0.41f + 0.025f * wave2)
+          val rightTongue = Path().apply {
+            moveTo(w * 0.56f, h * 0.78f)
+            cubicTo(
+              w * 0.71f,
+              h * 0.74f,
+              w * 0.81f,
+              h * 0.62f,
+              w * (0.79f + 0.015f * wave2),
+              h * 0.50f,
+            )
+            cubicTo(
+              w * 0.78f,
+              h * 0.45f,
+              w * 0.77f,
+              h * 0.43f,
+              rightTipX,
+              rightTipY,
+            )
+            cubicTo(
+              w * 0.72f,
+              h * 0.47f,
+              w * 0.66f,
+              h * 0.52f,
+              w * 0.60f,
+              h * 0.60f,
+            )
+            close()
+          }
+          drawPath(
+            path = rightTongue,
+            brush = Brush.verticalGradient(
+              colors = listOf(
+                Color(0xFFF59E0B),
+                Color(0xFFD9460F),
+                Color(0xFF881337),
+              ),
+              startY = rightTipY,
+              endY = h * 0.79f,
+            ),
+          )
+
+          // 4. Primary Outer S-Curve Flame Mantle (Deep Ruby -> Tangelo -> Solar Gold Tip)
+          val mainTipX = w * (0.52f + 0.038f * sway)
+          val mainTipY = h * (0.13f - 0.032f * flicker)
+          val outerMantle = Path().apply {
+            moveTo(mainTipX, mainTipY)
+            // Right windward S-curve descending to the right belly
+            cubicTo(
+              w * (0.59f + 0.025f * sway),
+              h * 0.23f,
+              w * (0.76f + 0.018f * flicker),
+              h * 0.43f,
+              w * 0.73f,
+              h * 0.64f,
+            )
+            // Right lower belly curving into the burner base
+            cubicTo(
+              w * 0.70f,
+              h * 0.77f,
+              w * 0.61f,
+              h * 0.83f,
+              w * 0.50f,
+              h * 0.83f,
+            )
+            // Left lower belly curving upward
+            cubicTo(
+              w * 0.39f,
+              h * 0.83f,
+              w * 0.28f,
+              h * 0.75f,
+              w * 0.27f,
+              h * 0.60f,
+            )
+            // Left S-curve waist sweeping up toward the tapered apex
+            cubicTo(
+              w * (0.26f - 0.018f * flicker),
+              h * 0.44f,
+              w * (0.40f + 0.020f * sway),
+              h * 0.31f,
+              w * (0.46f + 0.030f * sway),
+              h * 0.21f,
+            )
+            cubicTo(
+              w * (0.49f + 0.034f * sway),
+              h * 0.16f,
+              w * (0.50f + 0.036f * sway),
+              h * 0.14f,
+              mainTipX,
+              mainTipY,
+            )
+            close()
+          }
+          drawPath(
+            path = outerMantle,
+            brush = Brush.verticalGradient(
+              0.0f to Color(0xFFFFE57F),
+              0.24f to Color(0xFFFF9E00),
+              0.62f to Color(0xFFFF4800),
+              0.88f to Color(0xFFD90429),
+              1.0f to Color(0xFF7F1D1D),
+              startY = mainTipY,
+              endY = h * 0.84f,
+            ),
+          )
+
+          // 5. Mid-Layer Solar Plasma Plume (Nested S-Curve with counter-harmonic motion)
+          val midTipX = w * (0.49f - 0.024f * wave2 + 0.015f * sway)
+          val midTipY = h * (0.26f - 0.028f * flicker)
+          val midPlasma = Path().apply {
+            moveTo(midTipX, midTipY)
+            cubicTo(
+              w * (0.58f + 0.015f * sway),
+              h * 0.36f,
+              w * 0.66f,
+              h * 0.52f,
+              w * 0.63f,
+              h * 0.69f,
+            )
+            cubicTo(
+              w * 0.61f,
+              h * 0.78f,
+              w * 0.55f,
+              h * 0.82f,
+              w * 0.50f,
+              h * 0.82f,
+            )
+            cubicTo(
+              w * 0.44f,
+              h * 0.82f,
+              w * 0.36f,
+              h * 0.76f,
+              w * 0.35f,
+              h * 0.65f,
+            )
+            cubicTo(
+              w * 0.34f,
+              h * 0.50f,
+              w * (0.43f + 0.015f * sway),
+              h * 0.38f,
+              midTipX,
+              midTipY,
+            )
+            close()
+          }
+          drawPath(
+            path = midPlasma,
+            brush = Brush.verticalGradient(
+              0.0f to Color(0xFFFFF8CC),
+              0.38f to Color(0xFFFFD166),
+              0.76f to Color(0xFFFF8500),
+              1.0f to Color(0xFFE85D04),
+              startY = midTipY,
+              endY = h * 0.82f,
+            ),
+          )
+
+          // 6. Subtle Oxygen-Blue Ionization Cushion at the Immediate Combustion Base
+          val ionBase = Path().apply {
+            moveTo(w * 0.37f, h * 0.76f)
+            cubicTo(
+              w * 0.39f,
+              h * 0.83f,
+              w * 0.61f,
+              h * 0.83f,
+              w * 0.63f,
+              h * 0.76f,
+            )
+            cubicTo(
+              w * 0.59f,
+              h * 0.80f,
+              w * 0.41f,
+              h * 0.80f,
+              w * 0.37f,
+              h * 0.76f,
+            )
+            close()
+          }
+          drawPath(
+            path = ionBase,
+            brush = Brush.horizontalGradient(
+              colors = listOf(
+                Color(0xFF38BDF8).copy(alpha = 0.45f),
+                Color(0xFF60A5FA).copy(alpha = 0.70f),
+                Color(0xFF38BDF8).copy(alpha = 0.45f),
+              ),
+              startX = w * 0.36f,
+              endX = w * 0.64f,
+            ),
+          )
+
+          // 7. Incandescent White-Hot Ignition Core
+          val coreTipX = w * (0.50f + 0.014f * sway)
+          val coreTipY = h * (0.45f - 0.022f * flicker)
+          val innerHeart = Path().apply {
+            moveTo(coreTipX, coreTipY)
+            cubicTo(
+              w * 0.56f,
+              h * 0.54f,
+              w * 0.58f,
+              h * 0.66f,
+              w * 0.55f,
+              h * 0.76f,
+            )
+            cubicTo(
+              w * 0.53f,
+              h * 0.80f,
+              w * 0.47f,
+              h * 0.80f,
+              w * 0.45f,
+              h * 0.76f,
+            )
+            cubicTo(
+              w * 0.42f,
+              h * 0.66f,
+              w * 0.44f,
+              h * 0.54f,
+              coreTipX,
+              coreTipY,
+            )
+            close()
+          }
+          drawIntoCanvas { canvas ->
+            canvas.drawCircle(
+              Offset(w * 0.50f, h * 0.68f),
+              w * (0.11f + 0.015f * flicker),
+              whiteHeartBloomPaint,
+            )
+          }
+          drawPath(
+            path = innerHeart,
+            brush = Brush.verticalGradient(
+              0.0f to Color(0xFFFFFBEB),
+              0.45f to PureWhite,
+              0.85f to Color(0xFFFFE599),
+              1.0f to Color(0xFFBAE6FD),
+              startY = coreTipY,
+              endY = h * 0.80f,
+            ),
+          )
+
+          // 8. Delicate Specular Rim Highlight along the primary flame's windward contour
+          val specularRim = Path().apply {
+            moveTo(mainTipX, mainTipY + h * 0.02f)
+            cubicTo(
+              w * (0.46f + 0.028f * sway),
+              h * 0.21f,
+              w * (0.28f - 0.015f * flicker),
+              h * 0.43f,
+              w * 0.29f,
+              h * 0.61f,
+            )
+          }
+          drawPath(
+            path = specularRim,
+            brush = Brush.verticalGradient(
+              colors = listOf(
+                PureWhite.copy(alpha = 0.72f),
+                Color(0xFFFFD166).copy(alpha = 0.35f),
+                Color.Transparent,
+              ),
+              startY = mainTipY,
+              endY = h * 0.62f,
+            ),
+            style = Stroke(width = (w * 0.022f).coerceAtLeast(0.9f), cap = StrokeCap.Round),
+          )
+
+          // 9. Staggered Rising Micro-Embers (3 particles along organic convection paths)
+          val p1 = emberRise
+          val p2 = (emberRise + 0.37f) % 1f
+          val p3 = (emberRise + 0.71f) % 1f
+
+          val e1Alpha = sin(p1 * Math.PI.toFloat()).coerceIn(0f, 1f)
+          drawCircle(
+            color = Color(0xFFFFE57F).copy(alpha = e1Alpha * 0.88f),
+            radius = (w * 0.024f * (1f - 0.35f * p1)).coerceAtLeast(0.8f),
+            center = Offset(
+              x = w * (0.37f + 0.05f * sin(p1 * 4.5f) + 0.02f * sway),
+              y = h * (0.44f - 0.28f * p1),
+            ),
+          )
+
+          val e2Alpha = sin(p2 * Math.PI.toFloat()).coerceIn(0f, 1f)
+          drawCircle(
+            color = Color(0xFFFF9E00).copy(alpha = e2Alpha * 0.82f),
+            radius = (w * 0.021f * (1f - 0.35f * p2)).coerceAtLeast(0.7f),
+            center = Offset(
+              x = w * (0.65f - 0.04f * sin(p2 * 4.2f) + 0.02f * wave2),
+              y = h * (0.48f - 0.30f * p2),
+            ),
+          )
+
+          val e3Alpha = sin(p3 * Math.PI.toFloat()).coerceIn(0f, 1f)
+          drawCircle(
+            color = PureWhite.copy(alpha = e3Alpha * 0.75f),
+            radius = (w * 0.017f).coerceAtLeast(0.6f),
+            center = Offset(
+              x = w * (0.51f + 0.03f * sway),
+              y = h * (0.28f - 0.16f * p3),
+            ),
+          )
+
+          // 10. Precision Combustion Burner Pedestal at Base (grounds the flame physically)
+          val pedestalW = w * 0.46f
+          val pedestalH = (h * 0.055f).coerceAtLeast(2f)
+          val pedestalTop = h * 0.835f
+          val pedestalLeft = (w - pedestalW) / 2f
+          drawRoundRect(
+            brush = Brush.horizontalGradient(
+              colors = listOf(
+                Zinc800,
+                Zinc500,
+                Zinc800,
+              ),
+              startX = pedestalLeft,
+              endX = pedestalLeft + pedestalW,
+            ),
+            topLeft = Offset(pedestalLeft, pedestalTop),
+            size = Size(pedestalW, pedestalH),
+            cornerRadius = CornerRadius(pedestalH / 2f, pedestalH / 2f),
+          )
+          // Glowing molten ignition slot on top of the burner pedestal
+          val slotW = pedestalW * 0.68f
+          val slotLeft = (w - slotW) / 2f
+          drawLine(
+            brush = Brush.horizontalGradient(
+              colors = listOf(
+                Color.Transparent,
+                Color(0xFFFF9E00),
+                PureWhite,
+                Color(0xFFFF9E00),
+                Color.Transparent,
+              ),
+              startX = slotLeft,
+              endX = slotLeft + slotW,
+            ),
+            start = Offset(slotLeft, pedestalTop),
+            end = Offset(slotLeft + slotW, pedestalTop),
+            strokeWidth = (h * 0.022f).coerceAtLeast(1f),
+            cap = StrokeCap.Round,
+          )
+
+          // 11. Diagonal Sapphire-Crystal Glass Sheen across the upper chamber
+          val glassSheen = Path().apply {
+            moveTo(0f, 0f)
+            lineTo(w * 0.78f, 0f)
+            lineTo(w * 0.28f, h * 0.42f)
+            lineTo(0f, h * 0.42f)
+            close()
+          }
+          drawPath(
+            path = glassSheen,
+            brush = Brush.linearGradient(
+              colors = listOf(
+                PureWhite.copy(alpha = 0.09f),
+                PureWhite.copy(alpha = 0.02f),
+                Color.Transparent,
+              ),
+              start = Offset.Zero,
+              end = Offset(w * 0.55f, h * 0.42f),
+            ),
+          )
+        }
+
+        // 12. Outer Dual-Tone Metallic & Thermal Rim Bezel
         drawRoundRect(
-          color = Zinc700,
+          brush = Brush.linearGradient(
+            0.0f to PureWhite.copy(alpha = 0.30f),
+            0.45f to Zinc600.copy(alpha = 0.55f),
+            1.0f to Color(0xFFFF7A29).copy(alpha = 0.50f),
+            start = Offset.Zero,
+            end = Offset(w, h),
+          ),
           topLeft = Offset.Zero,
           size = size,
           cornerRadius = cornerRadius,
-          style = Stroke(width = 1.dp.toPx()),
-        )
-
-        // Subtle warm glow behind the flame inside the dark box
-        drawIntoCanvas { canvas ->
-          canvas.drawCircle(Offset(w * 0.50f, h * 0.58f), w * (0.26f + 0.04f * flicker), coreGlowPaint)
-        }
-
-        // 1. Outer Crimson-Orange Dancing Flame Path
-        val tipX = w * (0.51f + 0.035f * sway)
-        val tipY = h * (0.15f - 0.035f * flicker)
-        val outerFlame = Path().apply {
-          moveTo(tipX, tipY)
-          cubicTo(
-            w * (0.62f + 0.02f * sway),
-            h * 0.26f,
-            w * (0.82f + 0.02f * flicker),
-            h * 0.42f,
-            w * 0.77f,
-            h * 0.65f,
-          )
-          cubicTo(
-            w * 0.73f,
-            h * 0.81f,
-            w * 0.63f,
-            h * 0.87f,
-            w * 0.50f,
-            h * 0.87f,
-          )
-          cubicTo(
-            w * 0.36f,
-            h * 0.87f,
-            w * 0.24f,
-            h * 0.78f,
-            w * 0.23f,
-            h * 0.61f,
-          )
-          cubicTo(
-            w * (0.22f - 0.02f * flicker),
-            h * 0.45f,
-            w * 0.34f,
-            h * 0.34f,
-            w * (0.41f + 0.02f * sway),
-            h * 0.24f,
-          )
-          cubicTo(
-            w * 0.45f,
-            h * 0.19f,
-            w * 0.48f,
-            h * 0.16f,
-            tipX,
-            tipY,
-          )
-          close()
-        }
-
-        drawPath(
-          path = outerFlame,
-          brush = Brush.verticalGradient(
-            colors = listOf(
-              Color(0xFFFFAA00),
-              Color(0xFFFF5500),
-              Color(0xFFE01E37),
-            ),
-            startY = tipY,
-            endY = h * 0.88f,
-          ),
-        )
-
-        // 2. Middle Solar Amber-Gold Flame Path
-        val midTipX = w * (0.50f - 0.025f * sway)
-        val midTipY = h * (0.30f - 0.03f * flicker)
-        val midFlame = Path().apply {
-          moveTo(midTipX, midTipY)
-          cubicTo(
-            w * 0.62f,
-            h * 0.42f,
-            w * 0.69f,
-            h * 0.55f,
-            w * 0.65f,
-            h * 0.72f,
-          )
-          cubicTo(
-            w * 0.62f,
-            h * 0.82f,
-            w * 0.56f,
-            h * 0.86f,
-            w * 0.50f,
-            h * 0.86f,
-          )
-          cubicTo(
-            w * 0.43f,
-            h * 0.86f,
-            w * 0.36f,
-            h * 0.80f,
-            w * 0.35f,
-            h * 0.69f,
-          )
-          cubicTo(
-            w * 0.34f,
-            h * 0.55f,
-            w * 0.41f,
-            h * 0.42f,
-            midTipX,
-            midTipY,
-          )
-          close()
-        }
-
-        drawPath(
-          path = midFlame,
-          brush = Brush.verticalGradient(
-            colors = listOf(
-              Color(0xFFFFEA79),
-              Color(0xFFFFB703),
-              Color(0xFFFF6B00),
-            ),
-            startY = midTipY,
-            endY = h * 0.86f,
-          ),
-        )
-
-        // 3. Hot White-Gold Inner Core Flame
-        val coreTipX = w * (0.50f + 0.015f * sway)
-        val coreTipY = h * (0.49f - 0.02f * flicker)
-        val innerCore = Path().apply {
-          moveTo(coreTipX, coreTipY)
-          cubicTo(
-            w * 0.58f,
-            h * 0.57f,
-            w * 0.60f,
-            h * 0.68f,
-            w * 0.56f,
-            h * 0.79f,
-          )
-          cubicTo(
-            w * 0.54f,
-            h * 0.84f,
-            w * 0.46f,
-            h * 0.84f,
-            w * 0.44f,
-            h * 0.79f,
-          )
-          cubicTo(
-            w * 0.40f,
-            h * 0.68f,
-            w * 0.42f,
-            h * 0.57f,
-            coreTipX,
-            coreTipY,
-          )
-          close()
-        }
-
-        drawPath(
-          path = innerCore,
-          brush = Brush.verticalGradient(
-            colors = listOf(
-              PureWhite,
-              Color(0xFFFFF3B0),
-              Color(0xFFFFD166),
-            ),
-            startY = coreTipY,
-            endY = h * 0.85f,
-          ),
-        )
-
-        // Rising ember sparks
-        val ember1Alpha = (1f - emberRise).coerceIn(0f, 1f)
-        val ember1Y = h * (0.36f - 0.19f * emberRise)
-        val ember1X = w * (0.34f + 0.04f * sway)
-        drawCircle(
-          color = Color(0xFFFFD166).copy(alpha = ember1Alpha * 0.80f),
-          radius = (w * 0.030f).coerceAtLeast(1f),
-          center = Offset(ember1X, ember1Y),
+          style = Stroke(width = 1.05.dp.toPx()),
         )
       }
     },
