@@ -92,22 +92,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.CaloriesMid
-import com.example.ui.theme.CaloriesStart
-import com.example.ui.theme.CarbsMid
-import com.example.ui.theme.CarbsStart
-import com.example.ui.theme.FatsMid
-import com.example.ui.theme.FatsStart
-import com.example.ui.theme.HydrationMid
-import com.example.ui.theme.HydrationStart
 import com.example.ui.theme.InterFontFamily
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.ObsidianBlack
-import com.example.ui.theme.ProteinMid
-import com.example.ui.theme.ProteinStart
 import com.example.ui.theme.PureWhite
-import com.example.ui.theme.StepsMid
-import com.example.ui.theme.StepsStart
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -229,10 +217,11 @@ enum class BlueprintObjectiveOption(
 
 /**
  * Section 3 — Daily Streak Completion Threshold options (Single-select: 100%, 95%, 90%, 85%, 80%).
- * Each percentage option has a distinct minimalist color accent synced with the tier pill and progress bar.
+ * Each percentage option has a concise category sub-label and distinct minimalist color accent.
  */
 enum class StreakThresholdOption(
   val percentage: Int,
+  val shortTag: String,
   val tierTitle: String,
   val tierDescriptor: String,
   val barFillFraction: Float,
@@ -242,6 +231,7 @@ enum class StreakThresholdOption(
 ) {
   PERCENT_100(
     percentage = 100,
+    shortTag = "PEAK",
     tierTitle = "ABSOLUTE PRECISION",
     tierDescriptor = "Requires 100% completion across daily macro, hydration & step targets to earn +1 Streak.",
     barFillFraction = 1.00f,
@@ -251,6 +241,7 @@ enum class StreakThresholdOption(
   ),
   PERCENT_95(
     percentage = 95,
+    shortTag = "ELITE",
     tierTitle = "ELITE DISCIPLINE",
     tierDescriptor = "Requires at least 95% of overall daily goals completed to count as +1 Streak.",
     barFillFraction = 0.80f,
@@ -260,6 +251,7 @@ enum class StreakThresholdOption(
   ),
   PERCENT_90(
     percentage = 90,
+    shortTag = "OPTIMAL",
     tierTitle = "OPTIMAL CONSISTENCY",
     tierDescriptor = "Requires at least 90% of overall daily goals completed to count as +1 Streak.",
     barFillFraction = 0.60f,
@@ -269,6 +261,7 @@ enum class StreakThresholdOption(
   ),
   PERCENT_85(
     percentage = 85,
+    shortTag = "STRONG",
     tierTitle = "HIGH MOMENTUM",
     tierDescriptor = "Requires at least 85% of overall daily goals completed to count as +1 Streak.",
     barFillFraction = 0.40f,
@@ -278,6 +271,7 @@ enum class StreakThresholdOption(
   ),
   PERCENT_80(
     percentage = 80,
+    shortTag = "STEADY",
     tierTitle = "SUSTAINABLE RHYTHM",
     tierDescriptor = "Requires at least 80% of overall daily goals completed to count as +1 Streak.",
     barFillFraction = 0.20f,
@@ -292,25 +286,6 @@ enum class StreakThresholdOption(
       entries.firstOrNull { it.percentage == percent } ?: PERCENT_90
   }
 }
-
-/**
- * Welcome-Screen category accent colors for the 6 tracked daily pillars.
- */
-@Immutable
-private data class WelcomePillarSpec(
-  val label: String,
-  val dotColor: Color,
-  val borderTint: Color,
-)
-
-private val WelcomeDailyPillars = listOf(
-  WelcomePillarSpec("CAL", CaloriesStart, CaloriesMid),
-  WelcomePillarSpec("PRO", ProteinStart, ProteinMid),
-  WelcomePillarSpec("CARB", CarbsStart, CarbsMid),
-  WelcomePillarSpec("FAT", FatsStart, FatsMid),
-  WelcomePillarSpec("H2O", HydrationStart, HydrationMid),
-  WelcomePillarSpec("STEPS", StepsStart, StepsMid),
-)
 
 @Immutable
 private data class BlueprintResponsiveMetrics(
@@ -376,6 +351,7 @@ private fun computeBlueprintMetrics(
 @Composable
 fun BlueprintScreen(
   subjectName: String,
+  ageYears: Int = 31,
   selectedActivityLevel: ActivityLevelOption,
   onSelectActivityLevel: (ActivityLevelOption) -> Unit,
   selectedObjective: BlueprintObjectiveOption,
@@ -545,6 +521,7 @@ fun BlueprintScreen(
                 haptics.tick()
               }
             },
+            borderFlashProvider = borderFlashProvider,
             metrics = metrics,
           )
         }
@@ -569,6 +546,7 @@ fun BlueprintScreen(
                 haptics.tick()
               }
             },
+            borderFlashProvider = borderFlashProvider,
             metrics = metrics,
           )
         }
@@ -593,6 +571,7 @@ fun BlueprintScreen(
                 haptics.tick()
               }
             },
+            borderFlashProvider = borderFlashProvider,
             metrics = metrics,
           )
         }
@@ -602,6 +581,7 @@ fun BlueprintScreen(
         // 5. Live Blueprint Protocol Matrix Summary Card (Clickable tiles scroll to sections)
         BlueprintSummaryMatrixCard(
           subjectName = subjectName,
+          ageYears = ageYears,
           selectedActivityLevel = selectedActivityLevel,
           selectedObjective = selectedObjective,
           selectedStreakThreshold = selectedStreakThreshold,
@@ -910,6 +890,7 @@ private fun BlueprintSectionHeaderRow(
 private fun ActivityLevelSection(
   selectedLevel: ActivityLevelOption,
   onSelectLevel: (ActivityLevelOption) -> Unit,
+  borderFlashProvider: () -> Float,
   metrics: BlueprintResponsiveMetrics,
 ) {
   val cardShape = RoundedCornerShape(metrics.cardCornerRadius)
@@ -942,24 +923,37 @@ private fun ActivityLevelSection(
           val bgBrush = Brush.verticalGradient(
             colors = listOf(CardBgTop, CardBgBottom),
           )
-          val borderBrush = Brush.verticalGradient(
-            0.0f to PureWhite.copy(alpha = 0.20f),
-            0.35f to Zinc700.copy(alpha = 0.65f),
-            1.0f to Zinc850,
-          )
           onDrawBehind {
+            val flash = sin(borderFlashProvider().coerceIn(0f, 1f) * Math.PI.toFloat()).coerceIn(0f, 1f)
             drawRoundRect(
               brush = bgBrush,
               topLeft = Offset.Zero,
               size = size,
               cornerRadius = cornerRadius,
             )
+            if (flash > 0.01f) {
+              drawRoundRect(
+                brush = Brush.verticalGradient(
+                  colors = listOf(
+                    PureWhite.copy(alpha = 0.08f * flash),
+                    Color.Transparent,
+                  ),
+                ),
+                topLeft = Offset.Zero,
+                size = size,
+                cornerRadius = cornerRadius,
+              )
+            }
             drawRoundRect(
-              brush = borderBrush,
+              brush = Brush.verticalGradient(
+                0.0f to PureWhite.copy(alpha = 0.22f + 0.56f * flash),
+                0.5f to Zinc600.copy(alpha = 0.55f + 0.35f * flash),
+                1.0f to Zinc850,
+              ),
               topLeft = Offset.Zero,
               size = size,
               cornerRadius = cornerRadius,
-              style = Stroke(width = 1.dp.toPx()),
+              style = Stroke(width = (1.1f + 0.5f * flash).dp.toPx()),
             )
           }
         }
@@ -1404,6 +1398,7 @@ private fun BlueprintRadioLockIndicator(
 private fun ObjectiveSection(
   selectedObjective: BlueprintObjectiveOption,
   onSelectObjective: (BlueprintObjectiveOption) -> Unit,
+  borderFlashProvider: () -> Float,
   metrics: BlueprintResponsiveMetrics,
 ) {
   val cardShape = RoundedCornerShape(metrics.cardCornerRadius)
@@ -1436,24 +1431,37 @@ private fun ObjectiveSection(
           val bgBrush = Brush.verticalGradient(
             colors = listOf(CardBgTop, CardBgBottom),
           )
-          val borderBrush = Brush.verticalGradient(
-            0.0f to PureWhite.copy(alpha = 0.20f),
-            0.35f to Zinc700.copy(alpha = 0.65f),
-            1.0f to Zinc850,
-          )
           onDrawBehind {
+            val flash = sin(borderFlashProvider().coerceIn(0f, 1f) * Math.PI.toFloat()).coerceIn(0f, 1f)
             drawRoundRect(
               brush = bgBrush,
               topLeft = Offset.Zero,
               size = size,
               cornerRadius = cornerRadius,
             )
+            if (flash > 0.01f) {
+              drawRoundRect(
+                brush = Brush.verticalGradient(
+                  colors = listOf(
+                    PureWhite.copy(alpha = 0.08f * flash),
+                    Color.Transparent,
+                  ),
+                ),
+                topLeft = Offset.Zero,
+                size = size,
+                cornerRadius = cornerRadius,
+              )
+            }
             drawRoundRect(
-              brush = borderBrush,
+              brush = Brush.verticalGradient(
+                0.0f to PureWhite.copy(alpha = 0.22f + 0.56f * flash),
+                0.5f to Zinc600.copy(alpha = 0.55f + 0.35f * flash),
+                1.0f to Zinc850,
+              ),
               topLeft = Offset.Zero,
               size = size,
               cornerRadius = cornerRadius,
-              style = Stroke(width = 1.dp.toPx()),
+              style = Stroke(width = (1.1f + 0.5f * flash).dp.toPx()),
             )
           }
         }
@@ -1843,6 +1851,7 @@ private fun ObjectiveVectorGlyph(
 private fun StreakThresholdSection(
   selectedThreshold: StreakThresholdOption,
   onSelectThreshold: (StreakThresholdOption) -> Unit,
+  borderFlashProvider: () -> Float,
   metrics: BlueprintResponsiveMetrics,
 ) {
   val cardShape = RoundedCornerShape(metrics.cardCornerRadius)
@@ -1893,24 +1902,37 @@ private fun StreakThresholdSection(
           val bgBrush = Brush.verticalGradient(
             colors = listOf(CardBgTop, CardBgBottom),
           )
-          val borderBrush = Brush.verticalGradient(
-            0.0f to PureWhite.copy(alpha = 0.22f),
-            0.35f to Zinc700.copy(alpha = 0.65f),
-            1.0f to Zinc850,
-          )
           onDrawBehind {
+            val flash = sin(borderFlashProvider().coerceIn(0f, 1f) * Math.PI.toFloat()).coerceIn(0f, 1f)
             drawRoundRect(
               brush = bgBrush,
               topLeft = Offset.Zero,
               size = size,
               cornerRadius = cornerRadius,
             )
+            if (flash > 0.01f) {
+              drawRoundRect(
+                brush = Brush.verticalGradient(
+                  colors = listOf(
+                    PureWhite.copy(alpha = 0.08f * flash),
+                    Color.Transparent,
+                  ),
+                ),
+                topLeft = Offset.Zero,
+                size = size,
+                cornerRadius = cornerRadius,
+              )
+            }
             drawRoundRect(
-              brush = borderBrush,
+              brush = Brush.verticalGradient(
+                0.0f to PureWhite.copy(alpha = 0.22f + 0.56f * flash),
+                0.5f to Zinc600.copy(alpha = 0.55f + 0.35f * flash),
+                1.0f to Zinc850,
+              ),
               topLeft = Offset.Zero,
               size = size,
               cornerRadius = cornerRadius,
-              style = Stroke(width = 1.dp.toPx()),
+              style = Stroke(width = (1.1f + 0.5f * flash).dp.toPx()),
             )
           }
         }
@@ -1921,15 +1943,15 @@ private fun StreakThresholdSection(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy((11f * metrics.scale).coerceIn(9f, 14f).dp),
       ) {
-        // Top Header inside Streak Card: Animated Fire Emblem + Synced Tier Badge + White Percentage Readout
+        // Top Header inside Streak Card: Animated Fire Emblem + +1 DAILY STREAK + White Percentage Readout
         Row(
           modifier = Modifier.fillMaxWidth(),
-          verticalAlignment = Alignment.Top,
+          verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.SpaceBetween,
         ) {
           Row(
             modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.Top,
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy((11f * metrics.scale).coerceIn(9f, 13f).dp),
           ) {
             // Left Lively Animated Fire Streak Badge in an Obsidian frame
@@ -1951,40 +1973,6 @@ private fun StreakThresholdSection(
               )
 
               Spacer(modifier = Modifier.height(4.dp))
-
-              // Minimalist Tier Pill synced with the selected percentage block's color
-              Box(
-                modifier = Modifier
-                  .clip(RoundedCornerShape(4.5.dp))
-                  .background(Zinc900)
-                  .border(
-                    width = 0.8.dp,
-                    color = animatedAccent.copy(alpha = 0.55f),
-                    shape = RoundedCornerShape(4.5.dp),
-                  )
-                  .padding(horizontal = 6.5.dp, vertical = 2.dp),
-              ) {
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                  Canvas(modifier = Modifier.size(5.dp)) {
-                    drawCircle(color = animatedAccent)
-                  }
-                  Text(
-                    text = selectedThreshold.tierTitle,
-                    color = animatedAccent,
-                    fontFamily = JetBrainsMonoFontFamily,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = metrics.spScaled(8.6f, 7.6f, 9.8f),
-                    letterSpacing = 0.5.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                  )
-                }
-              }
-
-              Spacer(modifier = Modifier.height(5.dp))
 
               Text(
                 text = stringResource(R.string.blueprint_streak_section_subtitle),
@@ -2059,76 +2047,7 @@ private fun StreakThresholdSection(
             .fillMaxWidth()
             .height((8.5f * metrics.scale).coerceIn(7f, 10.5f).dp),
         )
-
-        // Tracked Daily Pillars row (Minimalist monochrome pills with Welcome-screen colored dots)
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-          Row(
-            horizontalArrangement = Arrangement.spacedBy((4.5f * metrics.scale).coerceIn(3.5f, 6f).dp),
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            WelcomeDailyPillars.forEach { pillar ->
-              WelcomeColoredPillarBadge(
-                spec = pillar,
-                metrics = metrics,
-              )
-            }
-          }
-
-          Text(
-            text = "≥ ${selectedThreshold.percentage}% DAILY",
-            color = PureWhite,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = metrics.spScaled(9.2f, 8.0f, 10.4f),
-            letterSpacing = 0.4.sp,
-          )
-        }
       }
-    }
-  }
-}
-
-/**
- * Minimalist dark Zinc900 pill badge for CAL, PRO, CARB, FAT, H2O, STEPS
- * featuring a crisp colored indicator dot from the Welcome screen palette.
- */
-@Composable
-private fun WelcomeColoredPillarBadge(
-  spec: WelcomePillarSpec,
-  metrics: BlueprintResponsiveMetrics,
-) {
-  val pillShape = RoundedCornerShape(4.5.dp)
-  Box(
-    modifier = Modifier
-      .clip(pillShape)
-      .background(Zinc900)
-      .border(
-        width = 0.7.dp,
-        color = spec.borderTint.copy(alpha = 0.38f),
-        shape = pillShape,
-      )
-      .padding(horizontal = (5.5f * metrics.scale).coerceIn(4.5f, 6.5f).dp, vertical = 2.2.dp),
-    contentAlignment = Alignment.Center,
-  ) {
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(3.5.dp),
-    ) {
-      Canvas(modifier = Modifier.size(4.2.dp)) {
-        drawCircle(color = spec.dotColor)
-      }
-      Text(
-        text = spec.label,
-        color = Zinc200,
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = metrics.spScaled(8.1f, 7.2f, 9.2f),
-        letterSpacing = 0.3.sp,
-      )
     }
   }
 }
@@ -2256,8 +2175,8 @@ private fun StreakPercentPillButton(
       )
       Spacer(modifier = Modifier.height(1.dp))
       Text(
-        text = if (isSelected) "ACTIVE" else "STREAK",
-        color = if (isSelected) ObsidianBlack.copy(alpha = 0.75f) else option.accentColor,
+        text = option.shortTag,
+        color = if (isSelected) ObsidianBlack.copy(alpha = 0.78f) else option.accentColor,
         fontFamily = JetBrainsMonoFontFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = metrics.spScaled(7.5f, 6.8f, 8.5f),
@@ -2641,6 +2560,7 @@ private fun AnimatedFireStreakBadge(
 @Composable
 private fun BlueprintSummaryMatrixCard(
   subjectName: String,
+  ageYears: Int,
   selectedActivityLevel: ActivityLevelOption,
   selectedObjective: BlueprintObjectiveOption,
   selectedStreakThreshold: StreakThresholdOption,
@@ -2681,6 +2601,19 @@ private fun BlueprintSummaryMatrixCard(
             size = size,
             cornerRadius = cornerRadius,
           )
+          if (flash > 0.01f) {
+            drawRoundRect(
+              brush = Brush.verticalGradient(
+                colors = listOf(
+                  PureWhite.copy(alpha = 0.08f * flash),
+                  Color.Transparent,
+                ),
+              ),
+              topLeft = Offset.Zero,
+              size = size,
+              cornerRadius = cornerRadius,
+            )
+          }
           drawRoundRect(
             brush = Brush.verticalGradient(
               0.0f to PureWhite.copy(alpha = 0.24f + 0.55f * flash),
@@ -2780,11 +2713,11 @@ private fun BlueprintSummaryMatrixCard(
         )
       }
 
-      // Subject footer note ("STEP 03 / 03 READY" removed)
+      // Subject (left) & Age (right) footer row in identical format
       Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Start,
+        horizontalArrangement = Arrangement.SpaceBetween,
       ) {
         Text(
           text = "SUBJECT: ${subjectName.ifBlank { "UNVERIFIED" }.uppercase()}",
@@ -2795,6 +2728,18 @@ private fun BlueprintSummaryMatrixCard(
           letterSpacing = 0.6.sp,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.weight(1f),
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+          text = "AGE: $ageYears YRS",
+          color = Zinc400,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Medium,
+          fontSize = metrics.spScaled(9.4f, 8.2f, 10.6f),
+          letterSpacing = 0.6.sp,
+          maxLines = 1,
+          modifier = Modifier.testTag("matrix_footer_age"),
         )
       }
     }

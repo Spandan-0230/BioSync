@@ -269,6 +269,7 @@ fun BioSyncApp() {
         }
         BlueprintScreen(
           subjectName = subjectName,
+          ageYears = calculatedAgeYears,
           selectedActivityLevel = currentActivityLevel,
           onSelectActivityLevel = { selectedActivityLevelName = it.name },
           selectedObjective = currentObjective,
