@@ -158,7 +158,7 @@ private fun safeBlurRadius(radius: Float): Float = radius.coerceAtLeast(0.5f)
 
 @Composable
 fun BioSyncApp() {
-  // 0 = Welcome, 1 = Profile Section (Step 01 of 03), 2 = Personal Details (Step 02 of 03)
+  // 0 = Welcome, 1 = Profile Section (Step 01 of 03), 2 = Personal Details (Step 02 of 03), 3 = Blueprint (Step 03 of 03)
   var currentStep by rememberSaveable { mutableIntStateOf(0) }
 
   // Persisted Step 01 Profile State
@@ -174,6 +174,11 @@ fun BioSyncApp() {
   var selectedHeightUnitName by rememberSaveable { mutableStateOf(HeightUnit.CM.name) }
   var weightKg by rememberSaveable { mutableFloatStateOf(62.0f) }
   var selectedWeightUnitName by rememberSaveable { mutableStateOf(WeightUnit.KG.name) }
+
+  // Persisted Step 03 Blueprint State
+  var selectedActivityLevelName by rememberSaveable { mutableStateOf(ActivityLevelOption.MODERATE.name) }
+  var selectedObjectiveName by rememberSaveable { mutableStateOf(BlueprintObjectiveOption.MAINTAIN.name) }
+  var selectedStreakPercent by rememberSaveable { mutableIntStateOf(90) }
 
   AnimatedContent(
     targetState = currentStep,
@@ -227,7 +232,7 @@ fun BioSyncApp() {
           onYearPersist = { selectedYear = it },
         )
       }
-      else -> {
+      2 -> {
         val currentHeightUnit = remember(selectedHeightUnitName) {
           runCatching { HeightUnit.valueOf(selectedHeightUnitName) }.getOrDefault(HeightUnit.CM)
         }
@@ -247,6 +252,30 @@ fun BioSyncApp() {
           selectedWeightUnit = currentWeightUnit,
           onSelectWeightUnit = { selectedWeightUnitName = it.name },
           onNavigateBack = { currentStep = 1 },
+          onNavigateToBlueprint = { currentStep = 3 },
+        )
+      }
+      else -> {
+        val currentActivityLevel = remember(selectedActivityLevelName) {
+          runCatching { ActivityLevelOption.valueOf(selectedActivityLevelName) }
+            .getOrDefault(ActivityLevelOption.MODERATE)
+        }
+        val currentObjective = remember(selectedObjectiveName) {
+          runCatching { BlueprintObjectiveOption.valueOf(selectedObjectiveName) }
+            .getOrDefault(BlueprintObjectiveOption.MAINTAIN)
+        }
+        val currentStreakOption = remember(selectedStreakPercent) {
+          StreakThresholdOption.fromPercent(selectedStreakPercent)
+        }
+        BlueprintScreen(
+          subjectName = subjectName,
+          selectedActivityLevel = currentActivityLevel,
+          onSelectActivityLevel = { selectedActivityLevelName = it.name },
+          selectedObjective = currentObjective,
+          onSelectObjective = { selectedObjectiveName = it.name },
+          selectedStreakThreshold = currentStreakOption,
+          onSelectStreakThreshold = { selectedStreakPercent = it.percentage },
+          onNavigateBack = { currentStep = 2 },
         )
       }
     }

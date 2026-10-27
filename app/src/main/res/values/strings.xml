@@ -67,4 +67,34 @@
     <string name="personal_resting_bmr">RESTING METABOLIC RATE</string>
     <string name="personal_bmr_accuracy_note">Disclaimer: Resting Metabolic Rate (RMR) estimate has 70–85% accuracy. Consult a fitness coach or medical professional for clinical precision.</string>
     <string name="cd_back_to_profile">Return to Profile Section</string>
+
+    <!-- Blueprint Screen (Step 03 of 03) -->
+    <string name="blueprint_header_step">STEP 03 OF 03</string>
+    <string name="blueprint_eyebrow">METABOLIC ARCHITECTURE</string>
+    <string name="blueprint_title">Blueprint</string>
+    <string name="blueprint_subtitle">Define your daily kinetic output, primary metabolic objective, and daily streak threshold to lock in your personalized BioSync protocol.</string>
+
+    <string name="blueprint_activity_section_label">Activity Level</string>
+    <string name="blueprint_activity_sedentary_title">Sedentary</string>
+    <string name="blueprint_activity_sedentary_sub">Work, Little exercise</string>
+    <string name="blueprint_activity_light_title">Light</string>
+    <string name="blueprint_activity_light_sub">1–3 days/week</string>
+    <string name="blueprint_activity_moderate_title">Moderate</string>
+    <string name="blueprint_activity_moderate_sub">3–5 days/week</string>
+    <string name="blueprint_activity_very_active_title">Very Active</string>
+    <string name="blueprint_activity_very_active_sub">6–7 days/week</string>
+
+    <string name="blueprint_objective_section_label">Objective</string>
+    <string name="blueprint_objective_lose_fat_title">Lose Fat</string>
+    <string name="blueprint_objective_lose_fat_sub">Caloric deficit &amp; lean preservation</string>
+    <string name="blueprint_objective_maintain_title">Maintain</string>
+    <string name="blueprint_objective_maintain_sub">Isocaloric homeostasis &amp; vitality</string>
+    <string name="blueprint_objective_build_muscle_title">Build Muscle</string>
+    <string name="blueprint_objective_build_muscle_sub">Anabolic surplus &amp; hypertrophy</string>
+
+    <string name="blueprint_streak_section_label">Daily Streak Completion</string>
+    <string name="blueprint_streak_section_subtitle">Select the percentage of overall daily goals (Calories, Protein, Carbs, Fats, Hydration &amp; Steps) required to earn 1 Daily Streak.</string>
+    <string name="blueprint_summary_header">BLUEPRINT PROTOCOL MATRIX</string>
+    <string name="blueprint_cta_complete">Complete Blueprint</string>
+    <string name="cd_back_to_personal_details">Return to Personal Details</string>
 </resources>

@@ -693,6 +693,7 @@ fun PersonalDetailsScreen(
   selectedWeightUnit: WeightUnit = WeightUnit.KG,
   onSelectWeightUnit: (WeightUnit) -> Unit = {},
   onNavigateBack: () -> Unit,
+  onNavigateToBlueprint: () -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
   BackHandler(onBack = onNavigateBack)
@@ -764,9 +765,10 @@ fun PersonalDetailsScreen(
       borderFlashPhase.snapTo(0f)
       borderFlashPhase.animateTo(
         targetValue = 1f,
-        animationSpec = tween(durationMillis = 680, easing = PersonalEaseOut),
+        animationSpec = tween(durationMillis = 220, easing = PersonalEaseOut),
       )
       borderFlashPhase.snapTo(0f)
+      onNavigateToBlueprint()
     }
   }
 
