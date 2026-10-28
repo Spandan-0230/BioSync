@@ -52,6 +52,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -355,6 +356,10 @@ fun BlueprintScreen(
   weightKg: Float = 62.0f,
   selectedActivityLevel: ActivityLevelOption,
   onSelectActivityLevel: (ActivityLevelOption) -> Unit,
+  selectedWorkoutDays: Set<DayOfWeekOption> = DailyTargetsEngine.defaultWorkoutDaysFor(selectedActivityLevel),
+  onUpdateWorkoutDays: (Set<DayOfWeekOption>) -> Unit = {},
+  selectedOccupationLoad: OccupationLoadOption = OccupationLoadOption.DESK,
+  onSelectOccupationLoad: (OccupationLoadOption) -> Unit = {},
   selectedObjective: BlueprintObjectiveOption,
   onSelectObjective: (BlueprintObjectiveOption) -> Unit,
   selectedTrainingModality: TrainingModalityOption = TrainingModalityOption.MIXED,
@@ -379,6 +384,9 @@ fun BlueprintScreen(
   onSelectStreakThreshold: (StreakThresholdOption) -> Unit,
   onNavigateBack: () -> Unit,
   onCompleteBlueprint: () -> Unit = {},
+  isQuickEditMode: Boolean = false,
+  initialFocusSection: String? = null,
+  onQuickEditReturnToSummary: () -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
   BackHandler(onBack = onNavigateBack)
@@ -387,8 +395,9 @@ fun BlueprintScreen(
   val coroutineScope = rememberCoroutineScope()
   val headerStepPhase = remember { Animatable(0f) }
   val borderFlashPhase = remember { Animatable(0f) }
+  var workoutDaysDialogActivity by remember { mutableStateOf<ActivityLevelOption?>(null) }
 
-  // Top STEP 03 OF 03 progress bar: animates from Step 02 (0.68f) to Step 03 (1.00f) on entry
+  // Top STEP 03 OF 04 progress bar: animates from Step 02 (0.50f) to Step 03 (0.75f) on entry
   LaunchedEffect(Unit) {
     headerStepPhase.snapTo(0f)
     headerStepPhase.animateTo(
@@ -406,7 +415,11 @@ fun BlueprintScreen(
         animationSpec = tween(durationMillis = 680, easing = BlueprintEaseOut),
       )
       borderFlashPhase.snapTo(0f)
-      onCompleteBlueprint()
+      if (isQuickEditMode) {
+        onQuickEditReturnToSummary()
+      } else {
+        onCompleteBlueprint()
+      }
     }
   }
 
@@ -476,8 +489,24 @@ fun BlueprintScreen(
         }
       }
 
-      LaunchedEffect(Unit) {
-        scrollState.scrollTo(0)
+      LaunchedEffect(
+        initialFocusSection,
+        activitySectionY,
+        objectiveSectionY,
+        trainingSectionY,
+        paceCycleSectionY,
+        nutritionSectionY,
+        streakSectionY,
+      ) {
+        when (initialFocusSection) {
+          "activity" -> if (activitySectionY > 0) scrollState.animateScrollTo((activitySectionY - 18).coerceAtLeast(0))
+          "objective" -> if (objectiveSectionY > 0) scrollState.animateScrollTo((objectiveSectionY - 18).coerceAtLeast(0))
+          "training" -> if (trainingSectionY > 0) scrollState.animateScrollTo((trainingSectionY - 18).coerceAtLeast(0))
+          "pace" -> if (paceCycleSectionY > 0) scrollState.animateScrollTo((paceCycleSectionY - 18).coerceAtLeast(0))
+          "nutrition" -> if (nutritionSectionY > 0) scrollState.animateScrollTo((nutritionSectionY - 18).coerceAtLeast(0))
+          "streak" -> if (streakSectionY > 0) scrollState.animateScrollTo((streakSectionY - 18).coerceAtLeast(0))
+          else -> scrollState.scrollTo(0)
+        }
       }
 
       Column(
@@ -495,7 +524,7 @@ fun BlueprintScreen(
           .testTag("blueprint_screen"),
         verticalArrangement = Arrangement.SpaceBetween,
       ) {
-        // Top Header Bar (BioSync + STEP 03 OF 03 + Full Shiny Glowy White Step Bar)
+        // Top Header Bar (BioSync + STEP 03 OF 04 + Shiny Glowy White Step Bar)
         BlueprintHeaderBar(
           onBackClick = {
             haptics.selection()
@@ -543,7 +572,7 @@ fun BlueprintScreen(
 
         Spacer(modifier = Modifier.height(metrics.titleToFirstFieldGap))
 
-        // 2. Section 1: Activity Level (Black & white cards with minimalist spectrum bar & badge accents)
+        // 2. Section 1: Activity Level & Occupation Physical Load
         Box(
           modifier = Modifier
             .fillMaxWidth()
@@ -553,10 +582,47 @@ fun BlueprintScreen(
         ) {
           ActivityLevelSection(
             selectedLevel = selectedActivityLevel,
+            selectedWorkoutDays = selectedWorkoutDays,
+            onOpenWorkoutDaysPicker = {
+              haptics.selection()
+              workoutDaysDialogActivity = selectedActivityLevel
+            },
             onSelectLevel = { level ->
+              haptics.selection()
               if (level != selectedActivityLevel) {
-                haptics.selection()
                 onSelectActivityLevel(level)
+                when (level) {
+                  ActivityLevelOption.SEDENTARY -> {
+                    onSelectScheduleCadence(ScheduleCadenceOption.UNIFORM_DAILY)
+                    onUpdateWorkoutDays(emptySet())
+                  }
+                  ActivityLevelOption.LIGHT -> {
+                    val defaultLightDays = DailyTargetsEngine.defaultWorkoutDaysFor(ActivityLevelOption.LIGHT)
+                    if (selectedWorkoutDays.size !in 1..3) {
+                      onUpdateWorkoutDays(defaultLightDays)
+                    }
+                    workoutDaysDialogActivity = ActivityLevelOption.LIGHT
+                  }
+                  ActivityLevelOption.MODERATE -> {
+                    val defaultModDays = DailyTargetsEngine.defaultWorkoutDaysFor(ActivityLevelOption.MODERATE)
+                    if (selectedWorkoutDays.size !in 3..5) {
+                      onUpdateWorkoutDays(defaultModDays)
+                    }
+                    workoutDaysDialogActivity = ActivityLevelOption.MODERATE
+                  }
+                  ActivityLevelOption.VERY_ACTIVE -> {
+                    onUpdateWorkoutDays(DailyTargetsEngine.defaultWorkoutDaysFor(ActivityLevelOption.VERY_ACTIVE))
+                  }
+                }
+              } else if (level == ActivityLevelOption.LIGHT || level == ActivityLevelOption.MODERATE) {
+                workoutDaysDialogActivity = level
+              }
+            },
+            selectedOccupationLoad = selectedOccupationLoad,
+            onSelectOccupationLoad = { occ ->
+              if (occ != selectedOccupationLoad) {
+                haptics.selection()
+                onSelectOccupationLoad(occ)
               } else {
                 haptics.tick()
               }
@@ -665,14 +731,26 @@ fun BlueprintScreen(
                 haptics.tick()
               }
             },
-            selectedCadence = selectedScheduleCadence,
+            selectedCadence = if (selectedActivityLevel == ActivityLevelOption.SEDENTARY) {
+              ScheduleCadenceOption.UNIFORM_DAILY
+            } else {
+              selectedScheduleCadence
+            },
             onSelectCadence = { cadence ->
-              if (cadence != selectedScheduleCadence) {
+              if (selectedActivityLevel == ActivityLevelOption.SEDENTARY) {
+                onSelectScheduleCadence(ScheduleCadenceOption.UNIFORM_DAILY)
+              } else if (cadence != selectedScheduleCadence) {
                 haptics.selection()
                 onSelectScheduleCadence(cadence)
               } else {
                 haptics.tick()
               }
+            },
+            selectedActivityLevel = selectedActivityLevel,
+            selectedWorkoutDays = selectedWorkoutDays,
+            onOpenWorkoutDaysPicker = {
+              haptics.selection()
+              workoutDaysDialogActivity = selectedActivityLevel
             },
             selectedObjective = selectedObjective,
             borderFlashProvider = borderFlashProvider,
@@ -756,13 +834,18 @@ fun BlueprintScreen(
           subjectName = subjectName,
           ageYears = ageYears,
           selectedActivityLevel = selectedActivityLevel,
+          selectedWorkoutDays = selectedWorkoutDays,
           selectedObjective = selectedObjective,
           selectedTrainingModality = selectedTrainingModality,
           selectedWorkoutDuration = selectedWorkoutDuration,
           selectedExperienceLevel = selectedExperienceLevel,
           selectedTargetPace = selectedTargetPace,
           selectedDayOne = selectedDayOne,
-          selectedScheduleCadence = selectedScheduleCadence,
+          selectedScheduleCadence = if (selectedActivityLevel == ActivityLevelOption.SEDENTARY) {
+            ScheduleCadenceOption.UNIFORM_DAILY
+          } else {
+            selectedScheduleCadence
+          },
           selectedMealFrequency = selectedMealFrequency,
           caffeineAlcoholYes = caffeineAlcoholYes,
           selectedSodiumFrequency = selectedSodiumFrequency,
@@ -782,11 +865,30 @@ fun BlueprintScreen(
         // 9. Primary Complete Blueprint Button & Encrypted Footer
         BlueprintContinueSection(
           onContinueClick = onContinueClick,
+          isQuickEditMode = isQuickEditMode,
           borderFlashProvider = borderFlashProvider,
           metrics = metrics,
         )
       }
     }
+  }
+
+  val activeDialogActivity = workoutDaysDialogActivity
+  if (activeDialogActivity != null &&
+    (activeDialogActivity == ActivityLevelOption.LIGHT || activeDialogActivity == ActivityLevelOption.MODERATE)
+  ) {
+    WorkoutDaysPickerDialog(
+      activityLevel = activeDialogActivity,
+      initialSelectedDays = selectedWorkoutDays,
+      onConfirmDays = { chosenDays ->
+        haptics.confirm()
+        onUpdateWorkoutDays(chosenDays)
+        workoutDaysDialogActivity = null
+      },
+      onDismiss = {
+        workoutDaysDialogActivity = null
+      },
+    )
   }
 }
 
@@ -959,7 +1061,7 @@ private fun StepThreeShinyGlowBar(
         onDrawBehind {
           if (size.width <= 1f || size.height <= 0.5f) return@onDrawBehind
           val p = phaseProvider().coerceIn(0f, 1f)
-          val activeFraction = 0.68f + (1.00f - 0.68f) * p
+          val activeFraction = 0.50f + (0.75f - 0.50f) * p
 
           drawRoundRect(
             color = Zinc850,
@@ -975,8 +1077,9 @@ private fun StepThreeShinyGlowBar(
             style = Stroke(width = 0.7.dp.toPx()),
           )
 
-          val step1X = size.width * 0.36f
-          val step2X = size.width * 0.68f
+          val step1X = size.width * 0.25f
+          val step2X = size.width * 0.50f
+          val step3X = size.width * 0.75f
 
           if (activeFraction > 0.01f) {
             val minFill = barH.coerceAtMost(size.width)
@@ -1016,20 +1119,26 @@ private fun StepThreeShinyGlowBar(
               size = Size((fillW - barH * 0.4f).coerceAtLeast(1f), barH * 0.45f),
               cornerRadius = radius,
             )
-
-            drawLine(
-              color = ObsidianBlack.copy(alpha = 0.32f),
-              start = Offset(step1X, 0f),
-              end = Offset(step1X, barH),
-              strokeWidth = 0.9.dp.toPx(),
-            )
-            drawLine(
-              color = ObsidianBlack.copy(alpha = 0.32f),
-              start = Offset(step2X, 0f),
-              end = Offset(step2X, barH),
-              strokeWidth = 0.9.dp.toPx(),
-            )
           }
+
+          drawLine(
+            color = ObsidianBlack.copy(alpha = 0.75f),
+            start = Offset(step1X, 0f),
+            end = Offset(step1X, barH),
+            strokeWidth = 1.2.dp.toPx(),
+          )
+          drawLine(
+            color = ObsidianBlack.copy(alpha = 0.75f),
+            start = Offset(step2X, 0f),
+            end = Offset(step2X, barH),
+            strokeWidth = 1.2.dp.toPx(),
+          )
+          drawLine(
+            color = ObsidianBlack.copy(alpha = 0.75f),
+            start = Offset(step3X, 0f),
+            end = Offset(step3X, barH),
+            strokeWidth = 1.2.dp.toPx(),
+          )
         }
       },
   )
@@ -1074,7 +1183,11 @@ private fun BlueprintSectionHeaderRow(
 @Composable
 private fun ActivityLevelSection(
   selectedLevel: ActivityLevelOption,
+  selectedWorkoutDays: Set<DayOfWeekOption>,
+  onOpenWorkoutDaysPicker: () -> Unit,
   onSelectLevel: (ActivityLevelOption) -> Unit,
+  selectedOccupationLoad: OccupationLoadOption,
+  onSelectOccupationLoad: (OccupationLoadOption) -> Unit,
   borderFlashProvider: () -> Float,
   metrics: BlueprintResponsiveMetrics,
 ) {
@@ -1234,8 +1347,202 @@ private fun ActivityLevelSection(
           metrics = metrics,
           testTag = "activity_option_very_active",
         )
+
+        if (selectedLevel == ActivityLevelOption.LIGHT || selectedLevel == ActivityLevelOption.MODERATE) {
+          val orderedDays = DayOfWeekOption.entries.filter { it in selectedWorkoutDays }
+          val wCount = orderedDays.size
+          val rCount = (7 - wCount).coerceAtLeast(0)
+          val dayCodes = if (orderedDays.isEmpty()) "NONE" else orderedDays.joinToString(" • ") { it.shortCode }
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape((9.5f * metrics.scale).dp))
+              .background(Zinc950)
+              .border(1.dp, Zinc800, RoundedCornerShape((9.5f * metrics.scale).dp))
+              .clickable(role = Role.Button, onClick = onOpenWorkoutDaysPicker)
+              .padding(horizontal = (11f * metrics.scale).dp, vertical = (9.5f * metrics.scale).dp)
+              .testTag("activity_workout_days_picker_button"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+              Text(
+                text = "SELECTED WORKOUT DAYS ($wCount WORKOUT • $rCount REST)",
+                color = Zinc400,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = metrics.spScaled(8.6f, 7.6f, 9.6f),
+                letterSpacing = 0.6.sp,
+              )
+              Text(
+                text = dayCodes,
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = metrics.spScaled(11.2f, 10.0f, 12.4f),
+              )
+            }
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(PureWhite)
+                .padding(horizontal = 9.dp, vertical = 5.dp),
+            ) {
+              Text(
+                text = "EDIT DAYS",
+                color = ObsidianBlack,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = metrics.spScaled(8.6f, 7.6f, 9.6f),
+              )
+            }
+          }
+        }
+
+        HorizontalDivider(
+          thickness = 0.8.dp,
+          color = Zinc800,
+          modifier = Modifier.padding(vertical = (3f * metrics.scale).dp),
+        )
+
+        // Occupation Physical Load Selector (Step 5 & Step 11 of PDF)
+        Column(
+          modifier = Modifier.fillMaxWidth(),
+          verticalArrangement = Arrangement.spacedBy((6.5f * metrics.scale).coerceIn(5f, 8.5f).dp),
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Text(
+              text = stringResource(R.string.blueprint_occupation_label),
+              color = Zinc400,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Medium,
+              fontSize = metrics.spScaled(9.2f, 8.0f, 10.5f),
+              letterSpacing = 0.9.sp,
+            )
+            Text(
+              text = selectedOccupationLoad.badgeCode,
+              color = selectedOccupationLoad.accentColor,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.SemiBold,
+              fontSize = metrics.spScaled(9.0f, 8.0f, 10.2f),
+              letterSpacing = 0.6.sp,
+            )
+          }
+
+          val occOptions = remember { OccupationLoadOption.entries }
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy((6f * metrics.scale).coerceIn(4.5f, 8f).dp),
+          ) {
+            occOptions.take(2).forEach { occ ->
+              OccupationOptionPill(
+                option = occ,
+                isSelected = occ == selectedOccupationLoad,
+                onClick = { onSelectOccupationLoad(occ) },
+                metrics = metrics,
+                modifier = Modifier.weight(1f),
+              )
+            }
+          }
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy((6f * metrics.scale).coerceIn(4.5f, 8f).dp),
+          ) {
+            occOptions.drop(2).forEach { occ ->
+              OccupationOptionPill(
+                option = occ,
+                isSelected = occ == selectedOccupationLoad,
+                onClick = { onSelectOccupationLoad(occ) },
+                metrics = metrics,
+                modifier = Modifier.weight(1f),
+              )
+            }
+          }
+        }
       }
     }
+  }
+}
+
+@Composable
+private fun OccupationOptionPill(
+  option: OccupationLoadOption,
+  isSelected: Boolean,
+  onClick: () -> Unit,
+  metrics: BlueprintResponsiveMetrics,
+  modifier: Modifier = Modifier,
+) {
+  val pillCorner = (9f * metrics.scale).coerceIn(7.5f, 11.5f).dp
+  val pillShape = RoundedCornerShape(pillCorner)
+  val bgColor by animateColorAsState(
+    targetValue = if (isSelected) PureWhite else Zinc900,
+    animationSpec = tween(durationMillis = 200),
+    label = "occ_pill_bg_${option.name}",
+  )
+  val borderColor by animateColorAsState(
+    targetValue = if (isSelected) PureWhite else Zinc800,
+    animationSpec = tween(durationMillis = 200),
+    label = "occ_pill_border_${option.name}",
+  )
+  val titleColor by animateColorAsState(
+    targetValue = if (isSelected) ObsidianBlack else PureWhite,
+    animationSpec = tween(durationMillis = 200),
+    label = "occ_pill_title_${option.name}",
+  )
+  val subColor by animateColorAsState(
+    targetValue = if (isSelected) Zinc600 else Zinc400,
+    animationSpec = tween(durationMillis = 200),
+    label = "occ_pill_sub_${option.name}",
+  )
+
+  Column(
+    modifier = modifier
+      .clip(pillShape)
+      .background(bgColor)
+      .border(width = 1.dp, color = borderColor, shape = pillShape)
+      .clickable(
+        role = Role.RadioButton,
+        onClick = onClick,
+      )
+      .semantics { selected = isSelected }
+      .padding(
+        horizontal = (10f * metrics.scale).coerceIn(8f, 12.5f).dp,
+        vertical = (8.5f * metrics.scale).coerceIn(7f, 10.5f).dp,
+      )
+      .testTag("occupation_option_${option.name.lowercase()}"),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Text(
+        text = option.title,
+        color = titleColor,
+        fontFamily = InterFontFamily,
+        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+        fontSize = metrics.spScaled(11.8f, 10.4f, 13.4f),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+      Canvas(modifier = Modifier.size(5.5.dp)) {
+        drawCircle(color = if (isSelected) ObsidianBlack else option.accentColor)
+      }
+    }
+    Spacer(modifier = Modifier.height(2.dp))
+    Text(
+      text = option.subtitle,
+      color = subColor,
+      fontFamily = InterFontFamily,
+      fontWeight = FontWeight.Normal,
+      fontSize = metrics.spScaled(9.8f, 8.6f, 11.0f),
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
   }
 }
 
@@ -3074,6 +3381,7 @@ private fun BlueprintSummaryMatrixCard(
   subjectName: String,
   ageYears: Int,
   selectedActivityLevel: ActivityLevelOption,
+  selectedWorkoutDays: Set<DayOfWeekOption>,
   selectedObjective: BlueprintObjectiveOption,
   selectedTrainingModality: TrainingModalityOption,
   selectedWorkoutDuration: WorkoutDurationOption,
@@ -3101,6 +3409,14 @@ private fun BlueprintSummaryMatrixCard(
     ActivityLevelOption.MODERATE -> stringResource(R.string.blueprint_activity_moderate_title)
     ActivityLevelOption.VERY_ACTIVE -> stringResource(R.string.blueprint_activity_very_active_title)
   }
+  val activitySubValue = when (selectedActivityLevel) {
+    ActivityLevelOption.SEDENTARY -> "0W / 7R • SEDENTARY"
+    ActivityLevelOption.LIGHT, ActivityLevelOption.MODERATE -> {
+      val wCount = selectedWorkoutDays.size.coerceIn(1, 6)
+      "${wCount}W / ${7 - wCount}R • ${DayOfWeekOption.entries.filter { it in selectedWorkoutDays }.joinToString(",") { it.shortCode }}"
+    }
+    ActivityLevelOption.VERY_ACTIVE -> "6W / 1R • ${selectedActivityLevel.cadenceBadge}"
+  }
   val objectiveLabel = when (selectedObjective) {
     BlueprintObjectiveOption.LOSE_FAT -> stringResource(R.string.blueprint_objective_lose_fat_title)
     BlueprintObjectiveOption.MAINTAIN -> stringResource(R.string.blueprint_objective_maintain_title)
@@ -3111,9 +3427,13 @@ private fun BlueprintSummaryMatrixCard(
     ExperienceLevelOption.INTERMEDIATE -> stringResource(R.string.blueprint_exp_intermediate)
     ExperienceLevelOption.ADVANCED -> stringResource(R.string.blueprint_exp_advanced)
   }
-  val cadenceLabel = when (selectedScheduleCadence) {
-    ScheduleCadenceOption.UNIFORM_DAILY -> stringResource(R.string.blueprint_cadence_uniform)
-    ScheduleCadenceOption.REST_DAYS -> stringResource(R.string.blueprint_cadence_rest_days)
+  val cadenceLabel = if (selectedActivityLevel == ActivityLevelOption.SEDENTARY) {
+    stringResource(R.string.blueprint_cadence_uniform)
+  } else {
+    when (selectedScheduleCadence) {
+      ScheduleCadenceOption.UNIFORM_DAILY -> stringResource(R.string.blueprint_cadence_uniform)
+      ScheduleCadenceOption.REST_DAYS -> stringResource(R.string.blueprint_cadence_rest_days)
+    }
   }
   val sodiumLabel = when (selectedSodiumFrequency) {
     SodiumFrequencyOption.RARELY -> stringResource(R.string.blueprint_sodium_rarely)
@@ -3206,7 +3526,7 @@ private fun BlueprintSummaryMatrixCard(
         SummaryMetricTile(
           label = "ACTIVITY LEVEL",
           value = activityLabel,
-          subValue = selectedActivityLevel.cadenceBadge,
+          subValue = activitySubValue,
           dotColor = selectedActivityLevel.accentColor,
           onClick = onClickActivityTile,
           metrics = metrics,
@@ -3401,6 +3721,7 @@ private fun SummaryMetricTile(
 @Composable
 private fun BlueprintContinueSection(
   onContinueClick: () -> Unit,
+  isQuickEditMode: Boolean,
   borderFlashProvider: () -> Float,
   metrics: BlueprintResponsiveMetrics,
 ) {
@@ -3545,7 +3866,9 @@ private fun BlueprintContinueSection(
         horizontalArrangement = Arrangement.Center,
       ) {
         Text(
-          text = stringResource(R.string.blueprint_cta_complete),
+          text = stringResource(
+            if (isQuickEditMode) R.string.calib_cta_return_summary else R.string.blueprint_cta_complete,
+          ),
           color = ObsidianBlack,
           fontFamily = InterFontFamily,
           fontWeight = FontWeight.SemiBold,

@@ -694,6 +694,8 @@ fun PersonalDetailsScreen(
   onSelectWeightUnit: (WeightUnit) -> Unit = {},
   onNavigateBack: () -> Unit,
   onNavigateToBlueprint: () -> Unit = {},
+  isQuickEditMode: Boolean = false,
+  onQuickEditReturnToSummary: () -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
   BackHandler(onBack = onNavigateBack)
@@ -714,7 +716,7 @@ fun PersonalDetailsScreen(
   val bmiEntryPhase = remember { Animatable(0f) }
   val borderFlashPhase = remember { Animatable(0f) }
 
-  // Top STEP 02 OF 03 progress bar: animates ONLY when switching onto the Personal Details page
+  // Top STEP 02 OF 04 progress bar: animates ONLY when switching onto the Personal Details page
   LaunchedEffect(Unit) {
     headerStepPhase.snapTo(0f)
     headerStepPhase.animateTo(
@@ -768,7 +770,11 @@ fun PersonalDetailsScreen(
         animationSpec = tween(durationMillis = 220, easing = PersonalEaseOut),
       )
       borderFlashPhase.snapTo(0f)
-      onNavigateToBlueprint()
+      if (isQuickEditMode) {
+        onQuickEditReturnToSummary()
+      } else {
+        onNavigateToBlueprint()
+      }
     }
   }
 
@@ -978,6 +984,7 @@ fun PersonalDetailsScreen(
         // 5. Primary Continue Button & Encrypted Footer
         PersonalContinueSection(
           onContinueClick = onContinueClick,
+          isQuickEditMode = isQuickEditMode,
           borderFlashProvider = borderFlashProvider,
           metrics = metrics,
         )
@@ -1203,8 +1210,8 @@ private fun StepTwoShinyGlowBar(
         onDrawBehind {
           if (size.width <= 1f || size.height <= 0.5f) return@onDrawBehind
           val p = phaseProvider().coerceIn(0f, 1f)
-          // Animates from Step 1 (0.36f) to Step 2 (0.68f) on page transition
-          val activeFraction = 0.36f + (0.68f - 0.36f) * p
+          // Animates from Step 1 (0.25f) to Step 2 (0.50f) on page transition
+          val activeFraction = 0.25f + (0.50f - 0.25f) * p
 
           drawRoundRect(
             color = Zinc850,
@@ -1220,8 +1227,9 @@ private fun StepTwoShinyGlowBar(
             style = Stroke(width = 0.7.dp.toPx()),
           )
 
-          val step1X = size.width * 0.36f
-          val step2X = size.width * 0.68f
+          val step1X = size.width * 0.25f
+          val step2X = size.width * 0.50f
+          val step3X = size.width * 0.75f
 
           if (activeFraction > 0.01f) {
             val minFill = barH.coerceAtMost(size.width)
@@ -1274,6 +1282,12 @@ private fun StepTwoShinyGlowBar(
             color = ObsidianBlack.copy(alpha = 0.75f),
             start = Offset(step2X, 0f),
             end = Offset(step2X, barH),
+            strokeWidth = 1.2.dp.toPx(),
+          )
+          drawLine(
+            color = ObsidianBlack.copy(alpha = 0.75f),
+            start = Offset(step3X, 0f),
+            end = Offset(step3X, barH),
             strokeWidth = 1.2.dp.toPx(),
           )
         }
@@ -3580,6 +3594,7 @@ private fun AnimatedBmiSpectrumGauge(
 @Composable
 private fun PersonalContinueSection(
   onContinueClick: () -> Unit,
+  isQuickEditMode: Boolean,
   borderFlashProvider: () -> Float,
   metrics: PersonalResponsiveMetrics,
 ) {
@@ -3724,7 +3739,9 @@ private fun PersonalContinueSection(
         horizontalArrangement = Arrangement.Center,
       ) {
         Text(
-          text = stringResource(R.string.calib_cta_continue),
+          text = stringResource(
+            if (isQuickEditMode) R.string.calib_cta_return_summary else R.string.calib_cta_continue,
+          ),
           color = ObsidianBlack,
           fontFamily = InterFontFamily,
           fontWeight = FontWeight.SemiBold,

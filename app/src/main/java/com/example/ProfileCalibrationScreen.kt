@@ -568,6 +568,8 @@ fun ProfileCalibrationScreen(
   onMonthPersist: (Int) -> Unit = {},
   initialYear: Int = 1994,
   onYearPersist: (Int) -> Unit = {},
+  isQuickEditMode: Boolean = false,
+  onQuickEditReturnToSummary: (subjectName: String, selectedSex: String, calculatedAgeYears: Int) -> Unit = { _, _, _ -> },
   modifier: Modifier = Modifier,
 ) {
   BackHandler(onBack = onNavigateBack)
@@ -599,7 +601,7 @@ fun ProfileCalibrationScreen(
   val chronoPhase = remember { Animatable(0f) }
   val borderFlashPhase = remember { Animatable(0f) }
 
-  // Top STEP 01 OF 03 progress bar: animates ONLY when switching to the Profile Section page
+  // Top STEP 01 OF 04 progress bar: animates ONLY when switching to the Profile Section page
   LaunchedEffect(Unit) {
     headerStepPhase.snapTo(0f)
     headerStepPhase.animateTo(
@@ -628,7 +630,11 @@ fun ProfileCalibrationScreen(
           animationSpec = tween(durationMillis = 480, easing = CalibrationEaseOut),
         )
         borderFlashPhase.snapTo(0f)
-        onNavigateToPersonalDetails(subjectName, selectedSex, chronometry.years)
+        if (isQuickEditMode) {
+          onQuickEditReturnToSummary(subjectName, selectedSex, chronometry.years)
+        } else {
+          onNavigateToPersonalDetails(subjectName, selectedSex, chronometry.years)
+        }
         isTransitioning = false
       }
     }
@@ -850,6 +856,7 @@ fun ProfileCalibrationScreen(
         // 6. Primary Action Button & Encrypted Footer (Content ends right here with no trailing scroll space)
         CalibrationContinueSection(
           onContinueClick = onContinueClick,
+          isQuickEditMode = isQuickEditMode,
           borderFlashProvider = borderFlashProvider,
           metrics = metrics,
         )
@@ -1025,7 +1032,7 @@ private fun StepOneShinyGlowBar(
         onDrawBehind {
           if (size.width <= 1f || size.height <= 0.5f) return@onDrawBehind
           val p = phaseProvider().coerceIn(0f, 1f)
-          val activeFraction = 0.36f * p
+          val activeFraction = 0.25f * p
 
           drawRoundRect(
             color = Zinc850,
@@ -1041,8 +1048,9 @@ private fun StepOneShinyGlowBar(
             style = Stroke(width = 0.7.dp.toPx()),
           )
 
-          val step1X = size.width * 0.36f
-          val step2X = size.width * 0.68f
+          val step1X = size.width * 0.25f
+          val step2X = size.width * 0.50f
+          val step3X = size.width * 0.75f
           drawLine(
             color = ObsidianBlack.copy(alpha = 0.75f),
             start = Offset(step1X, 0f),
@@ -1053,6 +1061,12 @@ private fun StepOneShinyGlowBar(
             color = ObsidianBlack.copy(alpha = 0.75f),
             start = Offset(step2X, 0f),
             end = Offset(step2X, barH),
+            strokeWidth = 1.2.dp.toPx(),
+          )
+          drawLine(
+            color = ObsidianBlack.copy(alpha = 0.75f),
+            start = Offset(step3X, 0f),
+            end = Offset(step3X, barH),
             strokeWidth = 1.2.dp.toPx(),
           )
 
@@ -3014,6 +3028,7 @@ private fun CalculatedAgeProgressBar(
 @Composable
 private fun CalibrationContinueSection(
   onContinueClick: () -> Unit,
+  isQuickEditMode: Boolean,
   borderFlashProvider: () -> Float,
   metrics: CalibrationResponsiveMetrics,
 ) {
@@ -3158,7 +3173,9 @@ private fun CalibrationContinueSection(
         horizontalArrangement = Arrangement.Center,
       ) {
         Text(
-          text = stringResource(R.string.calib_cta_continue),
+          text = stringResource(
+            if (isQuickEditMode) R.string.calib_cta_return_summary else R.string.calib_cta_continue,
+          ),
           color = ObsidianBlack,
           fontFamily = InterFontFamily,
           fontWeight = FontWeight.SemiBold,

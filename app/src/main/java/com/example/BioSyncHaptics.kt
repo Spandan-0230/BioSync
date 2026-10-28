@@ -69,6 +69,21 @@ class BioSyncHapticController(
       composeHaptics.performHapticFeedback(HapticFeedbackType.LongPress)
     }
   }
+
+  /**
+   * Distinct double/heavy warning pulse for out-of-range clinical alerts and disclaimer modals.
+   */
+  fun warning() {
+    val constant = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      HapticFeedbackConstants.REJECT
+    } else {
+      HapticFeedbackConstants.LONG_PRESS
+    }
+    val performed = view.performHapticFeedback(constant)
+    if (!performed) {
+      composeHaptics.performHapticFeedback(HapticFeedbackType.LongPress)
+    }
+  }
 }
 
 @Composable

@@ -19,9 +19,9 @@
     <string name="cd_biometric_dial">Precision Biometric Core Dial reading 94</string>
     <string name="cd_arrow_forward">Proceed arrow</string>
 
-    <!-- Profile Calibration Screen (Step 01 of 03) -->
+    <!-- Profile Calibration Screen (Step 01 of 04) -->
     <string name="calib_header_title">BioSync</string>
-    <string name="calib_header_step">STEP 01 OF 03</string>
+    <string name="calib_header_step">STEP 01 OF 04</string>
     <string name="calib_eyebrow">IDENTIFICATION</string>
     <string name="calib_title">Profile Section</string>
     <string name="calib_subtitle">Your identity and vitals. Keeping this info updated ensures your daily nutritional targets remain accurate as you age.</string>
@@ -46,11 +46,12 @@
     <string name="calib_total_duration">TOTAL DURATION</string>
     <string name="calib_next_anniversary">NEXT BIRTHDAY</string>
     <string name="calib_cta_continue">Continue</string>
+    <string name="calib_cta_return_summary">Save &amp; Return to Summary</string>
     <string name="calib_footer_encrypted">Encrypted on device • Private &amp; secure</string>
     <string name="cd_back_button">Return to Welcome screen</string>
 
-    <!-- Personal Details Screen (Step 02 of 03) -->
-    <string name="personal_header_step">STEP 02 OF 03</string>
+    <!-- Personal Details Screen (Step 02 of 04) -->
+    <string name="personal_header_step">STEP 02 OF 04</string>
     <string name="personal_eyebrow">ANTHROPOMETRICS</string>
     <string name="personal_title">Personal Details</string>
     <string name="personal_subtitle">Your physical stature and mass baseline. Precision somatic calibration powers real-time BMI indexing and daily energy modeling.</string>
@@ -68,8 +69,8 @@
     <string name="personal_bmr_accuracy_note">Disclaimer: Resting Metabolic Rate (RMR) estimate has 70–85% accuracy. Consult a fitness coach or medical professional for clinical precision.</string>
     <string name="cd_back_to_profile">Return to Profile Section</string>
 
-    <!-- Blueprint Screen (Step 03 of 03) -->
-    <string name="blueprint_header_step">STEP 03 OF 03</string>
+    <!-- Blueprint Screen (Step 03 of 04) -->
+    <string name="blueprint_header_step">STEP 03 OF 04</string>
     <string name="blueprint_eyebrow">METABOLIC ARCHITECTURE</string>
     <string name="blueprint_title">Blueprint</string>
     <string name="blueprint_subtitle">Define your daily kinetic output, primary metabolic objective, and daily streak threshold to lock in your personalized BioSync protocol.</string>
@@ -95,7 +96,7 @@
     <string name="blueprint_streak_section_label">Daily Streak Completion</string>
     <string name="blueprint_streak_section_subtitle">Select the percentage of overall daily goals (Calories, Protein, Carbs, Fats, Hydration &amp; Steps) required to earn 1 Daily Streak.</string>
     <string name="blueprint_summary_header">BLUEPRINT PROTOCOL MATRIX</string>
-    <string name="blueprint_cta_complete">Complete Blueprint</string>
+    <string name="blueprint_cta_complete">Continue</string>
     <string name="cd_back_to_personal_details">Return to Personal Details</string>
 
     <!-- Extended Blueprint Sections -->
@@ -123,9 +124,20 @@
     <string name="blueprint_section_nutrition_hydration">Nutrition &amp; Hydration Calibration</string>
     <string name="blueprint_meal_frequency_label">MEAL FREQUENCY PER DAY</string>
     <string name="blueprint_diuretic_title">Caffeine / Alcohol Intake</string>
-    <string name="blueprint_diuretic_subtitle">Heavy coffee, tea, or alcohol acts as a mild diuretic — auto-bumps daily H2O (+350 mL).</string>
+    <string name="blueprint_diuretic_subtitle">Heavy coffee, tea, or alcohol acts as a mild diuretic — auto-bumps daily H2O (+300 mL).</string>
     <string name="blueprint_sodium_label">HIGH-SODIUM / FAST FOOD FREQUENCY</string>
     <string name="blueprint_sodium_rarely">Rarely</string>
     <string name="blueprint_sodium_sometimes">Sometimes</string>
     <string name="blueprint_sodium_often">Often</string>
+    <string name="blueprint_occupation_label">OCCUPATION PHYSICAL LOAD</string>
+
+    <!-- Step 04: Protocol Summary & Daily Targets Engine Screen -->
+    <string name="summary_header_step">STEP 04 OF 04</string>
+    <string name="summary_eyebrow">DAILY TARGETS ENGINE • ON-DEVICE</string>
+    <string name="summary_title">Protocol Summary</string>
+    <string name="summary_subtitle">Scientifically calibrated daily energy, macronutrient, hydration, and step targets derived from your biometric profile and stored privately on your device.</string>
+    <string name="summary_mode_recommended">Recommended</string>
+    <string name="summary_mode_custom">Custom Edit</string>
+    <string name="summary_cta_lock_protocol">Lock In Daily Protocol</string>
+    <string name="cd_back_to_blueprint">Return to Blueprint</string>
 </resources>
