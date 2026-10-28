@@ -178,6 +178,15 @@ fun BioSyncApp() {
   // Persisted Step 03 Blueprint State
   var selectedActivityLevelName by rememberSaveable { mutableStateOf(ActivityLevelOption.MODERATE.name) }
   var selectedObjectiveName by rememberSaveable { mutableStateOf(BlueprintObjectiveOption.MAINTAIN.name) }
+  var selectedTrainingModalityName by rememberSaveable { mutableStateOf(TrainingModalityOption.MIXED.name) }
+  var selectedWorkoutDurationName by rememberSaveable { mutableStateOf(WorkoutDurationOption.HR_1_0.name) }
+  var selectedExperienceLevelName by rememberSaveable { mutableStateOf(ExperienceLevelOption.INTERMEDIATE.name) }
+  var selectedTargetPaceName by rememberSaveable { mutableStateOf(TargetPaceOption.NORMAL.name) }
+  var selectedDayOneName by rememberSaveable { mutableStateOf(DayOfWeekOption.MONDAY.name) }
+  var selectedScheduleCadenceName by rememberSaveable { mutableStateOf(ScheduleCadenceOption.UNIFORM_DAILY.name) }
+  var selectedMealFrequencyName by rememberSaveable { mutableStateOf(MealFrequencyOption.MEALS_3.name) }
+  var caffeineAlcoholYes by rememberSaveable { mutableStateOf(false) }
+  var selectedSodiumFrequencyName by rememberSaveable { mutableStateOf(SodiumFrequencyOption.RARELY.name) }
   var selectedStreakPercent by rememberSaveable { mutableIntStateOf(90) }
 
   AnimatedContent(
@@ -264,16 +273,67 @@ fun BioSyncApp() {
           runCatching { BlueprintObjectiveOption.valueOf(selectedObjectiveName) }
             .getOrDefault(BlueprintObjectiveOption.MAINTAIN)
         }
+        val currentTrainingModality = remember(selectedTrainingModalityName) {
+          runCatching { TrainingModalityOption.valueOf(selectedTrainingModalityName) }
+            .getOrDefault(TrainingModalityOption.MIXED)
+        }
+        val currentWorkoutDuration = remember(selectedWorkoutDurationName) {
+          runCatching { WorkoutDurationOption.valueOf(selectedWorkoutDurationName) }
+            .getOrDefault(WorkoutDurationOption.HR_1_0)
+        }
+        val currentExperienceLevel = remember(selectedExperienceLevelName) {
+          runCatching { ExperienceLevelOption.valueOf(selectedExperienceLevelName) }
+            .getOrDefault(ExperienceLevelOption.INTERMEDIATE)
+        }
+        val currentTargetPace = remember(selectedTargetPaceName) {
+          runCatching { TargetPaceOption.valueOf(selectedTargetPaceName) }
+            .getOrDefault(TargetPaceOption.NORMAL)
+        }
+        val currentDayOne = remember(selectedDayOneName) {
+          runCatching { DayOfWeekOption.valueOf(selectedDayOneName) }
+            .getOrDefault(DayOfWeekOption.MONDAY)
+        }
+        val currentScheduleCadence = remember(selectedScheduleCadenceName) {
+          runCatching { ScheduleCadenceOption.valueOf(selectedScheduleCadenceName) }
+            .getOrDefault(ScheduleCadenceOption.UNIFORM_DAILY)
+        }
+        val currentMealFrequency = remember(selectedMealFrequencyName) {
+          runCatching { MealFrequencyOption.valueOf(selectedMealFrequencyName) }
+            .getOrDefault(MealFrequencyOption.MEALS_3)
+        }
+        val currentSodiumFrequency = remember(selectedSodiumFrequencyName) {
+          runCatching { SodiumFrequencyOption.valueOf(selectedSodiumFrequencyName) }
+            .getOrDefault(SodiumFrequencyOption.RARELY)
+        }
         val currentStreakOption = remember(selectedStreakPercent) {
           StreakThresholdOption.fromPercent(selectedStreakPercent)
         }
         BlueprintScreen(
           subjectName = subjectName,
           ageYears = calculatedAgeYears,
+          weightKg = weightKg,
           selectedActivityLevel = currentActivityLevel,
           onSelectActivityLevel = { selectedActivityLevelName = it.name },
           selectedObjective = currentObjective,
           onSelectObjective = { selectedObjectiveName = it.name },
+          selectedTrainingModality = currentTrainingModality,
+          onSelectTrainingModality = { selectedTrainingModalityName = it.name },
+          selectedWorkoutDuration = currentWorkoutDuration,
+          onSelectWorkoutDuration = { selectedWorkoutDurationName = it.name },
+          selectedExperienceLevel = currentExperienceLevel,
+          onSelectExperienceLevel = { selectedExperienceLevelName = it.name },
+          selectedTargetPace = currentTargetPace,
+          onSelectTargetPace = { selectedTargetPaceName = it.name },
+          selectedDayOne = currentDayOne,
+          onSelectDayOne = { selectedDayOneName = it.name },
+          selectedScheduleCadence = currentScheduleCadence,
+          onSelectScheduleCadence = { selectedScheduleCadenceName = it.name },
+          selectedMealFrequency = currentMealFrequency,
+          onSelectMealFrequency = { selectedMealFrequencyName = it.name },
+          caffeineAlcoholYes = caffeineAlcoholYes,
+          onToggleCaffeineAlcohol = { caffeineAlcoholYes = it },
+          selectedSodiumFrequency = currentSodiumFrequency,
+          onSelectSodiumFrequency = { selectedSodiumFrequencyName = it.name },
           selectedStreakThreshold = currentStreakOption,
           onSelectStreakThreshold = { selectedStreakPercent = it.percentage },
           onNavigateBack = { currentStep = 2 },

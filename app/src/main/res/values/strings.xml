@@ -97,4 +97,35 @@
     <string name="blueprint_summary_header">BLUEPRINT PROTOCOL MATRIX</string>
     <string name="blueprint_cta_complete">Complete Blueprint</string>
     <string name="cd_back_to_personal_details">Return to Personal Details</string>
+
+    <!-- Extended Blueprint Sections -->
+    <string name="blueprint_section_training">Training Architecture</string>
+    <string name="blueprint_training_modality_label">TRAINING MODALITY</string>
+    <string name="blueprint_modality_cardio">Cardio</string>
+    <string name="blueprint_modality_strength">Strength</string>
+    <string name="blueprint_modality_mixed">Mixed</string>
+    <string name="blueprint_workout_duration_label">WORKOUT DURATION (HR / DAY)</string>
+    <string name="blueprint_experience_level_label">EXPERIENCE LEVEL (TRAINING AGE)</string>
+    <string name="blueprint_exp_beginner">Beginner</string>
+    <string name="blueprint_exp_intermediate">Intermediate</string>
+    <string name="blueprint_exp_advanced">Advanced</string>
+
+    <string name="blueprint_section_pace_cycle">Metabolic Pace &amp; Cycle</string>
+    <string name="blueprint_target_pace_label">TARGET PACE TO GOAL (TDEE)</string>
+    <string name="blueprint_pace_slow">Slow</string>
+    <string name="blueprint_pace_normal">Normal</string>
+    <string name="blueprint_pace_fast">Fast</string>
+    <string name="blueprint_day_one_label">PROTOCOL DAY 01 ANCHOR</string>
+    <string name="blueprint_schedule_cadence_label">WEEKLY DISTRIBUTION CADENCE</string>
+    <string name="blueprint_cadence_uniform">Uniform Daily</string>
+    <string name="blueprint_cadence_rest_days">Active + Rest Days</string>
+
+    <string name="blueprint_section_nutrition_hydration">Nutrition &amp; Hydration Calibration</string>
+    <string name="blueprint_meal_frequency_label">MEAL FREQUENCY PER DAY</string>
+    <string name="blueprint_diuretic_title">Caffeine / Alcohol Intake</string>
+    <string name="blueprint_diuretic_subtitle">Heavy coffee, tea, or alcohol acts as a mild diuretic — auto-bumps daily H2O (+350 mL).</string>
+    <string name="blueprint_sodium_label">HIGH-SODIUM / FAST FOOD FREQUENCY</string>
+    <string name="blueprint_sodium_rarely">Rarely</string>
+    <string name="blueprint_sodium_sometimes">Sometimes</string>
+    <string name="blueprint_sodium_often">Often</string>
 </resources>

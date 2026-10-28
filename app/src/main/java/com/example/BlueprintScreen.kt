@@ -288,7 +288,7 @@ enum class StreakThresholdOption(
 }
 
 @Immutable
-private data class BlueprintResponsiveMetrics(
+internal data class BlueprintResponsiveMetrics(
   val scale: Float,
   val fontCompensation: Float,
   val isExpanded: Boolean,
@@ -352,10 +352,29 @@ private fun computeBlueprintMetrics(
 fun BlueprintScreen(
   subjectName: String,
   ageYears: Int = 31,
+  weightKg: Float = 62.0f,
   selectedActivityLevel: ActivityLevelOption,
   onSelectActivityLevel: (ActivityLevelOption) -> Unit,
   selectedObjective: BlueprintObjectiveOption,
   onSelectObjective: (BlueprintObjectiveOption) -> Unit,
+  selectedTrainingModality: TrainingModalityOption = TrainingModalityOption.MIXED,
+  onSelectTrainingModality: (TrainingModalityOption) -> Unit = {},
+  selectedWorkoutDuration: WorkoutDurationOption = WorkoutDurationOption.HR_1_0,
+  onSelectWorkoutDuration: (WorkoutDurationOption) -> Unit = {},
+  selectedExperienceLevel: ExperienceLevelOption = ExperienceLevelOption.INTERMEDIATE,
+  onSelectExperienceLevel: (ExperienceLevelOption) -> Unit = {},
+  selectedTargetPace: TargetPaceOption = TargetPaceOption.NORMAL,
+  onSelectTargetPace: (TargetPaceOption) -> Unit = {},
+  selectedDayOne: DayOfWeekOption = DayOfWeekOption.MONDAY,
+  onSelectDayOne: (DayOfWeekOption) -> Unit = {},
+  selectedScheduleCadence: ScheduleCadenceOption = ScheduleCadenceOption.UNIFORM_DAILY,
+  onSelectScheduleCadence: (ScheduleCadenceOption) -> Unit = {},
+  selectedMealFrequency: MealFrequencyOption = MealFrequencyOption.MEALS_3,
+  onSelectMealFrequency: (MealFrequencyOption) -> Unit = {},
+  caffeineAlcoholYes: Boolean = false,
+  onToggleCaffeineAlcohol: (Boolean) -> Unit = {},
+  selectedSodiumFrequency: SodiumFrequencyOption = SodiumFrequencyOption.RARELY,
+  onSelectSodiumFrequency: (SodiumFrequencyOption) -> Unit = {},
   selectedStreakThreshold: StreakThresholdOption,
   onSelectStreakThreshold: (StreakThresholdOption) -> Unit,
   onNavigateBack: () -> Unit,
@@ -423,7 +442,28 @@ fun BlueprintScreen(
       // Track section Y positions inside the scrollable Column for smooth scroll-to-section
       var activitySectionY by remember { mutableIntStateOf(0) }
       var objectiveSectionY by remember { mutableIntStateOf(0) }
+      var trainingSectionY by remember { mutableIntStateOf(0) }
+      var paceCycleSectionY by remember { mutableIntStateOf(0) }
+      var nutritionSectionY by remember { mutableIntStateOf(0) }
       var streakSectionY by remember { mutableIntStateOf(0) }
+
+      val calibration = remember(
+        weightKg,
+        selectedWorkoutDuration,
+        selectedExperienceLevel,
+        selectedObjective,
+        caffeineAlcoholYes,
+        selectedSodiumFrequency,
+      ) {
+        computeHydrationMacroCalibration(
+          weightKg = weightKg,
+          workoutDuration = selectedWorkoutDuration,
+          experienceLevel = selectedExperienceLevel,
+          objective = selectedObjective,
+          caffeineAlcoholYes = caffeineAlcoholYes,
+          sodiumFrequency = selectedSodiumFrequency,
+        )
+      }
 
       val scrollToSection: (Int) -> Unit = { targetY ->
         haptics.selection()
@@ -553,7 +593,140 @@ fun BlueprintScreen(
 
         Spacer(modifier = Modifier.height(metrics.sectionGap))
 
-        // 4. Section 3: Daily Streak Completion Threshold (100% / 95% / 90% / 85% / 80%)
+        // 4. Section 3: Training Architecture (Cardio/Strength/Mixed + Workout Duration + Experience Level)
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { coords ->
+              trainingSectionY = coords.positionInParent().y.roundToInt()
+            },
+        ) {
+          TrainingArchitectureSection(
+            selectedModality = selectedTrainingModality,
+            onSelectModality = { modality ->
+              if (modality != selectedTrainingModality) {
+                haptics.selection()
+                onSelectTrainingModality(modality)
+              } else {
+                haptics.tick()
+              }
+            },
+            selectedDuration = selectedWorkoutDuration,
+            onSelectDuration = { duration ->
+              if (duration != selectedWorkoutDuration) {
+                haptics.selection()
+                onSelectWorkoutDuration(duration)
+              } else {
+                haptics.tick()
+              }
+            },
+            selectedExperience = selectedExperienceLevel,
+            onSelectExperience = { exp ->
+              if (exp != selectedExperienceLevel) {
+                haptics.selection()
+                onSelectExperienceLevel(exp)
+              } else {
+                haptics.tick()
+              }
+            },
+            selectedObjective = selectedObjective,
+            weightKg = weightKg,
+            borderFlashProvider = borderFlashProvider,
+            metrics = metrics,
+          )
+        }
+
+        Spacer(modifier = Modifier.height(metrics.sectionGap))
+
+        // 5. Section 4: Metabolic Pace & Cycle (Target Pace TDEE + Day 01 Anchor + Uniform/Rest Days)
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { coords ->
+              paceCycleSectionY = coords.positionInParent().y.roundToInt()
+            },
+        ) {
+          MetabolicPaceCycleSection(
+            selectedPace = selectedTargetPace,
+            onSelectPace = { pace ->
+              if (pace != selectedTargetPace) {
+                haptics.selection()
+                onSelectTargetPace(pace)
+              } else {
+                haptics.tick()
+              }
+            },
+            selectedDayOne = selectedDayOne,
+            onSelectDayOne = { day ->
+              if (day != selectedDayOne) {
+                haptics.selection()
+                onSelectDayOne(day)
+              } else {
+                haptics.tick()
+              }
+            },
+            selectedCadence = selectedScheduleCadence,
+            onSelectCadence = { cadence ->
+              if (cadence != selectedScheduleCadence) {
+                haptics.selection()
+                onSelectScheduleCadence(cadence)
+              } else {
+                haptics.tick()
+              }
+            },
+            selectedObjective = selectedObjective,
+            borderFlashProvider = borderFlashProvider,
+            metrics = metrics,
+          )
+        }
+
+        Spacer(modifier = Modifier.height(metrics.sectionGap))
+
+        // 6. Section 5: Nutrition & Hydration Calibration (Meal Frequency + Caffeine/Alcohol + Sodium Flush)
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { coords ->
+              nutritionSectionY = coords.positionInParent().y.roundToInt()
+            },
+        ) {
+          NutritionHydrationSection(
+            selectedMealFrequency = selectedMealFrequency,
+            onSelectMealFrequency = { freq ->
+              if (freq != selectedMealFrequency) {
+                haptics.selection()
+                onSelectMealFrequency(freq)
+              } else {
+                haptics.tick()
+              }
+            },
+            caffeineAlcoholYes = caffeineAlcoholYes,
+            onToggleCaffeineAlcohol = { enabled ->
+              if (enabled != caffeineAlcoholYes) {
+                haptics.selection()
+                onToggleCaffeineAlcohol(enabled)
+              } else {
+                haptics.tick()
+              }
+            },
+            selectedSodiumFrequency = selectedSodiumFrequency,
+            onSelectSodiumFrequency = { sodium ->
+              if (sodium != selectedSodiumFrequency) {
+                haptics.selection()
+                onSelectSodiumFrequency(sodium)
+              } else {
+                haptics.tick()
+              }
+            },
+            calibration = calibration,
+            borderFlashProvider = borderFlashProvider,
+            metrics = metrics,
+          )
+        }
+
+        Spacer(modifier = Modifier.height(metrics.sectionGap))
+
+        // 7. Section 6: Daily Streak Completion Threshold (100% / 95% / 90% / 85% / 80%)
         Box(
           modifier = Modifier
             .fillMaxWidth()
@@ -578,15 +751,27 @@ fun BlueprintScreen(
 
         Spacer(modifier = Modifier.height(metrics.sectionGap))
 
-        // 5. Live Blueprint Protocol Matrix Summary Card (Clickable tiles scroll to sections)
+        // 8. Live Blueprint Protocol Matrix Summary Card (Clickable tiles scroll to sections)
         BlueprintSummaryMatrixCard(
           subjectName = subjectName,
           ageYears = ageYears,
           selectedActivityLevel = selectedActivityLevel,
           selectedObjective = selectedObjective,
+          selectedTrainingModality = selectedTrainingModality,
+          selectedWorkoutDuration = selectedWorkoutDuration,
+          selectedExperienceLevel = selectedExperienceLevel,
+          selectedTargetPace = selectedTargetPace,
+          selectedDayOne = selectedDayOne,
+          selectedScheduleCadence = selectedScheduleCadence,
+          selectedMealFrequency = selectedMealFrequency,
+          caffeineAlcoholYes = caffeineAlcoholYes,
+          selectedSodiumFrequency = selectedSodiumFrequency,
           selectedStreakThreshold = selectedStreakThreshold,
           onClickActivityTile = { scrollToSection(activitySectionY) },
           onClickObjectiveTile = { scrollToSection(objectiveSectionY) },
+          onClickTrainingTile = { scrollToSection(trainingSectionY) },
+          onClickPaceCycleTile = { scrollToSection(paceCycleSectionY) },
+          onClickNutritionTile = { scrollToSection(nutritionSectionY) },
           onClickStreakTile = { scrollToSection(streakSectionY) },
           borderFlashProvider = borderFlashProvider,
           metrics = metrics,
@@ -594,7 +779,7 @@ fun BlueprintScreen(
 
         Spacer(modifier = Modifier.height(metrics.cardToCtaGap))
 
-        // 6. Primary Complete Blueprint Button & Encrypted Footer
+        // 9. Primary Complete Blueprint Button & Encrypted Footer
         BlueprintContinueSection(
           onContinueClick = onContinueClick,
           borderFlashProvider = borderFlashProvider,
@@ -701,7 +886,7 @@ private fun BlueprintHeaderBar(
 }
 
 @Composable
-private fun BlueprintLuminousWhiteDot(
+internal fun BlueprintLuminousWhiteDot(
   size: Dp,
   modifier: Modifier = Modifier,
 ) {
@@ -2890,9 +3075,21 @@ private fun BlueprintSummaryMatrixCard(
   ageYears: Int,
   selectedActivityLevel: ActivityLevelOption,
   selectedObjective: BlueprintObjectiveOption,
+  selectedTrainingModality: TrainingModalityOption,
+  selectedWorkoutDuration: WorkoutDurationOption,
+  selectedExperienceLevel: ExperienceLevelOption,
+  selectedTargetPace: TargetPaceOption,
+  selectedDayOne: DayOfWeekOption,
+  selectedScheduleCadence: ScheduleCadenceOption,
+  selectedMealFrequency: MealFrequencyOption,
+  caffeineAlcoholYes: Boolean,
+  selectedSodiumFrequency: SodiumFrequencyOption,
   selectedStreakThreshold: StreakThresholdOption,
   onClickActivityTile: () -> Unit,
   onClickObjectiveTile: () -> Unit,
+  onClickTrainingTile: () -> Unit,
+  onClickPaceCycleTile: () -> Unit,
+  onClickNutritionTile: () -> Unit,
   onClickStreakTile: () -> Unit,
   borderFlashProvider: () -> Float,
   metrics: BlueprintResponsiveMetrics,
@@ -2908,6 +3105,20 @@ private fun BlueprintSummaryMatrixCard(
     BlueprintObjectiveOption.LOSE_FAT -> stringResource(R.string.blueprint_objective_lose_fat_title)
     BlueprintObjectiveOption.MAINTAIN -> stringResource(R.string.blueprint_objective_maintain_title)
     BlueprintObjectiveOption.BUILD_MUSCLE -> stringResource(R.string.blueprint_objective_build_muscle_title)
+  }
+  val experienceLabel = when (selectedExperienceLevel) {
+    ExperienceLevelOption.BEGINNER -> stringResource(R.string.blueprint_exp_beginner)
+    ExperienceLevelOption.INTERMEDIATE -> stringResource(R.string.blueprint_exp_intermediate)
+    ExperienceLevelOption.ADVANCED -> stringResource(R.string.blueprint_exp_advanced)
+  }
+  val cadenceLabel = when (selectedScheduleCadence) {
+    ScheduleCadenceOption.UNIFORM_DAILY -> stringResource(R.string.blueprint_cadence_uniform)
+    ScheduleCadenceOption.REST_DAYS -> stringResource(R.string.blueprint_cadence_rest_days)
+  }
+  val sodiumLabel = when (selectedSodiumFrequency) {
+    SodiumFrequencyOption.RARELY -> stringResource(R.string.blueprint_sodium_rarely)
+    SodiumFrequencyOption.SOMETIMES -> stringResource(R.string.blueprint_sodium_sometimes)
+    SodiumFrequencyOption.OFTEN -> stringResource(R.string.blueprint_sodium_often)
   }
 
   Box(
@@ -2959,13 +3170,13 @@ private fun BlueprintSummaryMatrixCard(
   ) {
     Column(
       modifier = Modifier.fillMaxWidth(),
-      verticalArrangement = Arrangement.spacedBy((10f * metrics.scale).coerceIn(8f, 13f).dp),
+      verticalArrangement = Arrangement.spacedBy((8.5f * metrics.scale).coerceIn(7f, 11.5f).dp),
     ) {
-      // Top Row: Luminous White Dot + BLUEPRINT PROTOCOL MATRIX + CALIBRATED Pill
+      // Top Row: Luminous White Dot + BLUEPRINT PROTOCOL MATRIX
       Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.Start,
       ) {
         Row(
           verticalAlignment = Alignment.CenterVertically,
@@ -2983,33 +3194,17 @@ private fun BlueprintSummaryMatrixCard(
             letterSpacing = 1.1.sp,
           )
         }
-
-        Box(
-          modifier = Modifier
-            .clip(RoundedCornerShape(5.dp))
-            .background(PureWhite)
-            .padding(horizontal = 7.dp, vertical = 2.5.dp),
-        ) {
-          Text(
-            text = "CALIBRATED",
-            color = ObsidianBlack,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = metrics.spScaled(8.6f, 7.6f, 9.8f),
-            letterSpacing = 0.7.sp,
-          )
-        }
       }
 
       HorizontalDivider(color = Zinc850, thickness = 0.8.dp)
 
-      // 3-Column Interactive Telemetry Readout (Monochrome tiles with minimalist indicator dot)
+      // Row 1: Activity Level | Objective (2-Column Precision Layout)
       Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy((8f * metrics.scale).coerceIn(6f, 10f).dp),
+        horizontalArrangement = Arrangement.spacedBy((8f * metrics.scale).coerceIn(6.5f, 10.5f).dp),
       ) {
         SummaryMetricTile(
-          label = "ACTIVITY",
+          label = "ACTIVITY LEVEL",
           value = activityLabel,
           subValue = selectedActivityLevel.cadenceBadge,
           dotColor = selectedActivityLevel.accentColor,
@@ -3028,10 +3223,55 @@ private fun BlueprintSummaryMatrixCard(
           modifier = Modifier.weight(1f),
           testTag = "matrix_tile_objective",
         )
+      }
+
+      // Row 2: Training Architecture | Metabolic Pace & Cycle
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy((8f * metrics.scale).coerceIn(6.5f, 10.5f).dp),
+      ) {
+        SummaryMetricTile(
+          label = "TRAINING",
+          value = "${selectedTrainingModality.shortLabel} • ${selectedWorkoutDuration.displayHours}",
+          subValue = "${experienceLabel.uppercase()} • ${selectedExperienceLevel.trainingAgeTag}",
+          dotColor = selectedTrainingModality.accentColor,
+          onClick = onClickTrainingTile,
+          metrics = metrics,
+          modifier = Modifier.weight(1f),
+          testTag = "matrix_tile_training",
+        )
+        SummaryMetricTile(
+          label = "PACE & CYCLE",
+          value = "${selectedTargetPace.title} • D1 ${selectedDayOne.shortCode}",
+          subValue = cadenceLabel.uppercase(),
+          dotColor = selectedTargetPace.accentColor,
+          onClick = onClickPaceCycleTile,
+          metrics = metrics,
+          modifier = Modifier.weight(1f),
+          testTag = "matrix_tile_pace_cycle",
+        )
+      }
+
+      // Row 3: Nutrition & Hydration | Daily Streak Rule
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy((8f * metrics.scale).coerceIn(6.5f, 10.5f).dp),
+      ) {
+        val diureticStatus = if (caffeineAlcoholYes) "YES" else "NO"
+        SummaryMetricTile(
+          label = "NUTRITION",
+          value = "${selectedMealFrequency.displayCount} Meals • $sodiumLabel",
+          subValue = "CAFF/ALC: $diureticStatus • ${selectedMealFrequency.cadenceTag}",
+          dotColor = selectedSodiumFrequency.accentColor,
+          onClick = onClickNutritionTile,
+          metrics = metrics,
+          modifier = Modifier.weight(1f),
+          testTag = "matrix_tile_nutrition",
+        )
         SummaryMetricTile(
           label = "STREAK RULE",
-          value = "${selectedStreakThreshold.percentage}% GOAL",
-          subValue = "+1 DAY STREAK",
+          value = "${selectedStreakThreshold.percentage}% Daily Goal",
+          subValue = "${selectedStreakThreshold.shortTag} • +1 STREAK",
           dotColor = selectedStreakThreshold.accentColor,
           onClick = onClickStreakTile,
           metrics = metrics,
@@ -3039,6 +3279,8 @@ private fun BlueprintSummaryMatrixCard(
           testTag = "matrix_tile_streak",
         )
       }
+
+      HorizontalDivider(color = Zinc850, thickness = 0.8.dp)
 
       // Subject (left) & Age (right) footer row in identical format
       Row(
