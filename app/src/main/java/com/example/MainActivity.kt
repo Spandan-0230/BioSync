@@ -163,10 +163,8 @@ fun BioSyncApp() {
   val initialStored = remember { BioSyncLocalStore.load(context) }
 
   // 0 = Welcome, 1 = Profile (Step 01 of 04), 2 = Personal Details (Step 02 of 04),
-  // 3 = Blueprint (Step 03 of 04), 4 = Protocol Summary & Daily Targets (Step 04 of 04)
+  // 3 = Blueprint (Step 03 of 04)
   var currentStep by rememberSaveable { mutableIntStateOf(0) }
-  var isQuickEditFromSummary by rememberSaveable { mutableStateOf(false) }
-  var blueprintFocusSection by rememberSaveable { mutableStateOf<String?>(null) }
 
   // Persisted Step 01 Profile State
   var subjectName by rememberSaveable { mutableStateOf(initialStored.subjectName) }
@@ -200,7 +198,7 @@ fun BioSyncApp() {
   var selectedSodiumFrequencyName by rememberSaveable { mutableStateOf(initialStored.sodiumFrequency.name) }
   var selectedStreakPercent by rememberSaveable { mutableIntStateOf(initialStored.streakThreshold.percentage) }
 
-  // Persisted Step 04 Engine & Custom Target Override State
+  // Persisted Engine State
   var selectedClimateBandName by rememberSaveable { mutableStateOf(initialStored.climateBand.name) }
   var bodyFatOverrideEnabled by rememberSaveable { mutableStateOf(initialStored.bodyFatOverrideEnabled) }
   var bodyFatPercent by rememberSaveable { mutableFloatStateOf(initialStored.bodyFatPercent) }
@@ -393,7 +391,6 @@ fun BioSyncApp() {
       0 -> {
         BioSyncWelcomeScreen(
           onNavigateToCalibration = {
-            isQuickEditFromSummary = false
             currentStep = 1
           },
         )
@@ -401,26 +398,13 @@ fun BioSyncApp() {
       1 -> {
         ProfileCalibrationScreen(
           onNavigateBack = {
-            if (isQuickEditFromSummary) {
-              isQuickEditFromSummary = false
-              currentStep = 4
-            } else {
-              currentStep = 0
-            }
+            currentStep = 0
           },
           onNavigateToPersonalDetails = { name, sex, age ->
             subjectName = name
             selectedSex = sex
             calculatedAgeYears = age
             currentStep = 2
-          },
-          isQuickEditMode = isQuickEditFromSummary,
-          onQuickEditReturnToSummary = { name, sex, age ->
-            subjectName = name
-            selectedSex = sex
-            calculatedAgeYears = age
-            isQuickEditFromSummary = false
-            currentStep = 4
           },
           initialName = subjectName,
           onNamePersist = { subjectName = it },
@@ -448,22 +432,12 @@ fun BioSyncApp() {
           selectedWeightUnit = currentWeightUnit,
           onSelectWeightUnit = { selectedWeightUnitName = it.name },
           onNavigateBack = {
-            if (isQuickEditFromSummary) {
-              isQuickEditFromSummary = false
-              currentStep = 4
-            } else {
-              currentStep = 1
-            }
+            currentStep = 1
           },
           onNavigateToBlueprint = { currentStep = 3 },
-          isQuickEditMode = isQuickEditFromSummary,
-          onQuickEditReturnToSummary = {
-            isQuickEditFromSummary = false
-            currentStep = 4
-          },
         )
       }
-      3 -> {
+      else -> {
         BlueprintScreen(
           subjectName = subjectName,
           ageYears = calculatedAgeYears,
@@ -510,97 +484,10 @@ fun BioSyncApp() {
           selectedStreakThreshold = currentStreakOption,
           onSelectStreakThreshold = { selectedStreakPercent = it.percentage },
           onNavigateBack = {
-            if (isQuickEditFromSummary) {
-              isQuickEditFromSummary = false
-              blueprintFocusSection = null
-              currentStep = 4
-            } else {
-              currentStep = 2
-            }
-          },
-          onCompleteBlueprint = {
-            isQuickEditFromSummary = false
-            blueprintFocusSection = null
-            currentStep = 4
-          },
-          isQuickEditMode = isQuickEditFromSummary,
-          initialFocusSection = blueprintFocusSection,
-          onQuickEditReturnToSummary = {
-            isQuickEditFromSummary = false
-            blueprintFocusSection = null
-            currentStep = 4
-          },
-        )
-      }
-      else -> {
-        ProtocolSummaryScreen(
-          subjectName = subjectName,
-          selectedSex = selectedSex,
-          birthDay = selectedDay,
-          birthMonthZeroBased = selectedMonth,
-          birthYear = selectedYear,
-          ageYears = calculatedAgeYears,
-          heightCm = heightCm,
-          weightKg = weightKg,
-          activityLevel = currentActivityLevel,
-          selectedWorkoutDays = currentWorkoutDays,
-          occupationLoad = currentOccupationLoad,
-          objective = currentObjective,
-          trainingModality = currentTrainingModality,
-          workoutDuration = currentWorkoutDuration,
-          experienceLevel = currentExperienceLevel,
-          targetPace = currentTargetPace,
-          dayOne = currentDayOne,
-          scheduleCadence = currentScheduleCadence,
-          onSelectScheduleCadence = { selectedScheduleCadenceName = it.name },
-          mealFrequency = currentMealFrequency,
-          caffeineAlcoholYes = caffeineAlcoholYes,
-          sodiumFrequency = currentSodiumFrequency,
-          streakThreshold = currentStreakOption,
-          climateBand = currentClimateBand,
-          onSelectClimateBand = { selectedClimateBandName = it.name },
-          bodyFatOverrideEnabled = bodyFatOverrideEnabled,
-          bodyFatPercent = bodyFatPercent,
-          onToggleBodyFatOverride = { bodyFatOverrideEnabled = it },
-          onBodyFatPercentChange = { bodyFatPercent = it },
-          customOverride = CustomTargetsOverride(
-            isCustomMode = isCustomTargetsMode,
-            caloriesKcal = customCaloriesKcal,
-            proteinGrams = customProteinGrams,
-            carbsGrams = customCarbsGrams,
-            fatsGrams = customFatsGrams,
-            hydrationMl = customHydrationMl,
-            stepsCount = customStepsCount,
-          ),
-          onUpdateCustomOverride = { updated ->
-            isCustomTargetsMode = updated.isCustomMode
-            customCaloriesKcal = updated.caloriesKcal
-            customProteinGrams = updated.proteinGrams
-            customCarbsGrams = updated.carbsGrams
-            customFatsGrams = updated.fatsGrams
-            customHydrationMl = updated.hydrationMl
-            customStepsCount = updated.stepsCount
-          },
-          protocolLockedIn = protocolLockedIn,
-          onLockInProtocol = {
-            protocolLockedIn = true
-          },
-          onTeleportToStep01 = {
-            isQuickEditFromSummary = true
-            currentStep = 1
-          },
-          onTeleportToStep02 = {
-            isQuickEditFromSummary = true
             currentStep = 2
           },
-          onTeleportToStep03 = { focusSection ->
-            isQuickEditFromSummary = true
-            blueprintFocusSection = focusSection
-            currentStep = 3
-          },
-          onNavigateBack = {
-            isQuickEditFromSummary = false
-            currentStep = 3
+          onCompleteBlueprint = {
+            protocolLockedIn = true
           },
         )
       }

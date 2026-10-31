@@ -130,14 +130,4 @@
     <string name="blueprint_sodium_sometimes">Sometimes</string>
     <string name="blueprint_sodium_often">Often</string>
     <string name="blueprint_occupation_label">OCCUPATION PHYSICAL LOAD</string>
-
-    <!-- Step 04: Protocol Summary & Daily Targets Engine Screen -->
-    <string name="summary_header_step">STEP 04 OF 04</string>
-    <string name="summary_eyebrow">DAILY TARGETS ENGINE • ON-DEVICE</string>
-    <string name="summary_title">Protocol Summary</string>
-    <string name="summary_subtitle">Scientifically calibrated daily energy, macronutrient, hydration, and step targets derived from your biometric profile and stored privately on your device.</string>
-    <string name="summary_mode_recommended">Recommended</string>
-    <string name="summary_mode_custom">Custom Edit</string>
-    <string name="summary_cta_lock_protocol">Lock In Daily Protocol</string>
-    <string name="cd_back_to_blueprint">Return to Blueprint</string>
 </resources>
