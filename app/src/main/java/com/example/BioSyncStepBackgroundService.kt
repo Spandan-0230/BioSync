@@ -67,11 +67,9 @@ class BioSyncStepBackgroundService : Service() {
       )
       while (isActive) {
         runCatching {
-          BioSyncHealthStepManager.flushHardwareStepSensorNow(applicationContext)
           BioSyncHealthStepManager.syncWithHealthConnect(applicationContext)
         }
-        val isWalking = BioSyncHealthStepManager.syncState.value.isActivelyWalking
-        delay(if (isWalking) 1_000L else 2_000L)
+        delay(30_000L)
       }
     }
   }
@@ -211,7 +209,7 @@ class BioSyncBootReceiver : BroadcastReceiver() {
         context = appContext,
         currentDecidedGoal = stored.decidedDailyStepsGoal,
       )
-      if (stored.protocolLockedIn && BioSyncHealthStepManager.hasActivityRecognitionPermission(appContext)) {
+      if (BioSyncHealthStepManager.hasActivityRecognitionPermission(appContext)) {
         BioSyncHealthStepManager.startLiveStepSensorTracking(appContext)
         BioSyncStepBackgroundService.startIfAuthorized(appContext)
       }

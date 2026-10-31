@@ -2,6 +2,116 @@ package com.example
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlin.math.max
+import kotlin.math.roundToInt
+
+/**
+ * Thread-safe mathematical ledger for counting today's steps live from hardware
+ * Sensor.TYPE_STEP_COUNTER without opening Google Fit, with seamless catch-up
+ * when Google Fit flushes to Health Connect.
+ */
+data class StepLedger(
+  val dayKey: String = "",
+  val bootCount: Int = -1,
+  val baselineRaw: Float = -1f,
+  val carry: Int = 0,
+  val lastRaw: Float = -1f,
+  val lastRawAtMs: Long = 0L,
+  val offset: Int = 0,
+)
+
+object StepLedgerMath {
+  fun sensorPart(l: StepLedger): Int {
+    if (l.lastRaw < 0f || l.baselineRaw < 0f) return l.carry
+    val delta = max(0f, l.lastRaw - l.baselineRaw).roundToInt()
+    return delta + l.carry
+  }
+
+  fun total(l: StepLedger): Int = sensorPart(l) + l.offset
+
+  fun onRaw(
+    l: StepLedger,
+    raw: Float,
+    nowMs: Long,
+    today: String,
+    startOfTodayMs: Long,
+    boot: Int,
+    bootTimeMs: Long,
+  ): StepLedger {
+    if (raw <= 0f) return l
+    val freshBaseline = if (bootTimeMs >= startOfTodayMs) 0f else raw
+    return when {
+      l.dayKey.isEmpty() -> {
+        StepLedger(
+          dayKey = today,
+          bootCount = boot,
+          baselineRaw = raw,
+          carry = 0,
+          lastRaw = raw,
+          lastRawAtMs = nowMs,
+          offset = 0,
+        )
+      }
+      l.dayKey != today -> {
+        val sameBoot = (l.bootCount == boot && boot != -1)
+        val nearMidnight = (startOfTodayMs - l.lastRawAtMs) in 0..3_600_000L
+        val base = if (sameBoot && nearMidnight && l.lastRaw > 0f) {
+          l.lastRaw
+        } else if (sameBoot && l.lastRaw > 0f) {
+          raw
+        } else {
+          freshBaseline
+        }
+        StepLedger(
+          dayKey = today,
+          bootCount = boot,
+          baselineRaw = base,
+          carry = 0,
+          lastRaw = raw,
+          lastRawAtMs = nowMs,
+          offset = 0,
+        )
+      }
+      l.bootCount != boot && boot != -1 && l.bootCount != -1 -> {
+        l.copy(
+          carry = sensorPart(l),
+          bootCount = boot,
+          baselineRaw = freshBaseline,
+          lastRaw = raw,
+          lastRawAtMs = nowMs,
+        )
+      }
+      raw < l.lastRaw -> {
+        if (l.lastRaw - raw > 50f) {
+          l.copy(
+            carry = sensorPart(l),
+            baselineRaw = 0f,
+            lastRaw = raw,
+            lastRawAtMs = nowMs,
+          )
+        } else {
+          l
+        }
+      }
+      else -> {
+        l.copy(
+          lastRaw = raw,
+          lastRawAtMs = nowMs,
+        )
+      }
+    }
+  }
+
+  fun onFitTotal(l: StepLedger, fitSteps: Int): StepLedger {
+    if (fitSteps <= 0) return l
+    val s = sensorPart(l)
+    return if (fitSteps > s + l.offset) {
+      l.copy(offset = fitSteps - s)
+    } else {
+      l
+    }
+  }
+}
 
 /**
  * Device-local storage snapshot containing all user profile, anthropometric,
@@ -354,6 +464,50 @@ object BioSyncLocalStore {
       lastHealthConnectWrittenSteps?.let { putInt(KEY_LAST_HC_WRITTEN_STEPS, it) }
       apply()
     }
+  }
+
+  fun saveTodaySteps(context: Context, steps: Int) {
+    saveStepTelemetrySnapshot(context = context, todaySyncedSteps = steps)
+  }
+
+  fun getTodaySteps(context: Context): Int {
+    return prefs(context).getInt(KEY_TODAY_SYNCED_STEPS, 0)
+  }
+
+  private const val KEY_LEDGER_DAY_KEY = "ledger_day_key"
+  private const val KEY_LEDGER_BOOT_COUNT = "ledger_boot_count"
+  private const val KEY_LEDGER_BASELINE_RAW = "ledger_baseline_raw"
+  private const val KEY_LEDGER_CARRY = "ledger_carry"
+  private const val KEY_LEDGER_LAST_RAW = "ledger_last_raw"
+  private const val KEY_LEDGER_LAST_RAW_AT_MS = "ledger_last_raw_at_ms"
+  private const val KEY_LEDGER_OFFSET = "ledger_offset"
+
+  fun saveLedger(context: Context, ledger: StepLedger) {
+    prefs(context).edit().apply {
+      putString(KEY_LEDGER_DAY_KEY, ledger.dayKey)
+      putInt(KEY_LEDGER_BOOT_COUNT, ledger.bootCount)
+      putFloat(KEY_LEDGER_BASELINE_RAW, ledger.baselineRaw)
+      putInt(KEY_LEDGER_CARRY, ledger.carry)
+      putFloat(KEY_LEDGER_LAST_RAW, ledger.lastRaw)
+      putLong(KEY_LEDGER_LAST_RAW_AT_MS, ledger.lastRawAtMs)
+      putInt(KEY_LEDGER_OFFSET, ledger.offset)
+      putInt(KEY_TODAY_SYNCED_STEPS, StepLedgerMath.total(ledger))
+      putString(KEY_STEP_SENSOR_DAY_KEY, ledger.dayKey)
+      apply()
+    }
+  }
+
+  fun loadLedger(context: Context): StepLedger {
+    val p = prefs(context)
+    return StepLedger(
+      dayKey = p.getString(KEY_LEDGER_DAY_KEY, "") ?: "",
+      bootCount = p.getInt(KEY_LEDGER_BOOT_COUNT, -1),
+      baselineRaw = p.getFloat(KEY_LEDGER_BASELINE_RAW, -1f),
+      carry = p.getInt(KEY_LEDGER_CARRY, 0),
+      lastRaw = p.getFloat(KEY_LEDGER_LAST_RAW, -1f),
+      lastRawAtMs = p.getLong(KEY_LEDGER_LAST_RAW_AT_MS, 0L),
+      offset = p.getInt(KEY_LEDGER_OFFSET, 0),
+    )
   }
 
 
