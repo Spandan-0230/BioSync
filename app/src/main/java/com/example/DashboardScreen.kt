@@ -2,53 +2,50 @@ package com.example
 
 import android.graphics.BlurMaskFilter
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +62,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -80,7 +76,6 @@ import com.example.ui.theme.CaloriesStart
 import com.example.ui.theme.CarbsEnd
 import com.example.ui.theme.CarbsMid
 import com.example.ui.theme.CarbsStart
-import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.FatsEnd
 import com.example.ui.theme.FatsMid
 import com.example.ui.theme.FatsStart
@@ -98,17 +93,17 @@ import com.example.ui.theme.StepsEnd
 import com.example.ui.theme.StepsMid
 import com.example.ui.theme.StepsStart
 import java.text.NumberFormat
+import java.util.Calendar
 import java.util.Locale
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
-// Core BioSync Monochrome Palette (Identical across Steps 01–04)
-private val Zinc100 = Color(0xFFF4F4F5)
+// Unified Palette matching Steps 01–04
 private val Zinc200 = Color(0xFFE4E4E7)
 private val Zinc300 = Color(0xFFD4D4D8)
 private val Zinc400 = Color(0xFFA1A1AA)
@@ -119,393 +114,238 @@ private val Zinc800 = Color(0xFF27272A)
 private val Zinc850 = Color(0xFF1F1F23)
 private val Zinc900 = Color(0xFF18181B)
 private val Zinc950 = Color(0xFF09090B)
-
-// Sculpted 3D Floating Card Surfaces (Matches ChronometricDisplayCard & DailyTargetsCommandDeck)
-private val FloatingCardTop = Color(0xFF18181E)
-private val FloatingCardMid = Color(0xFF111116)
-private val FloatingCardBottom = Color(0xFF09090C)
-
-private val FloatingTileTop = Color(0xFF111115)
-private val FloatingTileBottom = Color(0xFF08080B)
-
+private val CardSurface = Color(0xFF131317)
+private val CardBorder = Color(0xFF2D2D34)
+private val InnerTileTop = Color(0xFF191920)
+private val InnerTileBottom = Color(0xFF101015)
 private val RecessedTrackFill = Color(0xFF07070A)
 private val RecessedTrackBorder = Color(0xFF27272E)
 
-private val WhiteVariantMulticolorGradient = listOf(
-  Color(0xFF7A7F87), // Gunmetal Platinum
-  Color(0xFFAEC0CE), // Cool Liquid Silver
-  Color(0xFFE6E9EF), // Satin Ice White
-  Color(0xFFF7EFE6), // Warm Pearl Champagne Highlight
-  Color(0xFFFFFFFF), // Pure Brilliant White Crest
-)
+private val SmoothOutEasing = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
 
-private val DashboardEaseOut = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
-
-internal fun safeDashboardBlur(radius: Float): Float = radius.coerceAtLeast(0.5f)
+internal fun safeDashboardBlur(px: Float): Float = px.coerceAtLeast(1f)
 
 /**
- * Primary 3D Floating Command Deck Modifier matching `ChronometricDisplayCard` (Step 01),
- * `BiometricMassIndexCard` (Step 02), and `DailyTargetsCommandDeck` (Step 04):
- * - Deep multi-layered 3D drop shadow (`28.dp` blur offset downward + `14.dp` mid shadow)
- * - Ambient silver/platinum levitation halo (`20.dp` blur) + subtle top-edge accent aura
- * - Top-lit specular glass crown + `1.35.dp` liquid-chrome border + traveling shimmer wave
- * - Zero transparent colored surface coatings
+ * 3D Floating Command Deck Modifier with toned-down background reflection:
+ * - Preserves deep multi-layered black 3D drop shadows for physical elevation
+ * - Minimizes outer halo reflection and inner top-sheen haze so the obsidian background stays deep and crisp
  */
-@Composable
 internal fun Modifier.floating3DProtocolCard(
   cornerRadiusDp: Dp = 18.dp,
   topRimTint: Color = PureWhite,
   borderFlashProgress: Float = 0f,
-): Modifier {
-  val shape = RoundedCornerShape(cornerRadiusDp)
-  return this
-    .drawWithCache {
-      val cornerPx = cornerRadiusDp.toPx()
-      val cornerRadius = CornerRadius(cornerPx, cornerPx)
+): Modifier = this.drawWithCache {
+  val cornerPx = cornerRadiusDp.toPx()
 
-      val deepDropShadowPaint = Paint().apply {
-        isAntiAlias = true
-        asFrameworkPaint().apply {
-          color = android.graphics.Color.argb(230, 0, 0, 0)
-          maskFilter = BlurMaskFilter(safeDashboardBlur(28.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
-        }
-      }
-      val midElevationShadowPaint = Paint().apply {
-        isAntiAlias = true
-        asFrameworkPaint().apply {
-          color = android.graphics.Color.argb(175, 0, 0, 0)
-          maskFilter = BlurMaskFilter(safeDashboardBlur(13.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
-        }
-      }
-      val silverLevitationHaloPaint = Paint().apply {
-        isAntiAlias = true
-        asFrameworkPaint().apply {
-          color = android.graphics.Color.argb(48, 226, 232, 245)
-          maskFilter = BlurMaskFilter(safeDashboardBlur(20.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
-        }
-      }
-      val topAccentRimHaloPaint = Paint().apply {
-        isAntiAlias = true
-        asFrameworkPaint().apply {
-          color = android.graphics.Color.argb(
-            34,
-            (topRimTint.red * 255).roundToInt(),
-            (topRimTint.green * 255).roundToInt(),
-            (topRimTint.blue * 255).roundToInt(),
-          )
-          maskFilter = BlurMaskFilter(safeDashboardBlur(16.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
-        }
-      }
-      val rearFlashHaloPaint = Paint().apply {
-        isAntiAlias = true
-        asFrameworkPaint().apply {
-          color = android.graphics.Color.argb(0, 255, 255, 255)
-          maskFilter = BlurMaskFilter(safeDashboardBlur(22.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
-        }
-      }
-
-      val baseBorderBrush = Brush.verticalGradient(
-        0.0f to PureWhite.copy(alpha = 0.42f),
-        0.18f to topRimTint.copy(alpha = 0.34f),
-        0.48f to Zinc700.copy(alpha = 0.65f),
-        0.82f to Zinc850,
-        1.0f to Zinc950,
-      )
-      val topSpecularGlassBrush = Brush.verticalGradient(
-        0.0f to PureWhite.copy(alpha = 0.065f),
-        0.22f to PureWhite.copy(alpha = 0.018f),
-        0.45f to Color.Transparent,
-      )
-
-      onDrawWithContent {
-        val flashP = borderFlashProgress.coerceIn(0f, 1f)
-        val flashEnvelope = if (flashP > 0.001f && flashP < 0.999f) {
-          sin(flashP * PI.toFloat()).coerceIn(0f, 1f)
-        } else {
-          0f
-        }
-
-        // 1. Multi-layer 3D Floating Shadows & Ambient Levitation Halo
-        drawIntoCanvas { canvas ->
-          // Deep ground shadow pushed down for floating depth
-          canvas.drawRoundRect(
-            5.dp.toPx(),
-            13.dp.toPx(),
-            size.width - 5.dp.toPx(),
-            size.height + 14.dp.toPx(),
-            cornerPx,
-            cornerPx,
-            deepDropShadowPaint,
-          )
-          // Crisp mid-elevation shadow
-          canvas.drawRoundRect(
-            2.dp.toPx(),
-            6.dp.toPx(),
-            size.width - 2.dp.toPx(),
-            size.height + 7.dp.toPx(),
-            cornerPx,
-            cornerPx,
-            midElevationShadowPaint,
-          )
-          // All-around platinum levitation aura
-          canvas.drawRoundRect(
-            1.dp.toPx(),
-            -2.dp.toPx(),
-            size.width - 1.dp.toPx(),
-            size.height + 5.dp.toPx(),
-            cornerPx,
-            cornerPx,
-            silverLevitationHaloPaint,
-          )
-          // Subtle top crown backlight
-          canvas.drawRoundRect(
-            12.dp.toPx(),
-            -3.dp.toPx(),
-            size.width - 12.dp.toPx(),
-            (size.height * 0.32f).coerceAtLeast(24.dp.toPx()),
-            cornerPx,
-            cornerPx,
-            topAccentRimHaloPaint,
-          )
-
-          if (flashEnvelope > 0.01f) {
-            rearFlashHaloPaint.asFrameworkPaint().alpha =
-              (160f * flashEnvelope).roundToInt().coerceIn(0, 200)
-            val waveCx = size.width * flashP
-            val waveCy = size.height * flashP
-            val spanX = size.width * 0.5f
-            val spanY = size.height * 0.5f
-            canvas.drawRoundRect(
-              (waveCx - spanX).coerceAtLeast(-4.dp.toPx()),
-              (waveCy - spanY).coerceAtLeast(-4.dp.toPx()),
-              (waveCx + spanX).coerceAtMost(size.width + 4.dp.toPx()),
-              (waveCy + spanY).coerceAtMost(size.height + 4.dp.toPx()),
-              cornerPx,
-              cornerPx,
-              rearFlashHaloPaint,
-            )
-          }
-        }
-
-        // 2. Card Surface & Composable Content
-        drawContent()
-
-        // 3. Top-edge Specular Glass Highlight
-        drawRoundRect(
-          brush = topSpecularGlassBrush,
-          topLeft = Offset.Zero,
-          size = size,
-          cornerRadius = cornerRadius,
-        )
-
-        // 4. 3D Specular Top-Lit Border
-        drawRoundRect(
-          brush = baseBorderBrush,
-          topLeft = Offset.Zero,
-          size = size,
-          cornerRadius = cornerRadius,
-          style = Stroke(width = 1.3.dp.toPx()),
-        )
-
-        // 5. Traveling Liquid-Silver Border Shimmer Wave (from ChronometricDisplayCard)
-        if (flashEnvelope > 0.01f) {
-          val diagW = size.width.coerceAtLeast(1f)
-          val diagH = size.height.coerceAtLeast(1f)
-          val bandSpanX = diagW * 0.42f
-          val bandSpanY = diagH * 0.42f
-          val centerX = -bandSpanX + (diagW + bandSpanX * 2f) * flashP
-          val centerY = -bandSpanY + (diagH + bandSpanY * 2f) * flashP
-
-          drawRoundRect(
-            brush = Brush.linearGradient(
-              colors = listOf(
-                Color.Transparent,
-                Zinc400.copy(alpha = 0.45f * flashEnvelope),
-                PureWhite.copy(alpha = 0.95f * flashEnvelope),
-                Color(0xFFF7EFE6).copy(alpha = 0.85f * flashEnvelope),
-                Color.Transparent,
-              ),
-              start = Offset(centerX - bandSpanX * 0.85f, centerY - bandSpanY * 0.85f),
-              end = Offset(centerX + bandSpanX * 0.85f, centerY + bandSpanY * 0.85f),
-            ),
-            topLeft = Offset.Zero,
-            size = size,
-            cornerRadius = cornerRadius,
-            style = Stroke(width = (1.9f + 0.6f * flashEnvelope).dp.toPx()),
-          )
-        }
-      }
+  val deepShadowPaint = Paint().apply {
+    isAntiAlias = true
+    asFrameworkPaint().apply {
+      color = android.graphics.Color.argb(230, 0, 0, 0)
+      maskFilter = BlurMaskFilter(safeDashboardBlur(24.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
     }
-    .clip(shape)
-    .background(
-      brush = Brush.verticalGradient(
-        colors = listOf(FloatingCardTop, FloatingCardMid, FloatingCardBottom),
-      ),
+  }
+
+  val midShadowPaint = Paint().apply {
+    isAntiAlias = true
+    asFrameworkPaint().apply {
+      color = android.graphics.Color.argb(175, 0, 0, 0)
+      maskFilter = BlurMaskFilter(safeDashboardBlur(10.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
+    }
+  }
+
+  // Subtle, low-reflection rim aura (toned down so there is no bright milky haze around cards)
+  val ambientHaloPaint = Paint().apply {
+    isAntiAlias = true
+    asFrameworkPaint().apply {
+      color = android.graphics.Color.argb(
+        6,
+        (topRimTint.red * 255).roundToInt(),
+        (topRimTint.green * 255).roundToInt(),
+        (topRimTint.blue * 255).roundToInt(),
+      )
+      maskFilter = BlurMaskFilter(safeDashboardBlur(6.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
+    }
+  }
+
+  val surfaceBrush = Brush.verticalGradient(
+    colors = listOf(
+      Color(0xFF17171C),
+      CardSurface,
+      Color(0xFF0B0B0E),
+    ),
+  )
+
+  val topSheenBrush = Brush.verticalGradient(
+    colors = listOf(
+      topRimTint.copy(alpha = 0.022f),
+      Color.Transparent,
+    ),
+    startY = 0f,
+    endY = size.height * 0.22f,
+  )
+
+  val baseRimBrush = Brush.verticalGradient(
+    colors = listOf(
+      PureWhite.copy(alpha = 0.24f),
+      topRimTint.copy(alpha = 0.14f),
+      CardBorder.copy(alpha = 0.85f),
+      Color(0xFF16161B),
+    ),
+  )
+
+  onDrawBehind {
+    drawIntoCanvas { canvas ->
+      canvas.drawRoundRect(
+        3.dp.toPx(),
+        12.dp.toPx(),
+        size.width - 3.dp.toPx(),
+        size.height + 14.dp.toPx(),
+        cornerPx,
+        cornerPx,
+        deepShadowPaint,
+      )
+      canvas.drawRoundRect(
+        1.dp.toPx(),
+        5.dp.toPx(),
+        size.width - 1.dp.toPx(),
+        size.height + 6.dp.toPx(),
+        cornerPx,
+        cornerPx,
+        midShadowPaint,
+      )
+      canvas.drawRoundRect(
+        0f,
+        -1.dp.toPx(),
+        size.width,
+        size.height + 1.dp.toPx(),
+        cornerPx,
+        cornerPx,
+        ambientHaloPaint,
+      )
+    }
+
+    drawRoundRect(
+      brush = surfaceBrush,
+      cornerRadius = CornerRadius(cornerPx, cornerPx),
     )
+
+    drawRoundRect(
+      brush = topSheenBrush,
+      cornerRadius = CornerRadius(cornerPx, cornerPx),
+    )
+
+    drawRoundRect(
+      brush = baseRimBrush,
+      cornerRadius = CornerRadius(cornerPx, cornerPx),
+      style = Stroke(width = 1.15.dp.toPx()),
+    )
+
+    if (borderFlashProgress > 0.01f && borderFlashProgress < 0.99f) {
+      val bandHalfWidth = (size.width + size.height) * 0.26f
+      val centerCoord = -bandHalfWidth +
+        (size.width + size.height + bandHalfWidth * 2f) * borderFlashProgress
+      val envelope = sin(borderFlashProgress * PI).toFloat().coerceIn(0f, 1f)
+      val shimmerBrush = Brush.linearGradient(
+        colors = listOf(
+          Color.Transparent,
+          PureWhite.copy(alpha = 0.12f * envelope),
+          PureWhite.copy(alpha = 0.55f * envelope),
+          PureWhite.copy(alpha = 0.12f * envelope),
+          Color.Transparent,
+        ),
+        start = Offset(centerCoord - bandHalfWidth, (centerCoord - bandHalfWidth) * 0.5f),
+        end = Offset(centerCoord + bandHalfWidth, (centerCoord + bandHalfWidth) * 0.5f),
+      )
+      drawRoundRect(
+        brush = shimmerBrush,
+        cornerRadius = CornerRadius(cornerPx, cornerPx),
+        style = Stroke(width = 1.4.dp.toPx()),
+      )
+    }
+  }
 }
 
 /**
- * Floating 3D Inner Bento Tile Modifier matching `PipelineMetricTile` & `CompactMacroBentoTile`
- * in `ProtocolSummaryScreen.kt`:
- * - Gives every inner sub-card its own 3D floating elevation shadow + top-lit accent/platinum rim.
+ * 3D Floating Inner Bento Tile Modifier with crisp elevation and minimal reflection haze.
  */
-@Composable
 internal fun Modifier.floating3DInnerTile(
   cornerRadiusDp: Dp = 12.dp,
-  accentColor: Color = Zinc700,
+  accentColor: Color = PureWhite,
   isHighlighted: Boolean = false,
-): Modifier {
-  val shape = RoundedCornerShape(cornerRadiusDp)
-  return this
-    .drawWithCache {
-      val cornerPx = cornerRadiusDp.toPx()
-      val cornerRadius = CornerRadius(cornerPx, cornerPx)
-      val tileShadowPaint = Paint().apply {
-        isAntiAlias = true
-        asFrameworkPaint().apply {
-          color = android.graphics.Color.argb(190, 0, 0, 0)
-          maskFilter = BlurMaskFilter(safeDashboardBlur(10.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
-        }
-      }
-      val borderBrush = Brush.verticalGradient(
-        0.0f to if (isHighlighted) accentColor.copy(alpha = 0.72f) else accentColor.copy(alpha = 0.38f),
-        0.45f to Zinc800,
-        1.0f to Zinc900,
-      )
-      val topSheenBrush = Brush.verticalGradient(
-        0.0f to PureWhite.copy(alpha = 0.045f),
-        0.35f to Color.Transparent,
-      )
+): Modifier = this.drawWithCache {
+  val cornerPx = cornerRadiusDp.toPx()
 
-      onDrawWithContent {
-        drawIntoCanvas { canvas ->
-          canvas.drawRoundRect(
-            2.dp.toPx(),
-            5.dp.toPx(),
-            size.width - 2.dp.toPx(),
-            size.height + 5.dp.toPx(),
-            cornerPx,
-            cornerPx,
-            tileShadowPaint,
-          )
-        }
-        drawContent()
-        drawRoundRect(
-          brush = topSheenBrush,
-          topLeft = Offset.Zero,
-          size = size,
-          cornerRadius = cornerRadius,
-        )
-        drawRoundRect(
-          brush = borderBrush,
-          topLeft = Offset.Zero,
-          size = size,
-          cornerRadius = cornerRadius,
-          style = Stroke(width = if (isHighlighted) 1.3.dp.toPx() else 1.dp.toPx()),
-        )
-      }
+  val dropShadowPaint = Paint().apply {
+    isAntiAlias = true
+    asFrameworkPaint().apply {
+      color = android.graphics.Color.argb(185, 0, 0, 0)
+      maskFilter = BlurMaskFilter(safeDashboardBlur(8.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
     }
-    .clip(shape)
-    .background(
-      brush = Brush.verticalGradient(
-        colors = listOf(FloatingTileTop, FloatingTileBottom),
-      ),
-    )
-}
+  }
 
-/**
- * Used ONLY ONCE on the Dashboard (exclusively in the Streak Protocol Engine card header),
- * matching how `OPTIMAL RANGE` is used once in `BiometricMassIndexCard` on `PersonalDetailsScreen.kt`.
- */
-@Composable
-private fun StreakStatusOptimalBadge(
-  text: String,
-  startColor: Color,
-  endColor: Color,
-  modifier: Modifier = Modifier,
-) {
-  val badgeShape = RoundedCornerShape(6.dp)
-  Box(
-    modifier = modifier
-      .clip(badgeShape)
-      .background(
-        brush = Brush.horizontalGradient(
-          colors = listOf(startColor, endColor),
-        ),
+  val surfaceBrush = Brush.verticalGradient(
+    colors = listOf(
+      InnerTileTop,
+      InnerTileBottom,
+    ),
+  )
+
+  val topSheenBrush = Brush.verticalGradient(
+    colors = listOf(
+      accentColor.copy(alpha = if (isHighlighted) 0.06f else 0.02f),
+      Color.Transparent,
+    ),
+    startY = 0f,
+    endY = size.height * 0.35f,
+  )
+
+  val borderBrush = Brush.verticalGradient(
+    colors = listOf(
+      if (isHighlighted) accentColor.copy(alpha = 0.65f) else PureWhite.copy(alpha = 0.18f),
+      if (isHighlighted) accentColor.copy(alpha = 0.28f) else Zinc800.copy(alpha = 0.90f),
+      Color(0xFF141419),
+    ),
+  )
+
+  onDrawBehind {
+    drawIntoCanvas { canvas ->
+      canvas.drawRoundRect(
+        1.dp.toPx(),
+        4.dp.toPx(),
+        size.width - 1.dp.toPx(),
+        size.height + 4.dp.toPx(),
+        cornerPx,
+        cornerPx,
+        dropShadowPaint,
       )
-      .border(
-        width = 1.dp,
-        color = startColor,
-        shape = badgeShape,
-      )
-      .padding(horizontal = 9.5.dp, vertical = 4.dp),
-    contentAlignment = Alignment.Center,
-  ) {
-    Text(
-      text = text,
-      color = ObsidianBlack,
-      fontFamily = JetBrainsMonoFontFamily,
-      fontWeight = FontWeight.ExtraBold,
-      fontSize = 9.2.sp,
-      letterSpacing = 0.7.sp,
-      maxLines = 1,
+    }
+
+    drawRoundRect(
+      brush = surfaceBrush,
+      cornerRadius = CornerRadius(cornerPx, cornerPx),
+    )
+
+    drawRoundRect(
+      brush = topSheenBrush,
+      cornerRadius = CornerRadius(cornerPx, cornerPx),
+    )
+
+    drawRoundRect(
+      brush = borderBrush,
+      cornerRadius = CornerRadius(cornerPx, cornerPx),
+      style = Stroke(width = 1.dp.toPx()),
     )
   }
 }
 
 /**
- * Luminous header dot matching `LuminousWhiteDot` / `PersonalSyncedRangeDot` across Steps 01–04.
+ * Daily Protocol Dashboard Screen:
+ * - Low-reflection 3D floating obsidian cards
+ * - Attractive 3x2 Streak Pillars Bento Grid
+ * - Redesigned Dual-Telemetry headers & borderless side-by-side metrics for Steps, Calories, and Hydration
+ * - Solid Red (`#EF4444`) Cross (`×`) and Delete buttons
+ * - Redesigned Chronological Timeline without repetitive top timestamp boxes
  */
-@Composable
-internal fun DashboardSyncedHeaderDot(
-  startColor: Color,
-  endColor: Color,
-  sizeDp: Dp = 8.dp,
-) {
-  Spacer(
-    modifier = Modifier
-      .size(sizeDp)
-      .drawWithCache {
-        val glowPaint = Paint().apply {
-          isAntiAlias = true
-          asFrameworkPaint().apply {
-            color = android.graphics.Color.argb(
-              155,
-              (startColor.red * 255).roundToInt(),
-              (startColor.green * 255).roundToInt(),
-              (startColor.blue * 255).roundToInt(),
-            )
-            maskFilter = BlurMaskFilter(
-              safeDashboardBlur(this@drawWithCache.size.minDimension * 0.85f),
-              BlurMaskFilter.Blur.NORMAL,
-            )
-          }
-        }
-        val dotBrush = Brush.linearGradient(colors = listOf(startColor, endColor))
-        onDrawBehind {
-          val r = (this.size.minDimension / 2f).coerceAtLeast(1f)
-          drawIntoCanvas { canvas ->
-            canvas.drawCircle(center, r * 1.3f, glowPaint)
-          }
-          drawCircle(brush = dotBrush, radius = r, center = center)
-        }
-      },
-  )
-}
-
-@Immutable
-private data class StreakPillarStatus(
-  val code: String,
-  val label: String,
-  val achievedPercent: Int,
-  val thresholdPercent: Int,
-  val accentColor: Color,
-  val secondaryColor: Color,
-) {
-  val isPassed: Boolean
-    get() = achievedPercent >= thresholdPercent
-}
-
 @Composable
 fun BioSyncDashboardScreen(
   subjectName: String,
@@ -522,481 +362,439 @@ fun BioSyncDashboardScreen(
   onOpenProtocolSummary: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  BackHandler(onBack = onOpenProtocolSummary)
-
   val context = LocalContext.current
   val haptics = rememberBioSyncHaptics()
-  val coroutineScope = rememberCoroutineScope()
+  val scrollState = rememberScrollState()
   val numberFormat = remember { NumberFormat.getIntegerInstance(Locale.US) }
-  val headerGlowPhase = remember { Animatable(0f) }
-  val cardShimmerWave = remember { Animatable(0f) }
 
-  LaunchedEffect(Unit) {
-    launch {
-      headerGlowPhase.snapTo(0f)
-      headerGlowPhase.animateTo(
-        targetValue = 1f,
-        animationSpec = tween(durationMillis = 720, easing = DashboardEaseOut),
-      )
-    }
-    launch {
-      delay(140L)
-      cardShimmerWave.snapTo(0f)
-      cardShimmerWave.animateTo(
-        targetValue = 1f,
-        animationSpec = tween(durationMillis = 1250, easing = DashboardEaseOut),
-      )
-    }
+  var dashboardData by remember { mutableStateOf(DashboardLocalStore.load(context)) }
+  var pendingDeletedItem by remember {
+    mutableStateOf<PendingDeletedTimelineItem?>(null)
   }
 
-  // Live Google Fit + Health Connect 1:1 Step & Distance Controller
-  val stepSyncController = rememberBioSyncStepSyncController(
-    decidedDailyStepsGoal = targetStepsCount,
-    autoRequestPermissionsOnStart = false,
-  )
-  val liveSteps = stepSyncController.state.liveTodaySteps.coerceAtLeast(0)
-  val liveDistanceKm = stepSyncController.state.liveDistanceKm.coerceAtLeast(0f)
-
-  // Persisted Dashboard state
-  val initialDashboardData = remember { DashboardLocalStore.load(context) }
-  var todayDayKey by remember { mutableStateOf(initialDashboardData.dayKey) }
-  var baseStreakDays by remember { mutableIntStateOf(initialDashboardData.baseStreakDays) }
-  var lastCompletedStreakDayKey by remember { mutableStateOf(initialDashboardData.lastCompletedStreakDayKey) }
-  var allCreatedSingleItems by remember { mutableStateOf(initialDashboardData.allCreatedSingleItems) }
-  var savedQuickItems by remember { mutableStateOf(initialDashboardData.savedQuickItems) }
-  var timelineEntries by remember { mutableStateOf(initialDashboardData.todayTimelineEntries) }
-
-  var pendingDeletedItem by remember { mutableStateOf<PendingDeletedTimelineItem?>(null) }
-
-  // Celebration particle burst animation state
-  val celebrationBurstPhase = remember { Animatable(0f) }
-  var hasCelebratedThisSession by remember { mutableStateOf(false) }
-
-  // Derived daily totals from Today's Timeline (all default to 0 until user logs items/meals/water)
-  val loggedCalories by remember(timelineEntries) {
-    derivedStateOf { timelineEntries.sumOf { it.caloriesKcal }.coerceAtLeast(0) }
-  }
-  val loggedProtein by remember(timelineEntries) {
-    derivedStateOf { timelineEntries.sumOf { it.proteinGrams }.coerceAtLeast(0) }
-  }
-  val loggedCarbs by remember(timelineEntries) {
-    derivedStateOf { timelineEntries.sumOf { it.carbsGrams }.coerceAtLeast(0) }
-  }
-  val loggedFats by remember(timelineEntries) {
-    derivedStateOf { timelineEntries.sumOf { it.fatsGrams }.coerceAtLeast(0) }
-  }
-  val loggedWaterMl by remember(timelineEntries) {
-    derivedStateOf { timelineEntries.sumOf { it.hydrationMl }.coerceAtLeast(0) }
+  fun persistDashboardData(updated: DashboardStoredData) {
+    dashboardData = updated
+    DashboardLocalStore.save(context, updated)
   }
 
-  val requiredPercent = streakThreshold.percentage.coerceIn(50, 100)
-
-  val stepsPct = remember(liveSteps, targetStepsCount) {
-    ((liveSteps.toFloat() / targetStepsCount.coerceAtLeast(1).toFloat()) * 100f).roundToInt()
-  }
-  val caloriesPct = remember(loggedCalories, targetCaloriesKcal) {
-    ((loggedCalories.toFloat() / targetCaloriesKcal.coerceAtLeast(1).toFloat()) * 100f).roundToInt()
-  }
-  val proteinPct = remember(loggedProtein, targetProteinGrams) {
-    ((loggedProtein.toFloat() / targetProteinGrams.coerceAtLeast(1).toFloat()) * 100f).roundToInt()
-  }
-  val carbsPct = remember(loggedCarbs, targetCarbsGrams) {
-    ((loggedCarbs.toFloat() / targetCarbsGrams.coerceAtLeast(1).toFloat()) * 100f).roundToInt()
-  }
-  val fatsPct = remember(loggedFats, targetFatsGrams) {
-    ((loggedFats.toFloat() / targetFatsGrams.coerceAtLeast(1).toFloat()) * 100f).roundToInt()
-  }
-  val waterPct = remember(loggedWaterMl, targetHydrationMl) {
-    ((loggedWaterMl.toFloat() / targetHydrationMl.coerceAtLeast(1).toFloat()) * 100f).roundToInt()
-  }
-
-  val pillars = remember(
-    stepsPct,
-    caloriesPct,
-    proteinPct,
-    carbsPct,
-    fatsPct,
-    waterPct,
-    requiredPercent,
-  ) {
-    listOf(
-      StreakPillarStatus("STEPS", "Steps", stepsPct, requiredPercent, StepsStart, StepsMid),
-      StreakPillarStatus("KCAL", "Calories", caloriesPct, requiredPercent, CaloriesStart, CaloriesMid),
-      StreakPillarStatus("PRO", "Protein", proteinPct, requiredPercent, ProteinStart, ProteinMid),
-      StreakPillarStatus("CARB", "Carbs", carbsPct, requiredPercent, CarbsStart, CarbsMid),
-      StreakPillarStatus("FAT", "Fats", fatsPct, requiredPercent, FatsStart, FatsMid),
-      StreakPillarStatus("H₂O", "Water", waterPct, requiredPercent, HydrationStart, HydrationMid),
-    )
-  }
-
-  val passedPillarsCount = remember(pillars) { pillars.count { it.isPassed } }
-  val isTodayStreakAchieved = passedPillarsCount == pillars.size
-
-  val combinedStreakReadinessPct = remember(pillars, requiredPercent) {
-    val sumNormalized = pillars.sumOf { pillar ->
-      (pillar.achievedPercent.toDouble() / requiredPercent.toDouble()).coerceIn(0.0, 1.0)
-    }
-    ((sumNormalized / pillars.size.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
-  }
-
-  val displayedStreakDays = remember(baseStreakDays, lastCompletedStreakDayKey, todayDayKey, isTodayStreakAchieved) {
-    if (isTodayStreakAchieved) {
-      if (lastCompletedStreakDayKey == todayDayKey) baseStreakDays.coerceAtLeast(1) else baseStreakDays + 1
-    } else {
-      if (lastCompletedStreakDayKey == todayDayKey) (baseStreakDays - 1).coerceAtLeast(0) else baseStreakDays
-    }
-  }
-
-  LaunchedEffect(isTodayStreakAchieved) {
-    if (isTodayStreakAchieved) {
-      if (lastCompletedStreakDayKey != todayDayKey) {
-        baseStreakDays += 1
-        lastCompletedStreakDayKey = todayDayKey
-      }
-      if (!hasCelebratedThisSession) {
-        hasCelebratedThisSession = true
-        haptics.confirm()
-        celebrationBurstPhase.snapTo(0f)
-        celebrationBurstPhase.animateTo(
-          targetValue = 1f,
-          animationSpec = tween(durationMillis = 1350, easing = DashboardEaseOut),
-        )
-      }
-    } else {
-      hasCelebratedThisSession = false
-      if (lastCompletedStreakDayKey == todayDayKey) {
-        baseStreakDays = (baseStreakDays - 1).coerceAtLeast(0)
-        lastCompletedStreakDayKey = ""
-      }
-    }
-  }
-
-  LaunchedEffect(
-    todayDayKey,
-    baseStreakDays,
-    lastCompletedStreakDayKey,
-    allCreatedSingleItems,
-    savedQuickItems,
-    timelineEntries,
-  ) {
-    DashboardLocalStore.save(
-      context = context,
-      data = DashboardStoredData(
-        dayKey = todayDayKey,
-        baseStreakDays = baseStreakDays,
-        lastCompletedStreakDayKey = lastCompletedStreakDayKey,
-        allCreatedSingleItems = allCreatedSingleItems,
-        savedQuickItems = savedQuickItems,
-        todayTimelineEntries = timelineEntries,
-      ),
-    )
-  }
-
-  LaunchedEffect(pendingDeletedItem) {
-    val currentPending = pendingDeletedItem ?: return@LaunchedEffect
-    val waitMs = (currentPending.expiresAtEpochMs - System.currentTimeMillis()).coerceAtLeast(0L)
-    delay(waitMs + 50L)
-    if (pendingDeletedItem?.entry?.id == currentPending.entry.id) {
-      pendingDeletedItem = null
-    }
-  }
-
-  val isWorkoutDayToday = remember(activityLevel, selectedWorkoutDays) {
+  val isActiveWorkoutDay = remember(activityLevel, selectedWorkoutDays) {
     if (activityLevel == ActivityLevelOption.SEDENTARY) {
       false
     } else {
-      val cal = java.util.Calendar.getInstance()
-      val todayOpt = when (cal.get(java.util.Calendar.DAY_OF_WEEK)) {
-        java.util.Calendar.MONDAY -> DayOfWeekOption.MONDAY
-        java.util.Calendar.TUESDAY -> DayOfWeekOption.TUESDAY
-        java.util.Calendar.WEDNESDAY -> DayOfWeekOption.WEDNESDAY
-        java.util.Calendar.THURSDAY -> DayOfWeekOption.THURSDAY
-        java.util.Calendar.FRIDAY -> DayOfWeekOption.FRIDAY
-        java.util.Calendar.SATURDAY -> DayOfWeekOption.SATURDAY
-        else -> DayOfWeekOption.SUNDAY
+      val cal = Calendar.getInstance()
+      val todayOption = when (cal.get(Calendar.DAY_OF_WEEK)) {
+        Calendar.MONDAY -> DayOfWeekOption.MONDAY
+        Calendar.TUESDAY -> DayOfWeekOption.TUESDAY
+        Calendar.WEDNESDAY -> DayOfWeekOption.WEDNESDAY
+        Calendar.THURSDAY -> DayOfWeekOption.THURSDAY
+        Calendar.FRIDAY -> DayOfWeekOption.FRIDAY
+        Calendar.SATURDAY -> DayOfWeekOption.SATURDAY
+        Calendar.SUNDAY -> DayOfWeekOption.SUNDAY
+        else -> DayOfWeekOption.MONDAY
       }
-      todayOpt in selectedWorkoutDays
+      selectedWorkoutDays.contains(todayOption)
     }
   }
 
-  Scaffold(
+  val targetCalories = targetCaloriesKcal.coerceAtLeast(1000)
+  val targetProtein = targetProteinGrams.coerceAtLeast(30)
+  val targetCarbs = targetCarbsGrams.coerceAtLeast(40)
+  val targetFats = targetFatsGrams.coerceAtLeast(20)
+  val targetWaterMl = targetHydrationMl.coerceAtLeast(500)
+  val targetSteps = targetStepsCount.coerceAtLeast(1000)
+
+  val stepSyncController = rememberBioSyncStepSyncController(
+    decidedDailyStepsGoal = targetSteps,
+    autoRequestPermissionsOnStart = false,
+  )
+  val stepSyncState = stepSyncController.state
+
+  val timelineEntries = dashboardData.todayTimelineEntries
+  val allCreatedSingleItems = dashboardData.allCreatedSingleItems
+  val savedQuickItems = dashboardData.savedQuickItems
+
+  val loggedCalories = remember(timelineEntries) {
+    timelineEntries.sumOf { it.caloriesKcal }.coerceAtLeast(0)
+  }
+  val loggedProtein = remember(timelineEntries) {
+    timelineEntries.sumOf { it.proteinGrams }.coerceAtLeast(0)
+  }
+  val loggedCarbs = remember(timelineEntries) {
+    timelineEntries.sumOf { it.carbsGrams }.coerceAtLeast(0)
+  }
+  val loggedFats = remember(timelineEntries) {
+    timelineEntries.sumOf { it.fatsGrams }.coerceAtLeast(0)
+  }
+  val loggedWaterMl = remember(timelineEntries) {
+    timelineEntries.sumOf { it.hydrationMl }.coerceAtLeast(0)
+  }
+  val liveSteps = stepSyncState.liveTodaySteps.coerceAtLeast(0)
+
+  val streakThresholdPercent = streakThreshold.percentage
+
+  val stepsQualifies = remember(liveSteps, targetSteps, streakThresholdPercent) {
+    targetSteps > 0 && ((liveSteps * 100f) / targetSteps.toFloat()).roundToInt() >= streakThresholdPercent
+  }
+  val caloriesQualifies = remember(loggedCalories, targetCalories, streakThresholdPercent) {
+    targetCalories > 0 && ((loggedCalories * 100f) / targetCalories.toFloat()).roundToInt() >= streakThresholdPercent
+  }
+  val proteinQualifies = remember(loggedProtein, targetProtein, streakThresholdPercent) {
+    targetProtein > 0 && ((loggedProtein * 100f) / targetProtein.toFloat()).roundToInt() >= streakThresholdPercent
+  }
+  val carbsQualifies = remember(loggedCarbs, targetCarbs, streakThresholdPercent) {
+    targetCarbs > 0 && ((loggedCarbs * 100f) / targetCarbs.toFloat()).roundToInt() >= streakThresholdPercent
+  }
+  val fatsQualifies = remember(loggedFats, targetFats, streakThresholdPercent) {
+    targetFats > 0 && ((loggedFats * 100f) / targetFats.toFloat()).roundToInt() >= streakThresholdPercent
+  }
+  val waterQualifies = remember(loggedWaterMl, targetWaterMl, streakThresholdPercent) {
+    targetWaterMl > 0 && ((loggedWaterMl * 100f) / targetWaterMl.toFloat()).roundToInt() >= streakThresholdPercent
+  }
+
+  val allSixMet = stepsQualifies &&
+    caloriesQualifies &&
+    proteinQualifies &&
+    carbsQualifies &&
+    fatsQualifies &&
+    waterQualifies
+
+  LaunchedEffect(allSixMet, dashboardData.dayKey) {
+    val todayKey = DashboardTimeFormatter.currentDayKey()
+    if (allSixMet && dashboardData.lastCompletedStreakDayKey != todayKey) {
+      haptics.confirm()
+      persistDashboardData(
+        dashboardData.copy(
+          dayKey = todayKey,
+          baseStreakDays = dashboardData.baseStreakDays + 1,
+          lastCompletedStreakDayKey = todayKey,
+        ),
+      )
+    } else if (!allSixMet && dashboardData.lastCompletedStreakDayKey == todayKey) {
+      persistDashboardData(
+        dashboardData.copy(
+          dayKey = todayKey,
+          baseStreakDays = (dashboardData.baseStreakDays - 1).coerceAtLeast(0),
+          lastCompletedStreakDayKey = "",
+        ),
+      )
+    }
+  }
+
+  LaunchedEffect(Unit) {
+    while (true) {
+      delay(1_000L)
+      val tickMs = System.currentTimeMillis()
+      val newDayKey = DashboardTimeFormatter.currentDayKey(tickMs)
+      if (newDayKey != dashboardData.dayKey) {
+        dashboardData = DashboardLocalStore.load(context)
+        pendingDeletedItem = null
+      }
+      val pending = pendingDeletedItem
+      if (pending != null && tickMs >= pending.expiresAtEpochMs) {
+        pendingDeletedItem = null
+      }
+    }
+  }
+
+  var borderFlashTriggerCount by remember { mutableIntStateOf(1) }
+  var activeFlashCardIndex by remember { mutableIntStateOf(-1) }
+  var cardFlashProgress by remember { mutableStateOf(0f) }
+
+  LaunchedEffect(borderFlashTriggerCount) {
+    for (cardIdx in 0..5) {
+      activeFlashCardIndex = cardIdx
+      val durationMs = 260L
+      val frameMs = 16L
+      val steps = (durationMs / frameMs).toInt().coerceAtLeast(1)
+      for (s in 0..steps) {
+        cardFlashProgress = s.toFloat() / steps.toFloat()
+        delay(frameMs)
+      }
+      cardFlashProgress = 1f
+      delay(30L)
+    }
+    activeFlashCardIndex = -1
+    cardFlashProgress = 0f
+  }
+
+  LaunchedEffect(Unit) {
+    while (true) {
+      delay(18_000L)
+      borderFlashTriggerCount += 1
+    }
+  }
+
+  BackHandler {
+    haptics.selection()
+    onOpenProtocolSummary()
+  }
+
+  val infiniteTransition = rememberInfiniteTransition(label = "dashboard_ambient")
+  val ambientPulse by infiniteTransition.animateFloat(
+    initialValue = 0f,
+    targetValue = (2f * PI).toFloat(),
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 7000, easing = LinearEasing),
+      repeatMode = RepeatMode.Restart,
+    ),
+    label = "ambient_pulse",
+  )
+
+  val statusBarTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+  val navBarBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+  Box(
     modifier = modifier
       .fillMaxSize()
-      .background(ObsidianBlack),
-    containerColor = ObsidianBlack,
-    contentWindowInsets = WindowInsets(0, 0, 0, 0),
-  ) { innerPadding ->
-    BoxWithConstraints(
+      .background(ObsidianBlack)
+      .testTag("dashboard_screen_root"),
+  ) {
+    // Low-reflection Obsidian Backdrop Canvas
+    DashboardAmbientBackdropCanvas(
+      ambientPhase = ambientPulse,
+      modifier = Modifier.fillMaxSize(),
+    )
+
+    Column(
       modifier = Modifier
         .fillMaxSize()
-        .background(ObsidianBlack)
-        .padding(innerPadding)
-        .windowInsetsPadding(WindowInsets.systemBars),
-      contentAlignment = Alignment.TopCenter,
+        .verticalScroll(scrollState)
+        .padding(
+          top = statusBarTopPadding + 14.dp,
+          bottom = navBarBottomPadding + 36.dp,
+          start = 20.dp,
+          end = 20.dp,
+        ),
+      horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-      val maxW = maxWidth
-      val contentMaxWidth = if (maxW >= 600.dp) 580.dp else 480.dp
-      val horizontalPad = (maxW.value * 0.05f).coerceIn(16f, 28f).dp
-      val scrollState = rememberScrollState()
-
       Column(
         modifier = Modifier
-          .widthIn(max = contentMaxWidth)
-          .fillMaxWidth()
-          .imePadding()
-          .verticalScroll(scrollState)
-          .padding(
-            start = horizontalPad,
-            end = horizontalPad,
-            top = 6.dp,
-            bottom = 32.dp,
-          )
-          .testTag("biosync_dashboard_screen"),
+          .widthIn(max = 540.dp)
+          .fillMaxWidth(),
       ) {
-        // 1. Header Bar identical in DNA to Steps 01–04 (BioSync + LIVE PROTOCOL + Shiny White Bar)
-        DashboardHeaderBar(
-          onBackClick = {
+        // 1. TOP COMMAND HEADER
+        DashboardTopNavigationHeader(
+          subjectName = subjectName,
+          isActiveWorkoutDay = isActiveWorkoutDay,
+          isCustomTargetsMode = false,
+          streakThresholdPercent = streakThresholdPercent,
+          onTriggerShimmer = {
+            haptics.tick()
+            borderFlashTriggerCount += 1
+          },
+          onOpenProtocolSettings = {
             haptics.selection()
             onOpenProtocolSummary()
           },
-          phaseProvider = { headerGlowPhase.value },
         )
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
-        // 2. Eyebrow & Title Section (Matching Steps 01–04 clean typography without bulky badge blocks)
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Text(
-            text = "PROTOCOL COMMAND • LIVE TELEMETRY",
-            color = Zinc400,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Medium,
-            fontSize = 11.sp,
-            letterSpacing = 1.5.sp,
-          )
-
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-          ) {
-            Box(
-              modifier = Modifier
-                .size(5.5.dp)
-                .clip(CircleShape)
-                .background(if (isWorkoutDayToday) StepsStart else Zinc400),
-            )
-            Text(
-              text = if (isWorkoutDayToday) "TRAINING DAY" else "RECOVERY DAY",
-              color = if (isWorkoutDayToday) StepsStart else Zinc300,
-              fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.SemiBold,
-              fontSize = 10.sp,
-              letterSpacing = 0.8.sp,
-            )
-          }
-        }
-
-        Spacer(modifier = Modifier.height(5.dp))
-        Text(
-          text = "Daily Protocol Dashboard",
-          color = PureWhite,
-          fontFamily = InterFontFamily,
-          fontWeight = FontWeight.SemiBold,
-          fontSize = 24.5.sp,
-          letterSpacing = (-0.5).sp,
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-          text = "$subjectName • Reach ≥$requiredPercent% across all 6 categories to lock in today's combined streak.",
-          color = Zinc400,
-          fontFamily = InterFontFamily,
-          fontWeight = FontWeight.Normal,
-          fontSize = 12.2.sp,
-          lineHeight = 17.5.sp,
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // 3. FLOATING SECTION 1: COMBINED STREAK PROTOCOL ENGINE
-        // (The ONLY card on the screen that uses the solid "OPTIMAL RANGE"-style status badge)
-        DashboardStreakCommandCard(
-          streakDays = displayedStreakDays,
-          requiredThresholdPercent = requiredPercent,
-          combinedReadinessPercent = combinedStreakReadinessPct,
-          passedPillarsCount = passedPillarsCount,
-          pillars = pillars,
-          isStreakAchieved = isTodayStreakAchieved,
-          borderFlashProgress = cardShimmerWave.value,
-          celebrationPhaseProvider = { celebrationBurstPhase.value },
-          onReplayCelebration = {
-            haptics.selection()
-            coroutineScope.launch {
-              cardShimmerWave.snapTo(0f)
-              cardShimmerWave.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 1050, easing = DashboardEaseOut),
-              )
-            }
-            if (isTodayStreakAchieved) {
-              haptics.confirm()
-              coroutineScope.launch {
-                celebrationBurstPhase.snapTo(0f)
-                celebrationBurstPhase.animateTo(
-                  targetValue = 1f,
-                  animationSpec = tween(durationMillis = 1350, easing = DashboardEaseOut),
-                )
-              }
-            }
-          },
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // 4. FLOATING SECTION 2 (PRIORITY #1): DAILY STEPS & DISTANCE (GOOGLE FIT 1:1 SYNCED)
-        DashboardPriorityStepsCard(
+        // 2. FLOATING COMBINED DAILY STREAK CARD (Attractive 3x2 Pillar Bento Grid)
+        DashboardCombinedStreakHeroCard(
+          streakDays = dashboardData.baseStreakDays,
+          streakThresholdPercent = streakThresholdPercent,
           liveSteps = liveSteps,
-          targetSteps = targetStepsCount,
-          liveDistanceKm = liveDistanceKm,
-          isActivelyWalking = stepSyncController.state.isActivelyWalking,
-          streakThresholdPercent = requiredPercent,
-          borderFlashProgress = cardShimmerWave.value,
-          onRefreshSteps = {
+          targetSteps = targetSteps,
+          loggedCalories = loggedCalories,
+          targetCalories = targetCalories,
+          loggedProtein = loggedProtein,
+          targetProtein = targetProtein,
+          loggedCarbs = loggedCarbs,
+          targetCarbs = targetCarbs,
+          loggedFats = loggedFats,
+          targetFats = targetFats,
+          loggedWaterMl = loggedWaterMl,
+          targetWaterMl = targetWaterMl,
+          stepsQualifies = stepsQualifies,
+          caloriesQualifies = caloriesQualifies,
+          proteinQualifies = proteinQualifies,
+          carbsQualifies = carbsQualifies,
+          fatsQualifies = fatsQualifies,
+          waterQualifies = waterQualifies,
+          borderFlashProgress = if (activeFlashCardIndex == 0) cardFlashProgress else 0f,
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 3. PRIORITY #1: FLOATING DAILY STEPS COMMAND CARD (Dual-Telemetry Layout without clunky boxes)
+        DashboardPrimaryStepsHeroCard(
+          liveSteps = liveSteps,
+          targetSteps = targetSteps,
+          liveDistanceKm = stepSyncState.liveDistanceKm,
+          isActivelyWalking = stepSyncState.isActivelyWalking,
+          streakThresholdPercent = streakThresholdPercent,
+          stepsQualifies = stepsQualifies,
+          borderFlashProgress = if (activeFlashCardIndex == 1) cardFlashProgress else 0f,
+          onForceSyncSteps = {
             haptics.selection()
             stepSyncController.forceRefreshNow()
           },
           numberFormat = numberFormat,
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // 5. FLOATING SECTION 3 (PRIORITY #2): DAILY ENERGY (CALORIES) & 3-COLUMN MACRO BENTO (PROTEIN | CARBS | FATS)
+        // 4. FLOATING METABOLIC ENERGY (CALORIES) & 3-COLUMN MACROS CARD (Clean Calorie Balance Readout)
         DashboardCaloriesAndMacrosCard(
           loggedCalories = loggedCalories,
-          targetCalories = targetCaloriesKcal,
+          targetCalories = targetCalories,
           loggedProtein = loggedProtein,
-          targetProtein = targetProteinGrams,
+          targetProtein = targetProtein,
           loggedCarbs = loggedCarbs,
-          targetCarbs = targetCarbsGrams,
+          targetCarbs = targetCarbs,
           loggedFats = loggedFats,
-          targetFats = targetFatsGrams,
-          streakThresholdPercent = requiredPercent,
-          borderFlashProgress = cardShimmerWave.value,
+          targetFats = targetFats,
+          streakThresholdPercent = streakThresholdPercent,
+          caloriesQualifies = caloriesQualifies,
+          proteinQualifies = proteinQualifies,
+          carbsQualifies = carbsQualifies,
+          fatsQualifies = fatsQualifies,
+          borderFlashProgress = if (activeFlashCardIndex == 2) cardFlashProgress else 0f,
           numberFormat = numberFormat,
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // 6. FLOATING SECTION 4: DEDICATED HYDRATION (H2O) COMMAND DECK (Separate from Calories & Macros)
+        // 5. FLOATING DEDICATED HYDRATION (H2O) COMMAND CARD (Clean Glasses Readout)
         DashboardHydrationCommandCard(
           loggedWaterMl = loggedWaterMl,
-          targetWaterMl = targetHydrationMl,
-          streakThresholdPercent = requiredPercent,
-          borderFlashProgress = cardShimmerWave.value,
+          targetWaterMl = targetWaterMl,
+          streakThresholdPercent = streakThresholdPercent,
+          borderFlashProgress = if (activeFlashCardIndex == 3) cardFlashProgress else 0f,
           onLogWaterMl = { addedMl ->
-            val nowMs = System.currentTimeMillis()
-            val newEntry = DashboardTimelineEntry(
+            val newHydrationEntry = DashboardTimelineEntry(
               type = DashboardEntryType.HYDRATION,
-              title = "Hydration +$addedMl ml",
+              title = "Hydration +${numberFormat.format(addedMl)} ml",
+              subtitle = "Cellular H₂O",
               hydrationMl = addedMl,
-              timestampEpochMs = nowMs,
-              formattedTimeAmPm = DashboardTimeFormatter.formatAmPm(nowMs),
             )
-            timelineEntries = listOf(newEntry) + timelineEntries
+            persistDashboardData(
+              dashboardData.copy(
+                todayTimelineEntries = listOf(newHydrationEntry) + dashboardData.todayTimelineEntries,
+              ),
+            )
           },
           haptics = haptics,
           numberFormat = numberFormat,
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // 7. FLOATING SECTION 5: QUICK ACTIONS (+) BAR (Pop-up Composer on click + Saved Quick Items beside it)
+        // 6. FLOATING QUICK ACTIONS (+) BAR WITH SAVED ITEMS BESIDE IT (Solid Red × Button)
         DashboardQuickActionsHubCard(
           allCreatedSingleItems = allCreatedSingleItems,
           savedQuickItems = savedQuickItems,
-          targetCalories = targetCaloriesKcal,
-          targetProtein = targetProteinGrams,
-          targetCarbs = targetCarbsGrams,
-          targetFats = targetFatsGrams,
+          targetCalories = targetCalories,
+          targetProtein = targetProtein,
+          targetCarbs = targetCarbs,
+          targetFats = targetFats,
           mealCount = mealFrequency.count,
-          borderFlashProgress = cardShimmerWave.value,
-          onLogNutritionItem = { item, shouldSaveToQuickActions ->
-            val nowMs = System.currentTimeMillis()
-            if (!item.isMeal) {
-              val updatedSingles = listOf(item) + allCreatedSingleItems.filterNot {
-                it.name.equals(item.name, ignoreCase = true)
+          borderFlashProgress = if (activeFlashCardIndex == 4) cardFlashProgress else 0f,
+          onLogNutritionItem = { itemToLog, saveToQuickActions ->
+            val updatedSingles = if (!itemToLog.isMeal) {
+              listOf(itemToLog) + dashboardData.allCreatedSingleItems.filterNot {
+                it.id == itemToLog.id || it.name.equals(itemToLog.name, ignoreCase = true)
               }
-              allCreatedSingleItems = updatedSingles.take(40)
+            } else {
+              dashboardData.allCreatedSingleItems
             }
-            if (shouldSaveToQuickActions) {
-              val savedCopy = item.copy(isSavedToQuickActions = true)
-              val updatedSaved = listOf(savedCopy) + savedQuickItems.filterNot {
-                it.name.equals(savedCopy.name, ignoreCase = true) && it.isMeal == savedCopy.isMeal
+            val updatedSaved = if (saveToQuickActions) {
+              val savedCopy = itemToLog.copy(isSavedToQuickActions = true)
+              listOf(savedCopy) + dashboardData.savedQuickItems.filterNot {
+                it.id == savedCopy.id || (it.isMeal == savedCopy.isMeal && it.name.equals(savedCopy.name, ignoreCase = true))
               }
-              savedQuickItems = updatedSaved.take(30)
+            } else {
+              dashboardData.savedQuickItems
             }
             val newEntry = DashboardTimelineEntry(
-              type = if (item.isMeal) DashboardEntryType.MEAL else DashboardEntryType.SINGLE_ITEM,
-              title = item.name,
-              subtitle = if (item.componentNames.isNotEmpty()) item.componentNames.joinToString(" + ") else "",
-              caloriesKcal = item.caloriesKcal,
-              proteinGrams = item.proteinGrams,
-              carbsGrams = item.carbsGrams,
-              fatsGrams = item.fatsGrams,
-              timestampEpochMs = nowMs,
-              formattedTimeAmPm = DashboardTimeFormatter.formatAmPm(nowMs),
+              type = if (itemToLog.isMeal) DashboardEntryType.MEAL else DashboardEntryType.SINGLE_ITEM,
+              title = itemToLog.name,
+              subtitle = if (itemToLog.componentNames.isNotEmpty()) {
+                itemToLog.componentNames.joinToString(" + ")
+              } else {
+                ""
+              },
+              caloriesKcal = itemToLog.caloriesKcal,
+              proteinGrams = itemToLog.proteinGrams,
+              carbsGrams = itemToLog.carbsGrams,
+              fatsGrams = itemToLog.fatsGrams,
+              hydrationMl = 0,
             )
-            timelineEntries = listOf(newEntry) + timelineEntries
+            persistDashboardData(
+              dashboardData.copy(
+                allCreatedSingleItems = updatedSingles,
+                savedQuickItems = updatedSaved,
+                todayTimelineEntries = listOf(newEntry) + dashboardData.todayTimelineEntries,
+              ),
+            )
           },
           onQuickTapSavedItem = { savedItem ->
-            val nowMs = System.currentTimeMillis()
             val newEntry = DashboardTimelineEntry(
               type = if (savedItem.isMeal) DashboardEntryType.MEAL else DashboardEntryType.SINGLE_ITEM,
               title = savedItem.name,
-              subtitle = if (savedItem.componentNames.isNotEmpty()) savedItem.componentNames.joinToString(" + ") else "Quick Action",
+              subtitle = if (savedItem.componentNames.isNotEmpty()) {
+                savedItem.componentNames.joinToString(" + ")
+              } else {
+                "Quick Action"
+              },
               caloriesKcal = savedItem.caloriesKcal,
               proteinGrams = savedItem.proteinGrams,
               carbsGrams = savedItem.carbsGrams,
               fatsGrams = savedItem.fatsGrams,
-              timestampEpochMs = nowMs,
-              formattedTimeAmPm = DashboardTimeFormatter.formatAmPm(nowMs),
+              hydrationMl = 0,
             )
-            timelineEntries = listOf(newEntry) + timelineEntries
+            persistDashboardData(
+              dashboardData.copy(
+                todayTimelineEntries = listOf(newEntry) + dashboardData.todayTimelineEntries,
+              ),
+            )
           },
-          onDeleteSavedQuickItem = { idToDelete ->
-            savedQuickItems = savedQuickItems.filterNot { it.id == idToDelete }
-            allCreatedSingleItems = allCreatedSingleItems.filterNot { it.id == idToDelete }
+          onDeleteSavedQuickItem = { itemId ->
+            persistDashboardData(
+              dashboardData.copy(
+                savedQuickItems = dashboardData.savedQuickItems.filterNot { it.id == itemId },
+              ),
+            )
           },
           haptics = haptics,
           numberFormat = numberFormat,
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // 8. FLOATING SECTION 6: TODAY'S TIMELINE (At the very bottom: AM/PM timestamps, Delete & 3-second Undo)
+        // 7. FLOATING TODAY'S TIMELINE SECTION (Chronological Rail + Solid Red Delete Button)
         DashboardTodayTimelineSection(
           timelineEntries = timelineEntries,
           pendingDeletedItem = pendingDeletedItem,
-          borderFlashProgress = cardShimmerWave.value,
-          onDeleteEntry = { entryToDelete ->
-            val idx = timelineEntries.indexOfFirst { it.id == entryToDelete.id }.coerceAtLeast(0)
-            timelineEntries = timelineEntries.filterNot { it.id == entryToDelete.id }
-            pendingDeletedItem = PendingDeletedTimelineItem(
-              entry = entryToDelete,
-              originalIndex = idx,
-              expiresAtEpochMs = System.currentTimeMillis() + 3000L,
-            )
+          borderFlashProgress = if (activeFlashCardIndex == 5) cardFlashProgress else 0f,
+          onDeleteEntry = { entryToRemove ->
+            val currentList = dashboardData.todayTimelineEntries
+            val idx = currentList.indexOfFirst { it.id == entryToRemove.id }
+            if (idx >= 0) {
+              pendingDeletedItem = PendingDeletedTimelineItem(
+                entry = entryToRemove,
+                originalIndex = idx,
+                expiresAtEpochMs = System.currentTimeMillis() + 3_000L,
+              )
+              persistDashboardData(
+                dashboardData.copy(
+                  todayTimelineEntries = currentList.filterNot { it.id == entryToRemove.id },
+                ),
+              )
+            }
           },
           onUndoDelete = {
             val pending = pendingDeletedItem
             if (pending != null) {
-              val mutable = timelineEntries.toMutableList()
-              val targetIdx = pending.originalIndex.coerceIn(0, mutable.size)
-              mutable.add(targetIdx, pending.entry)
-              timelineEntries = mutable
+              val currentList = dashboardData.todayTimelineEntries.toMutableList()
+              val insertIdx = pending.originalIndex.coerceIn(0, currentList.size)
+              currentList.add(insertIdx, pending.entry)
+              persistDashboardData(
+                dashboardData.copy(
+                  todayTimelineEntries = currentList,
+                ),
+              )
               pendingDeletedItem = null
             }
           },
@@ -1009,534 +807,277 @@ fun BioSyncDashboardScreen(
 }
 
 // ============================================================================
-// HEADER BAR (IDENTICAL ECOSYSTEM DNA TO STEPS 01–04)
+// AMBIENT BACKDROP CANVAS (Toned down reflection so background stays deep obsidian)
 // ============================================================================
 
 @Composable
-private fun DashboardHeaderBar(
-  onBackClick: () -> Unit,
-  phaseProvider: () -> Float,
+private fun DashboardAmbientBackdropCanvas(
+  ambientPhase: Float,
+  modifier: Modifier = Modifier,
 ) {
-  Row(
-    modifier = Modifier
-      .fillMaxWidth()
-      .heightIn(min = 46.dp)
-      .padding(vertical = 4.dp),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.SpaceBetween,
-  ) {
-    Box(
-      modifier = Modifier
-        .size(48.dp)
-        .clip(CircleShape)
-        .clickable(role = Role.Button, onClick = onBackClick)
-        .testTag("dashboard_open_protocol_button"),
-      contentAlignment = Alignment.CenterStart,
-    ) {
-      Canvas(modifier = Modifier.size(18.dp)) {
-        val w = size.width
-        val h = size.height
-        val chevron = Path().apply {
-          moveTo(w * 0.68f, h * 0.14f)
-          lineTo(w * 0.24f, h * 0.50f)
-          lineTo(w * 0.68f, h * 0.86f)
-        }
-        drawPath(
-          path = chevron,
-          color = Zinc300,
-          style = Stroke(
-            width = 1.8.dp.toPx(),
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round,
-          ),
-        )
-      }
-    }
+  Canvas(modifier = modifier) {
+    val w = size.width
+    val h = size.height
+    val gridSpacing = 28.dp.toPx()
+    val dotRadius = 0.85.dp.toPx()
 
-    Column(
-      horizontalAlignment = Alignment.CenterHorizontally,
-      verticalArrangement = Arrangement.Center,
-    ) {
-      Text(
-        text = "BioSync",
-        color = PureWhite,
-        fontFamily = InterFontFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 15.sp,
-        letterSpacing = (-0.2).sp,
-      )
-      Spacer(modifier = Modifier.height(2.dp))
-      Text(
-        text = "LIVE PROTOCOL • ACTIVE",
-        color = Zinc400,
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = 10.2.sp,
-        letterSpacing = 1.0.sp,
-      )
-      Spacer(modifier = Modifier.height(4.5.dp))
-
-      Spacer(
-        modifier = Modifier
-          .width(108.dp)
-          .height(4.dp)
-          .graphicsLayer()
-          .drawWithCache {
-            val barH = size.height.coerceAtLeast(1f)
-            val radius = CornerRadius(barH / 2f, barH / 2f)
-            val outerGlowPaint = Paint().apply {
-              isAntiAlias = true
-              asFrameworkPaint().apply {
-                color = android.graphics.Color.argb(155, 255, 255, 255)
-                maskFilter = BlurMaskFilter(safeDashboardBlur(barH * 1.9f), BlurMaskFilter.Blur.NORMAL)
-              }
-            }
-            val shinyCoreBrush = Brush.horizontalGradient(
-              colors = listOf(Color(0xFFC8CCD4), Color(0xFFF2F4F7), PureWhite),
-            )
-            onDrawBehind {
-              if (size.width <= 1f || size.height <= 0.5f) return@onDrawBehind
-              val p = phaseProvider().coerceIn(0f, 1f)
-              val fillW = (size.width * p).coerceIn(barH, size.width)
-              drawRoundRect(
-                color = Zinc850,
-                topLeft = Offset.Zero,
-                size = Size(size.width, barH),
-                cornerRadius = radius,
-              )
-              drawIntoCanvas { canvas ->
-                canvas.drawRoundRect(0f, 0f, fillW, barH, barH / 2f, barH / 2f, outerGlowPaint)
-              }
-              drawRoundRect(
-                brush = shinyCoreBrush,
-                topLeft = Offset.Zero,
-                size = Size(fillW, barH),
-                cornerRadius = radius,
-              )
-            }
-          },
-      )
-    }
-
-    Box(
-      modifier = Modifier.size(48.dp),
-      contentAlignment = Alignment.CenterEnd,
-    ) {
-      DashboardSyncedHeaderDot(
-        startColor = PureWhite,
-        endColor = Zinc200,
-        sizeDp = 8.dp,
-      )
-    }
-  }
-}
-
-// ============================================================================
-// FLOATING SECTION 1: STREAK PROTOCOL COMMAND CARD
-// (Uses the single purposeful Optimal Status Badge, plus floating 3D pillar tiles)
-// ============================================================================
-
-@Composable
-private fun DashboardStreakCommandCard(
-  streakDays: Int,
-  requiredThresholdPercent: Int,
-  combinedReadinessPercent: Int,
-  passedPillarsCount: Int,
-  pillars: List<StreakPillarStatus>,
-  isStreakAchieved: Boolean,
-  borderFlashProgress: Float,
-  celebrationPhaseProvider: () -> Float,
-  onReplayCelebration: () -> Unit,
-) {
-  val animatedReadiness by animateFloatAsState(
-    targetValue = (combinedReadinessPercent / 100f).coerceIn(0f, 1f),
-    animationSpec = tween(durationMillis = 480, easing = DashboardEaseOut),
-    label = "streak_readiness_fill",
-  )
-
-  val badgeStart = if (isStreakAchieved) StepsStart else HydrationStart
-  val badgeEnd = if (isStreakAchieved) CyberCyan else ProteinStart
-
-  Box(
-    modifier = Modifier
-      .fillMaxWidth()
-      .floating3DProtocolCard(
-        cornerRadiusDp = 18.dp,
-        topRimTint = if (isStreakAchieved) StepsStart else PureWhite,
-        borderFlashProgress = borderFlashProgress,
-      )
-      .clickable(role = Role.Button, onClick = onReplayCelebration)
-      .padding(16.dp)
-      .testTag("dashboard_streak_card"),
-  ) {
-    // Celebratory Radial Shockwave & Particle Burst when Streak Goal is Achieved
-    val burstPhase = celebrationPhaseProvider()
-    if (burstPhase > 0.01f && burstPhase < 0.99f) {
-      Canvas(modifier = Modifier.matchParentSize()) {
-        val cx = size.width * 0.5f
-        val cy = size.height * 0.45f
-        val maxR = size.maxDimension * 0.62f
-        val alpha = (1f - burstPhase).coerceIn(0f, 1f)
-
+    var x = gridSpacing * 0.5f
+    while (x < w) {
+      var y = gridSpacing * 0.5f
+      while (y < h) {
         drawCircle(
-          color = PureWhite.copy(alpha = alpha * 0.4f),
-          radius = maxR * burstPhase,
-          center = Offset(cx, cy),
-          style = Stroke(width = 2.dp.toPx()),
+          color = Color.White.copy(alpha = 0.014f),
+          radius = dotRadius,
+          center = Offset(x, y),
         )
-
-        val sparkColors = listOf(PureWhite, StepsStart, CyberCyan, HydrationStart, CaloriesStart)
-        for (i in 0 until 16) {
-          val angle = (i * (2.0 * PI / 16.0)).toFloat()
-          val dist = maxR * (0.16f + 0.84f * burstPhase)
-          val px = cx + cos(angle) * dist
-          val py = cy + sin(angle) * dist
-          drawCircle(
-            color = sparkColors[i % sparkColors.size].copy(alpha = alpha),
-            radius = (3.8f * (1f - burstPhase * 0.45f)).dp.toPx(),
-            center = Offset(px, py),
-          )
-        }
+        y += gridSpacing
       }
+      x += gridSpacing
     }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
-      // 1. Header Row: Luminous Dot + Title + The Single Relevant Optimal Status Badge (like Step 02 BMI)
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(bottom = 11.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          DashboardSyncedHeaderDot(
-            startColor = if (isStreakAchieved) StepsStart else PureWhite,
-            endColor = if (isStreakAchieved) CyberCyan else Zinc300,
-          )
-          Spacer(modifier = Modifier.width(9.dp))
-          Text(
-            text = "STREAK PROTOCOL ENGINE",
-            color = PureWhite,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 11.2.sp,
-            letterSpacing = 1.0.sp,
-          )
-        }
+    val driftX = cos(ambientPhase) * (w * 0.03f)
+    val driftY = sin(ambientPhase) * (h * 0.015f)
 
-        StreakStatusOptimalBadge(
-          text = if (isStreakAchieved) "STREAK UNLOCKED" else "OPTIMAL GATE ≥ $requiredThresholdPercent%",
-          startColor = badgeStart,
-          endColor = badgeEnd,
-        )
-      }
+    // Subtle deep emerald aura
+    drawCircle(
+      brush = Brush.radialGradient(
+        colors = listOf(
+          StepsStart.copy(alpha = 0.028f),
+          Color.Transparent,
+        ),
+        center = Offset(w * 0.84f + driftX, h * 0.12f + driftY),
+        radius = w * 0.62f,
+      ),
+      radius = w * 0.62f,
+      center = Offset(w * 0.84f + driftX, h * 0.12f + driftY),
+    )
 
-      HorizontalDivider(
-        thickness = 1.dp,
-        color = Zinc800.copy(alpha = 0.85f),
-      )
-
-      Spacer(modifier = Modifier.height(12.dp))
-
-      // 2. Floating Inner Streak Readout Module (Matches DailyTargetsCommandDeck inner card on Step 04)
-      Column(
-        modifier = Modifier
-          .fillMaxWidth()
-          .floating3DInnerTile(
-            cornerRadiusDp = 12.dp,
-            accentColor = if (isStreakAchieved) StepsStart else Zinc600,
-            isHighlighted = isStreakAchieved,
-          )
-          .padding(13.dp),
-      ) {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.Bottom,
-        ) {
-          Column {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-              Box(
-                modifier = Modifier
-                  .width(3.5.dp)
-                  .height(12.dp)
-                  .clip(RoundedCornerShape(2.dp))
-                  .background(
-                    Brush.verticalGradient(
-                      if (isStreakAchieved) listOf(StepsStart, CyberCyan) else listOf(PureWhite, Zinc400),
-                    ),
-                  ),
-              )
-              Text(
-                text = "COMBINED DAILY STREAK",
-                color = Zinc300,
-                fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 10.2.sp,
-                letterSpacing = 0.9.sp,
-              )
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.Bottom) {
-              Text(
-                text = "$streakDays",
-                color = PureWhite,
-                fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = 34.sp,
-                lineHeight = 34.sp,
-                letterSpacing = (-1.0).sp,
-                modifier = Modifier.testTag("dashboard_streak_days_text"),
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = if (streakDays == 1) "day active" else "days active",
-                color = Zinc400,
-                fontFamily = InterFontFamily,
-                fontWeight = FontWeight.Medium,
-                fontSize = 12.5.sp,
-                modifier = Modifier.padding(bottom = 3.dp),
-              )
-            }
-          }
-
-          Column(
-            horizontalAlignment = Alignment.End,
-            modifier = Modifier.padding(bottom = 2.dp),
-          ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Text(
-                text = "READINESS ",
-                color = Zinc400,
-                fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.Medium,
-                fontSize = 9.8.sp,
-              )
-              Text(
-                text = "$combinedReadinessPercent%",
-                color = if (isStreakAchieved) StepsStart else PureWhite,
-                fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp,
-              )
-            }
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-              text = "$passedPillarsCount of 6 pillars ≥$requiredThresholdPercent%",
-              color = Zinc400,
-              fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.Normal,
-              fontSize = 10.sp,
-            )
-          }
-        }
-
-        Spacer(modifier = Modifier.height(11.dp))
-
-        // Liquid-Chrome Multi-Tone White / Optimal Progress Bar with Luminous Reticle
-        DashboardSpectrumGaugeBar(
-          fillFraction = animatedReadiness,
-          streakThresholdPercent = 100,
-          gradientColors = if (isStreakAchieved) {
-            listOf(StepsEnd, StepsMid, StepsStart, CyberCyan, PureWhite)
-          } else {
-            WhiteVariantMulticolorGradient
-          },
-          accentColor = if (isStreakAchieved) StepsStart else PureWhite,
-          showThresholdMarker = false,
-          barHeight = 9.5.dp,
-        )
-      }
-
-      Spacer(modifier = Modifier.height(10.dp))
-
-      // 3. 6-Column Floating Pillar Matrix (Clean vertical accent bar + crisp numbers — NO colored block spam!)
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-      ) {
-        pillars.forEach { pillar ->
-          val passed = pillar.isPassed
-          val pillarFill = (pillar.achievedPercent.toFloat() / pillar.thresholdPercent.coerceAtLeast(1).toFloat())
-            .coerceIn(0f, 1f)
-
-          Column(
-            modifier = Modifier
-              .weight(1f)
-              .floating3DInnerTile(
-                cornerRadiusDp = 10.dp,
-                accentColor = if (passed) pillar.accentColor else Zinc700,
-                isHighlighted = passed,
-              )
-              .padding(horizontal = 6.dp, vertical = 7.5.dp),
-            horizontalAlignment = Alignment.Start,
-          ) {
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically,
-            ) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(3.5.dp),
-              ) {
-                Box(
-                  modifier = Modifier
-                    .width(2.5.dp)
-                    .height(9.dp)
-                    .clip(RoundedCornerShape(1.5.dp))
-                    .background(pillar.accentColor),
-                )
-                Text(
-                  text = pillar.code,
-                  color = if (passed) PureWhite else Zinc300,
-                  fontFamily = JetBrainsMonoFontFamily,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 8.4.sp,
-                  maxLines = 1,
-                )
-              }
-
-              if (passed) {
-                Text(
-                  text = "✓",
-                  color = pillar.accentColor,
-                  fontFamily = JetBrainsMonoFontFamily,
-                  fontWeight = FontWeight.ExtraBold,
-                  fontSize = 8.5.sp,
-                )
-              }
-            }
-
-            Spacer(modifier = Modifier.height(5.dp))
-
-            Text(
-              text = "${pillar.achievedPercent}%",
-              color = PureWhite,
-              fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.Bold,
-              fontSize = 12.2.sp,
-              maxLines = 1,
-            )
-
-            Text(
-              text = "/${pillar.thresholdPercent}%",
-              color = if (passed) pillar.accentColor else Zinc500,
-              fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.Medium,
-              fontSize = 8.2.sp,
-              maxLines = 1,
-            )
-
-            Spacer(modifier = Modifier.height(5.dp))
-
-            // Mini telemetry bar matching PipelineMetricTile in ProtocolSummaryScreen
-            Canvas(
-              modifier = Modifier
-                .fillMaxWidth()
-                .height(3.5.dp),
-            ) {
-              val r = CornerRadius(size.height / 2f, size.height / 2f)
-              drawRoundRect(
-                color = RecessedTrackFill,
-                topLeft = Offset.Zero,
-                size = size,
-                cornerRadius = r,
-              )
-              val wFill = (size.width * pillarFill.coerceAtLeast(0.10f)).coerceAtMost(size.width)
-              drawRoundRect(
-                brush = Brush.horizontalGradient(
-                  colors = listOf(pillar.secondaryColor, pillar.accentColor, PureWhite),
-                  startX = 0f,
-                  endX = wFill,
-                ),
-                topLeft = Offset.Zero,
-                size = Size(wFill, size.height),
-                cornerRadius = r,
-              )
-            }
-          }
-        }
-      }
-
-      // 4. Clean Celebratory Status Strip when Streak is Unlocked
-      AnimatedVisibility(
-        visible = isStreakAchieved,
-        enter = expandVertically() + fadeIn(),
-        exit = shrinkVertically() + fadeOut(),
-      ) {
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 10.dp)
-            .floating3DInnerTile(
-              cornerRadiusDp = 9.dp,
-              accentColor = StepsStart,
-              isHighlighted = true,
-            )
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Text(
-            text = "ALL 6 PILLARS ≥$requiredThresholdPercent% • DAILY STREAK LOCKED IN",
-            color = StepsStart,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = 9.6.sp,
-            letterSpacing = 0.5.sp,
-          )
-          Text(
-            text = "REPLAY ✦",
-            color = PureWhite,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = 9.2.sp,
-          )
-        }
-      }
-    }
+    // Subtle deep cyan aura
+    drawCircle(
+      brush = Brush.radialGradient(
+        colors = listOf(
+          HydrationStart.copy(alpha = 0.022f),
+          Color.Transparent,
+        ),
+        center = Offset(w * 0.16f - driftX, h * 0.54f - driftY),
+        radius = w * 0.58f,
+      ),
+      radius = w * 0.58f,
+      center = Offset(w * 0.16f - driftX, h * 0.54f - driftY),
+    )
   }
 }
 
 // ============================================================================
-// FLOATING SECTION 2: PRIORITY #1 TELEMETRY — DAILY STEPS & DISTANCE (GOOGLE FIT 1:1)
-// (Consistent with DailyTargetsCommandDeck on Step 04 — NO bulky colored header block!)
+// TOP NAVIGATION HEADER
 // ============================================================================
 
 @Composable
-private fun DashboardPriorityStepsCard(
+private fun DashboardTopNavigationHeader(
+  subjectName: String,
+  isActiveWorkoutDay: Boolean,
+  isCustomTargetsMode: Boolean,
+  streakThresholdPercent: Int,
+  onTriggerShimmer: () -> Unit,
+  onOpenProtocolSettings: () -> Unit,
+) {
+  val todayFormatted = remember {
+    val cal = Calendar.getInstance()
+    val dayName = cal.getDisplayName(Calendar.DAY_OF_WEEK, Calendar.SHORT, Locale.US)?.uppercase(Locale.US) ?: "TODAY"
+    val monthName = cal.getDisplayName(Calendar.MONTH, Calendar.SHORT, Locale.US)?.uppercase(Locale.US) ?: ""
+    val dayNum = cal.get(Calendar.DAY_OF_MONTH)
+    "$dayName, $monthName $dayNum"
+  }
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+        onClick = onTriggerShimmer,
+      ),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Box(
+          modifier = Modifier
+            .size(38.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Zinc900)
+            .border(1.dp, Zinc800, RoundedCornerShape(10.dp))
+            .clickable(
+              role = Role.Button,
+              onClick = onOpenProtocolSettings,
+            )
+            .testTag("dashboard_recalibrate_button"),
+          contentAlignment = Alignment.Center,
+        ) {
+          Canvas(modifier = Modifier.size(16.dp)) {
+            val w = size.width
+            val h = size.height
+            val stroke = 1.6.dp.toPx()
+            drawLine(
+              color = PureWhite,
+              start = Offset(w * 0.12f, h * 0.28f),
+              end = Offset(w * 0.88f, h * 0.28f),
+              strokeWidth = stroke,
+              cap = StrokeCap.Round,
+            )
+            drawCircle(
+              color = StepsStart,
+              radius = 2.4.dp.toPx(),
+              center = Offset(w * 0.34f, h * 0.28f),
+            )
+            drawLine(
+              color = PureWhite,
+              start = Offset(w * 0.12f, h * 0.72f),
+              end = Offset(w * 0.88f, h * 0.72f),
+              strokeWidth = stroke,
+              cap = StrokeCap.Round,
+            )
+            drawCircle(
+              color = HydrationStart,
+              radius = 2.4.dp.toPx(),
+              center = Offset(w * 0.68f, h * 0.72f),
+            )
+          }
+        }
+
+        Column {
+          Text(
+            text = "ACTIVE PROTOCOL • LIVE",
+            color = Zinc500,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = 10.sp,
+            letterSpacing = 1.5.sp,
+          )
+          Spacer(modifier = Modifier.height(2.dp))
+          Text(
+            text = "Daily Protocol",
+            color = PureWhite,
+            fontFamily = InterFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 24.sp,
+            letterSpacing = (-0.8).sp,
+          )
+        }
+      }
+
+      Column(horizontalAlignment = Alignment.End) {
+        Text(
+          text = todayFormatted,
+          color = PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = 11.sp,
+          letterSpacing = 0.6.sp,
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+          text = if (isCustomTargetsMode) {
+            "CUSTOM OVERRIDE"
+          } else if (isActiveWorkoutDay) {
+            "ACTIVE TRAINING DAY"
+          } else {
+            "REST & RECOVERY DAY"
+          },
+          color = if (isActiveWorkoutDay) StepsStart else HydrationStart,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.SemiBold,
+          fontSize = 9.5.sp,
+          letterSpacing = 0.5.sp,
+        )
+      }
+    }
+
+    Spacer(modifier = Modifier.height(4.dp))
+
+    Text(
+      text = "${subjectName.ifBlank { "Athlete" }} • Daily streak unlocks at ≥$streakThresholdPercent% across all 6 pillars.",
+      color = Zinc400,
+      fontFamily = InterFontFamily,
+      fontWeight = FontWeight.Normal,
+      fontSize = 12.2.sp,
+    )
+  }
+}
+
+// ============================================================================
+// COMBINED DAILY STREAK HERO CARD (Redesigned Attractive 3x2 Pillar Bento Grid)
+// ============================================================================
+
+@Composable
+private fun DashboardCombinedStreakHeroCard(
+  streakDays: Int,
+  streakThresholdPercent: Int,
   liveSteps: Int,
   targetSteps: Int,
-  liveDistanceKm: Float,
-  isActivelyWalking: Boolean,
-  streakThresholdPercent: Int,
-  borderFlashProgress: Float,
-  onRefreshSteps: () -> Unit,
-  numberFormat: NumberFormat,
+  loggedCalories: Int,
+  targetCalories: Int,
+  loggedProtein: Int,
+  targetProtein: Int,
+  loggedCarbs: Int,
+  targetCarbs: Int,
+  loggedFats: Int,
+  targetFats: Int,
+  loggedWaterMl: Int,
+  targetWaterMl: Int,
+  stepsQualifies: Boolean,
+  caloriesQualifies: Boolean,
+  proteinQualifies: Boolean,
+  carbsQualifies: Boolean,
+  fatsQualifies: Boolean,
+  waterQualifies: Boolean,
+  borderFlashProgress: Float = 0f,
 ) {
-  val safeTargetSteps = targetSteps.coerceAtLeast(500)
-  val stepsFraction = (liveSteps.toFloat() / safeTargetSteps.toFloat()).coerceIn(0f, 1f)
-  val stepsPct = ((liveSteps.toFloat() / safeTargetSteps.toFloat()) * 100f).roundToInt()
-  val remainingSteps = (safeTargetSteps - liveSteps).coerceAtLeast(0)
-  val isGoalMet = stepsPct >= streakThresholdPercent
+  val qualifiedCount = listOf(
+    stepsQualifies,
+    caloriesQualifies,
+    proteinQualifies,
+    carbsQualifies,
+    fatsQualifies,
+    waterQualifies,
+  ).count { it }
+  val allSixMet = qualifiedCount == 6
+
+  val stepsProgress = if (targetSteps > 0) (liveSteps.toFloat() / targetSteps).coerceIn(0f, 1f) else 0f
+  val calProgress = if (targetCalories > 0) (loggedCalories.toFloat() / targetCalories).coerceIn(0f, 1f) else 0f
+  val proProgress = if (targetProtein > 0) (loggedProtein.toFloat() / targetProtein).coerceIn(0f, 1f) else 0f
+  val carbProgress = if (targetCarbs > 0) (loggedCarbs.toFloat() / targetCarbs).coerceIn(0f, 1f) else 0f
+  val fatProgress = if (targetFats > 0) (loggedFats.toFloat() / targetFats).coerceIn(0f, 1f) else 0f
+  val waterProgress = if (targetWaterMl > 0) (loggedWaterMl.toFloat() / targetWaterMl).coerceIn(0f, 1f) else 0f
+
+  val overallReadinessFraction = (
+    (stepsProgress + calProgress + proProgress + carbProgress + fatProgress + waterProgress) / 6f
+    ).coerceIn(0f, 1f)
+
+  val animatedReadiness by animateFloatAsState(
+    targetValue = overallReadinessFraction,
+    animationSpec = tween(durationMillis = 520, easing = SmoothOutEasing),
+    label = "streak_readiness_fill",
+  )
 
   Column(
     modifier = Modifier
       .fillMaxWidth()
       .floating3DProtocolCard(
         cornerRadiusDp = 18.dp,
-        topRimTint = StepsStart,
+        topRimTint = if (allSixMet) StepsStart else PureWhite,
         borderFlashProgress = borderFlashProgress,
       )
       .padding(16.dp)
-      .testTag("dashboard_priority_steps_card"),
+      .testTag("dashboard_streak_card"),
   ) {
-    // 1. Clean Ecosystem Header Row: Luminous Dot + Title on left, Plain Colored % + Monochrome SYNC button on right
+    // 1. Header Row (Single solid status badge on the screen, matching Step 02 OPTIMAL RANGE)
     Row(
       modifier = Modifier
         .fillMaxWidth()
@@ -1544,59 +1085,36 @@ private fun DashboardPriorityStepsCard(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.weight(1f),
-      ) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
         DashboardSyncedHeaderDot(
-          startColor = StepsStart,
-          endColor = CyberCyan,
+          startColor = if (allSixMet) StepsStart else PureWhite,
+          endColor = if (allSixMet) StepsMid else Zinc300,
         )
         Spacer(modifier = Modifier.width(9.dp))
         Text(
-          text = "PRIORITY 01 • DAILY STEPS",
+          text = "STREAK PROTOCOL ENGINE",
           color = PureWhite,
           fontFamily = JetBrainsMonoFontFamily,
           fontWeight = FontWeight.SemiBold,
           fontSize = 11.2.sp,
           letterSpacing = 1.0.sp,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
         )
       }
 
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      Box(
+        modifier = Modifier
+          .clip(RoundedCornerShape(8.dp))
+          .background(if (allSixMet) StepsStart else HydrationStart)
+          .padding(horizontal = 9.dp, vertical = 4.dp),
       ) {
         Text(
-          text = if (isActivelyWalking) "LIVE • $stepsPct%" else "GOOGLE FIT • $stepsPct%",
-          color = StepsStart,
+          text = if (allSixMet) "STREAK UNLOCKED" else "OPTIMAL GATE ≥ $streakThresholdPercent%",
+          color = ObsidianBlack,
           fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.Bold,
-          fontSize = 10.sp,
-          letterSpacing = 0.5.sp,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = 9.2.sp,
+          letterSpacing = 0.6.sp,
         )
-
-        Box(
-          modifier = Modifier
-            .clip(RoundedCornerShape(7.dp))
-            .background(Zinc900)
-            .border(1.dp, Zinc700, RoundedCornerShape(7.dp))
-            .clickable(role = Role.Button, onClick = onRefreshSteps)
-            .padding(horizontal = 9.dp, vertical = 4.5.dp)
-            .testTag("dashboard_steps_sync_button"),
-          contentAlignment = Alignment.Center,
-        ) {
-          Text(
-            text = "SYNC",
-            color = PureWhite,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = 9.2.sp,
-            letterSpacing = 0.6.sp,
-          )
-        }
       }
     }
 
@@ -1607,60 +1125,58 @@ private fun DashboardPriorityStepsCard(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    // 2. Floating 3D Inner Telemetry Module (Matches DailyTargetsCommandDeck on Step 04)
+    // 2. Floating Inner Streak Readout Card
     Column(
       modifier = Modifier
         .fillMaxWidth()
         .floating3DInnerTile(
           cornerRadiusDp = 12.dp,
-          accentColor = StepsStart,
-          isHighlighted = isGoalMet,
+          accentColor = if (allSixMet) StepsStart else PureWhite,
+          isHighlighted = allSixMet,
         )
-        .padding(13.dp),
+        .padding(horizontal = 13.dp, vertical = 11.dp),
     ) {
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
       ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Column {
           Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
           ) {
             Box(
               modifier = Modifier
-                .width(4.dp)
-                .height(14.dp)
+                .width(3.5.dp)
+                .height(12.dp)
                 .clip(RoundedCornerShape(2.dp))
-                .background(Brush.verticalGradient(listOf(StepsStart, StepsMid))),
+                .background(if (allSixMet) StepsStart else PureWhite),
             )
             Text(
-              text = "GOOGLE FIT & HEALTH CONNECT 1:1",
+              text = "COMBINED DAILY STREAK",
               color = Zinc300,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.SemiBold,
-              fontSize = 10.2.sp,
+              fontSize = 10.sp,
               letterSpacing = 0.8.sp,
             )
           }
-
-          Spacer(modifier = Modifier.height(7.dp))
-
+          Spacer(modifier = Modifier.height(5.dp))
           Row(verticalAlignment = Alignment.Bottom) {
             Text(
-              text = numberFormat.format(liveSteps),
+              text = "$streakDays",
               color = PureWhite,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.Bold,
-              fontSize = 33.sp,
-              lineHeight = 33.sp,
+              fontSize = 30.sp,
+              lineHeight = 30.sp,
               letterSpacing = (-1.0).sp,
-              modifier = Modifier.testTag("dashboard_live_steps_value"),
+              modifier = Modifier.testTag("dashboard_combined_streak_value"),
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-              text = "/ ${numberFormat.format(safeTargetSteps)} steps",
+              text = if (streakDays == 1) "day active" else "days active",
               color = Zinc400,
               fontFamily = InterFontFamily,
               fontWeight = FontWeight.Medium,
@@ -1670,42 +1186,422 @@ private fun DashboardPriorityStepsCard(
           }
         }
 
-        // Floating Distance Readout Chip (Matches PerMealMacroChip on Step 04)
-        Column(
+        Column(horizontalAlignment = Alignment.End) {
+          Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+              text = "READINESS ",
+              color = Zinc400,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Medium,
+              fontSize = 9.5.sp,
+              modifier = Modifier.padding(bottom = 2.dp),
+            )
+            Text(
+              text = "${(overallReadinessFraction * 100).roundToInt()}%",
+              color = if (allSixMet) StepsStart else PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 17.sp,
+            )
+          }
+          Spacer(modifier = Modifier.height(2.dp))
+          Text(
+            text = "$qualifiedCount of 6 pillars ≥$streakThresholdPercent%",
+            color = if (allSixMet) StepsStart else Zinc400,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = 9.8.sp,
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(9.dp))
+
+      DashboardSpectrumGaugeBar(
+        fillFraction = animatedReadiness,
+        thresholdFraction = streakThresholdPercent / 100f,
+        startColor = if (allSixMet) StepsStart else Zinc300,
+        midColor = if (allSixMet) StepsMid else PureWhite,
+        endColor = PureWhite,
+        barHeight = 6.5.dp,
+      )
+    }
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    // 3. REDESIGNED 3x2 PILLAR BENTO GRID (Spacious, attractive, zero congestion, not over-elaborated)
+    val stepsPct = if (targetSteps > 0) ((liveSteps.toFloat() / targetSteps) * 100f).roundToInt() else 0
+    val calPct = if (targetCalories > 0) ((loggedCalories.toFloat() / targetCalories) * 100f).roundToInt() else 0
+    val proPct = if (targetProtein > 0) ((loggedProtein.toFloat() / targetProtein) * 100f).roundToInt() else 0
+    val carbPct = if (targetCarbs > 0) ((loggedCarbs.toFloat() / targetCarbs) * 100f).roundToInt() else 0
+    val fatPct = if (targetFats > 0) ((loggedFats.toFloat() / targetFats) * 100f).roundToInt() else 0
+    val waterPct = if (targetWaterMl > 0) ((loggedWaterMl.toFloat() / targetWaterMl) * 100f).roundToInt() else 0
+
+    Column(
+      modifier = Modifier.fillMaxWidth(),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      // Row 1: STEPS • KCAL • PROTEIN
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        StreakPillarCompactCard(
+          label = "STEPS",
+          pct = stepsPct,
+          thresholdPct = streakThresholdPercent,
+          qualifies = stepsQualifies,
+          accentColor = StepsStart,
+          accentMid = StepsMid,
+          modifier = Modifier.weight(1f),
+        )
+        StreakPillarCompactCard(
+          label = "CALORIES",
+          pct = calPct,
+          thresholdPct = streakThresholdPercent,
+          qualifies = caloriesQualifies,
+          accentColor = CaloriesStart,
+          accentMid = CaloriesMid,
+          modifier = Modifier.weight(1f),
+        )
+        StreakPillarCompactCard(
+          label = "PROTEIN",
+          pct = proPct,
+          thresholdPct = streakThresholdPercent,
+          qualifies = proteinQualifies,
+          accentColor = ProteinStart,
+          accentMid = ProteinMid,
+          modifier = Modifier.weight(1f),
+        )
+      }
+
+      // Row 2: CARBS • FATS • H₂O
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        StreakPillarCompactCard(
+          label = "CARBS",
+          pct = carbPct,
+          thresholdPct = streakThresholdPercent,
+          qualifies = carbsQualifies,
+          accentColor = CarbsStart,
+          accentMid = CarbsMid,
+          modifier = Modifier.weight(1f),
+        )
+        StreakPillarCompactCard(
+          label = "FATS",
+          pct = fatPct,
+          thresholdPct = streakThresholdPercent,
+          qualifies = fatsQualifies,
+          accentColor = FatsStart,
+          accentMid = FatsMid,
+          modifier = Modifier.weight(1f),
+        )
+        StreakPillarCompactCard(
+          label = "H₂O",
+          pct = waterPct,
+          thresholdPct = streakThresholdPercent,
+          qualifies = waterQualifies,
+          accentColor = HydrationStart,
+          accentMid = HydrationMid,
+          modifier = Modifier.weight(1f),
+        )
+      }
+    }
+  }
+}
+
+/**
+ * Sleek, spacious, non-congested 3x2 Bento Pillar Card for the Streak Protocol Engine:
+ * - Row 1: Colored dot + Pillar Label (`STEPS`, `CALORIES`, etc.) on the left, and live `%` + `✓` on the right
+ * - Row 2: Luminous micro-spectrum gauge bar with the `90%` threshold gate marker
+ */
+@Composable
+private fun StreakPillarCompactCard(
+  label: String,
+  pct: Int,
+  thresholdPct: Int,
+  qualifies: Boolean,
+  accentColor: Color,
+  accentMid: Color,
+  modifier: Modifier = Modifier,
+) {
+  val barFill = (pct / 100f).coerceIn(0f, 1f)
+  val animatedFill by animateFloatAsState(
+    targetValue = barFill,
+    animationSpec = tween(durationMillis = 420, easing = SmoothOutEasing),
+    label = "pillar_${label}_fill",
+  )
+
+  Column(
+    modifier = modifier
+      .floating3DInnerTile(
+        cornerRadiusDp = 10.dp,
+        accentColor = accentColor,
+        isHighlighted = qualifies,
+      )
+      .padding(horizontal = 10.dp, vertical = 9.dp),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+      ) {
+        Box(
           modifier = Modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(Zinc950)
-            .border(1.dp, Zinc800, RoundedCornerShape(9.dp))
-            .padding(horizontal = 10.dp, vertical = 7.dp),
-          horizontalAlignment = Alignment.End,
-        ) {
+            .size(6.dp)
+            .clip(CircleShape)
+            .background(accentColor),
+        )
+        Text(
+          text = label,
+          color = if (qualifies) PureWhite else Zinc300,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = 9.5.sp,
+          letterSpacing = 0.4.sp,
+          maxLines = 1,
+        )
+      }
+
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+      ) {
+        Text(
+          text = "${pct.coerceAtMost(999)}%",
+          color = if (qualifies) accentColor else PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = 11.5.sp,
+        )
+        if (qualifies) {
+          Text(
+            text = "✓",
+            color = accentColor,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 10.5.sp,
+          )
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height(7.dp))
+
+    DashboardSpectrumGaugeBar(
+      fillFraction = animatedFill,
+      thresholdFraction = thresholdPct / 100f,
+      startColor = accentColor,
+      midColor = accentMid,
+      endColor = PureWhite,
+      barHeight = 4.5.dp,
+    )
+  }
+}
+
+// ============================================================================
+// PRIORITY #1: DAILY STEPS HERO CARD (No clunky SYNC or DISTANCE box!)
+// ============================================================================
+
+@Composable
+private fun DashboardPrimaryStepsHeroCard(
+  liveSteps: Int,
+  targetSteps: Int,
+  liveDistanceKm: Float,
+  isActivelyWalking: Boolean,
+  streakThresholdPercent: Int,
+  stepsQualifies: Boolean,
+  borderFlashProgress: Float = 0f,
+  onForceSyncSteps: () -> Unit,
+  numberFormat: NumberFormat,
+) {
+  val safeTarget = targetSteps.coerceAtLeast(500)
+  val rawFraction = liveSteps.toFloat() / safeTarget.toFloat()
+  val barFraction = rawFraction.coerceIn(0f, 1f)
+  val pctAchieved = (rawFraction * 100f).roundToInt()
+  val remainingSteps = (safeTarget - liveSteps).coerceAtLeast(0)
+
+  val animatedSteps by animateFloatAsState(
+    targetValue = liveSteps.toFloat(),
+    animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing),
+    label = "live_steps_counter",
+  )
+  val animatedBarFill by animateFloatAsState(
+    targetValue = barFraction,
+    animationSpec = tween(durationMillis = 480, easing = SmoothOutEasing),
+    label = "steps_bar_fill",
+  )
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .floating3DProtocolCard(
+        cornerRadiusDp = 18.dp,
+        topRimTint = StepsStart,
+        borderFlashProgress = borderFlashProgress,
+      )
+      .padding(16.dp)
+      .testTag("dashboard_steps_priority_card"),
+  ) {
+    // 1. Header Row: Clean tap-to-refresh live telemetry label on the right (NO boxy [ SYNC ] button!)
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(bottom = 11.dp),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        DashboardSyncedHeaderDot(
+          startColor = StepsStart,
+          endColor = StepsMid,
+        )
+        Spacer(modifier = Modifier.width(9.dp))
+        Text(
+          text = "PRIORITY 01 • DAILY STEPS",
+          color = PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.SemiBold,
+          fontSize = 11.2.sp,
+          letterSpacing = 1.0.sp,
+        )
+      }
+
+      Row(
+        modifier = Modifier
+          .clip(RoundedCornerShape(6.dp))
+          .clickable(role = Role.Button, onClick = onForceSyncSteps)
+          .padding(horizontal = 4.dp, vertical = 2.dp)
+          .testTag("dashboard_steps_sync_button"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+      ) {
+        Box(
+          modifier = Modifier
+            .size(6.dp)
+            .clip(CircleShape)
+            .background(StepsStart),
+        )
+        Text(
+          text = if (isActivelyWalking) "WALKING • $pctAchieved%" else "LIVE SYNC • $pctAchieved% ↻",
+          color = StepsStart,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = 10.sp,
+          letterSpacing = 0.4.sp,
+        )
+      }
+    }
+
+    HorizontalDivider(
+      thickness = 1.dp,
+      color = Zinc800.copy(alpha = 0.85f),
+    )
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    // 2. Floating Inner Steps + Borderless Dual-Telemetry Split Readout (NO dark box around Distance!)
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .floating3DInnerTile(
+          cornerRadiusDp = 12.dp,
+          accentColor = StepsStart,
+          isHighlighted = stepsQualifies,
+        )
+        .padding(13.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        // Left: Primary Steps Readout
+        Column(modifier = Modifier.weight(1f)) {
           Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
           ) {
             Box(
               modifier = Modifier
-                .size(5.dp)
-                .clip(CircleShape)
-                .background(StepsStart),
+                .width(4.dp)
+                .height(13.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Brush.verticalGradient(listOf(StepsStart, StepsMid))),
             )
             Text(
-              text = "DISTANCE",
-              color = Zinc400,
+              text = "LIVE PEDOMETER & FIT",
+              color = Zinc300,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.SemiBold,
-              fontSize = 9.sp,
-              letterSpacing = 0.6.sp,
+              fontSize = 10.sp,
+              letterSpacing = 0.8.sp,
             )
           }
-          Spacer(modifier = Modifier.height(3.dp))
+          Spacer(modifier = Modifier.height(6.dp))
           Row(verticalAlignment = Alignment.Bottom) {
             Text(
-              text = String.format(Locale.US, "%.2f", liveDistanceKm),
+              text = numberFormat.format(animatedSteps.roundToInt()),
               color = PureWhite,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.Bold,
-              fontSize = 15.5.sp,
+              fontSize = 32.sp,
+              lineHeight = 32.sp,
+              letterSpacing = (-1.1).sp,
+              modifier = Modifier.testTag("dashboard_live_steps_value"),
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+              text = "/ ${numberFormat.format(safeTarget)}",
+              color = Zinc400,
+              fontFamily = InterFontFamily,
+              fontWeight = FontWeight.Medium,
+              fontSize = 12.5.sp,
+              modifier = Modifier.padding(bottom = 3.dp),
+            )
+          }
+        }
+
+        // Subtle Vertical Telemetry Divider
+        Box(
+          modifier = Modifier
+            .padding(horizontal = 12.dp)
+            .width(1.dp)
+            .height(38.dp)
+            .background(
+              Brush.verticalGradient(
+                listOf(Color.Transparent, Zinc700, Color.Transparent),
+              ),
+            ),
+        )
+
+        // Right: Clean Borderless Distance Telemetry Readout
+        Column(horizontalAlignment = Alignment.End) {
+          Text(
+            text = "DISTANCE",
+            color = Zinc400,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 9.2.sp,
+            letterSpacing = 0.8.sp,
+          )
+          Spacer(modifier = Modifier.height(4.dp))
+          Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+              text = String.format(Locale.US, "%.2f", liveDistanceKm.coerceAtLeast(0f)),
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 21.sp,
+              lineHeight = 21.sp,
+              letterSpacing = (-0.5).sp,
+              modifier = Modifier.testTag("dashboard_live_distance_value"),
             )
             Spacer(modifier = Modifier.width(3.dp))
             Text(
@@ -1713,26 +1609,25 @@ private fun DashboardPriorityStepsCard(
               color = StepsStart,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.SemiBold,
-              fontSize = 10.2.sp,
+              fontSize = 11.sp,
               modifier = Modifier.padding(bottom = 1.dp),
             )
           }
         }
       }
 
-      Spacer(modifier = Modifier.height(12.dp))
+      Spacer(modifier = Modifier.height(11.dp))
 
-      // Luminous Spectrum Progress Bar with Glowing Reticle & Streak Threshold Gate
       DashboardSpectrumGaugeBar(
-        fillFraction = stepsFraction,
-        streakThresholdPercent = streakThresholdPercent,
-        gradientColors = listOf(StepsEnd, StepsMid, StepsStart, CyberCyan, PureWhite),
-        accentColor = StepsStart,
-        showThresholdMarker = true,
-        barHeight = 9.5.dp,
+        fillFraction = animatedBarFill,
+        thresholdFraction = streakThresholdPercent / 100f,
+        startColor = StepsStart,
+        midColor = StepsMid,
+        endColor = StepsEnd,
+        barHeight = 8.5.dp,
       )
 
-      Spacer(modifier = Modifier.height(8.dp))
+      Spacer(modifier = Modifier.height(7.dp))
 
       Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1743,7 +1638,7 @@ private fun DashboardPriorityStepsCard(
           text = if (remainingSteps > 0) {
             "${numberFormat.format(remainingSteps)} steps remaining to daily goal"
           } else {
-            "Daily step target achieved"
+            "Daily step target completed (+${numberFormat.format(liveSteps - safeTarget)})"
           },
           color = Zinc400,
           fontFamily = InterFontFamily,
@@ -1751,7 +1646,7 @@ private fun DashboardPriorityStepsCard(
         )
         Text(
           text = "Streak Gate ≥$streakThresholdPercent%",
-          color = if (isGoalMet) StepsStart else Zinc400,
+          color = if (stepsQualifies) StepsStart else Zinc400,
           fontFamily = JetBrainsMonoFontFamily,
           fontWeight = FontWeight.Medium,
           fontSize = 9.5.sp,
@@ -1762,8 +1657,7 @@ private fun DashboardPriorityStepsCard(
 }
 
 // ============================================================================
-// FLOATING SECTION 3: PRIORITY #2 TELEMETRY — DAILY CALORIES + 3-COLUMN MACRO BENTO
-// (Matches `DailyTargetsCommandDeck` & `CompactMacroBentoTile` in `ProtocolSummaryScreen.kt` 1:1)
+// METABOLIC ENERGY (CALORIES) & 3-COLUMN MACROS CARD (No clunky STATUS DONE box!)
 // ============================================================================
 
 @Composable
@@ -1777,14 +1671,24 @@ private fun DashboardCaloriesAndMacrosCard(
   loggedFats: Int,
   targetFats: Int,
   streakThresholdPercent: Int,
-  borderFlashProgress: Float,
+  caloriesQualifies: Boolean,
+  proteinQualifies: Boolean,
+  carbsQualifies: Boolean,
+  fatsQualifies: Boolean,
+  borderFlashProgress: Float = 0f,
   numberFormat: NumberFormat,
 ) {
-  val safeTargetCal = targetCalories.coerceAtLeast(800)
-  val calFraction = (loggedCalories.toFloat() / safeTargetCal.toFloat()).coerceIn(0f, 1f)
-  val calPct = ((loggedCalories.toFloat() / safeTargetCal.toFloat()) * 100f).roundToInt()
-  val remainingCalories = (safeTargetCal - loggedCalories).coerceAtLeast(0)
-  val isCalGateMet = calPct >= streakThresholdPercent
+  val safeCalTarget = targetCalories.coerceAtLeast(500)
+  val calRawFraction = loggedCalories.toFloat() / safeCalTarget.toFloat()
+  val calBarFraction = calRawFraction.coerceIn(0f, 1f)
+  val calPct = (calRawFraction * 100f).roundToInt()
+  val calDelta = safeCalTarget - loggedCalories
+
+  val animatedCalBar by animateFloatAsState(
+    targetValue = calBarFraction,
+    animationSpec = tween(durationMillis = 480, easing = SmoothOutEasing),
+    label = "calories_bar_fill",
+  )
 
   Column(
     modifier = Modifier
@@ -1795,9 +1699,9 @@ private fun DashboardCaloriesAndMacrosCard(
         borderFlashProgress = borderFlashProgress,
       )
       .padding(16.dp)
-      .testTag("dashboard_metabolic_macros_card"),
+      .testTag("dashboard_calories_macros_card"),
   ) {
-    // 1. Clean Ecosystem Header Row (Matches DailyTargetsCommandDeck on Step 04 — NO colored badge block!)
+    // 1. Clean Ecosystem Header Row
     Row(
       modifier = Modifier
         .fillMaxWidth()
@@ -1808,7 +1712,7 @@ private fun DashboardCaloriesAndMacrosCard(
       Row(verticalAlignment = Alignment.CenterVertically) {
         DashboardSyncedHeaderDot(
           startColor = CaloriesStart,
-          endColor = CaloriesMid,
+          endColor = CaloriesEnd,
         )
         Spacer(modifier = Modifier.width(9.dp))
         Text(
@@ -1838,21 +1742,21 @@ private fun DashboardCaloriesAndMacrosCard(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    // 2. Floating Primary Calorie Card (Exact match to `target_card_calories` in `ProtocolSummaryScreen.kt`)
+    // 2. Floating Primary Daily Energy Sub-Card (Borderless Balance Readout on right instead of STATUS DONE box)
     Column(
       modifier = Modifier
         .fillMaxWidth()
         .floating3DInnerTile(
           cornerRadiusDp = 12.dp,
           accentColor = CaloriesStart,
-          isHighlighted = isCalGateMet,
+          isHighlighted = caloriesQualifies,
         )
         .padding(13.dp),
     ) {
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
       ) {
         Column(modifier = Modifier.weight(1f)) {
           Row(
@@ -1862,7 +1766,7 @@ private fun DashboardCaloriesAndMacrosCard(
             Box(
               modifier = Modifier
                 .width(4.dp)
-                .height(14.dp)
+                .height(13.dp)
                 .clip(RoundedCornerShape(2.dp))
                 .background(Brush.verticalGradient(listOf(CaloriesStart, CaloriesMid))),
             )
@@ -1871,27 +1775,25 @@ private fun DashboardCaloriesAndMacrosCard(
               color = Zinc300,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.SemiBold,
-              fontSize = 10.2.sp,
+              fontSize = 10.sp,
               letterSpacing = 0.8.sp,
             )
           }
-
-          Spacer(modifier = Modifier.height(7.dp))
-
+          Spacer(modifier = Modifier.height(6.dp))
           Row(verticalAlignment = Alignment.Bottom) {
             Text(
               text = numberFormat.format(loggedCalories),
               color = PureWhite,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.Bold,
-              fontSize = 32.sp,
-              lineHeight = 32.sp,
+              fontSize = 29.sp,
+              lineHeight = 29.sp,
               letterSpacing = (-1.0).sp,
-              modifier = Modifier.testTag("dashboard_calories_logged_value"),
+              modifier = Modifier.testTag("dashboard_logged_calories_value"),
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-              text = "/ ${numberFormat.format(safeTargetCal)} kcal",
+              text = "/ ${numberFormat.format(safeCalTarget)} kcal",
               color = Zinc400,
               fontFamily = InterFontFamily,
               fontWeight = FontWeight.Medium,
@@ -1901,55 +1803,66 @@ private fun DashboardCaloriesAndMacrosCard(
           }
         }
 
-        Column(
+        // Subtle Vertical Divider
+        Box(
           modifier = Modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(Zinc950)
-            .border(1.dp, Zinc800, RoundedCornerShape(9.dp))
-            .padding(horizontal = 10.dp, vertical = 7.dp),
-          horizontalAlignment = Alignment.End,
-        ) {
+            .padding(horizontal = 12.dp)
+            .width(1.dp)
+            .height(38.dp)
+            .background(
+              Brush.verticalGradient(
+                listOf(Color.Transparent, Zinc700, Color.Transparent),
+              ),
+            ),
+        )
+
+        // Right: Clean Borderless Balance Readout (Replaces the clunky [ STATUS / DONE ] box)
+        Column(horizontalAlignment = Alignment.End) {
           Text(
-            text = if (remainingCalories > 0) "REMAINING" else "STATUS",
+            text = if (calDelta >= 0) "REMAINING" else "SURPLUS",
             color = Zinc400,
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 8.8.sp,
-            letterSpacing = 0.6.sp,
+            fontSize = 9.2.sp,
+            letterSpacing = 0.8.sp,
           )
-          Spacer(modifier = Modifier.height(3.dp))
+          Spacer(modifier = Modifier.height(4.dp))
           Row(verticalAlignment = Alignment.Bottom) {
             Text(
-              text = if (remainingCalories > 0) numberFormat.format(remainingCalories) else "DONE",
+              text = if (calDelta >= 0) {
+                numberFormat.format(calDelta)
+              } else {
+                "+${numberFormat.format(abs(calDelta))}"
+              },
               color = PureWhite,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.Bold,
-              fontSize = 14.5.sp,
+              fontSize = 19.sp,
+              lineHeight = 19.sp,
+              letterSpacing = (-0.5).sp,
             )
-            if (remainingCalories > 0) {
-              Spacer(modifier = Modifier.width(3.dp))
-              Text(
-                text = "kcal",
-                color = CaloriesStart,
-                fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 9.8.sp,
-                modifier = Modifier.padding(bottom = 1.dp),
-              )
-            }
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+              text = "kcal",
+              color = CaloriesStart,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.SemiBold,
+              fontSize = 10.5.sp,
+              modifier = Modifier.padding(bottom = 1.dp),
+            )
           }
         }
       }
 
-      Spacer(modifier = Modifier.height(11.dp))
+      Spacer(modifier = Modifier.height(10.dp))
 
       DashboardSpectrumGaugeBar(
-        fillFraction = calFraction,
-        streakThresholdPercent = streakThresholdPercent,
-        gradientColors = listOf(CaloriesEnd, CaloriesMid, CaloriesStart, Color(0xFFFFF2DC), PureWhite),
-        accentColor = CaloriesStart,
-        showThresholdMarker = true,
-        barHeight = 9.dp,
+        fillFraction = animatedCalBar,
+        thresholdFraction = streakThresholdPercent / 100f,
+        startColor = CaloriesEnd,
+        midColor = CaloriesStart,
+        endColor = CarbsStart,
+        barHeight = 8.dp,
       )
 
       Spacer(modifier = Modifier.height(7.dp))
@@ -1960,14 +1873,14 @@ private fun DashboardCaloriesAndMacrosCard(
         verticalAlignment = Alignment.CenterVertically,
       ) {
         Text(
-          text = "Target ${numberFormat.format(safeTargetCal)} kcal/day",
+          text = "Daily Target ${numberFormat.format(safeCalTarget)} kcal",
           color = Zinc400,
           fontFamily = JetBrainsMonoFontFamily,
-          fontSize = 9.6.sp,
+          fontSize = 10.sp,
         )
         Text(
           text = "Streak Gate ≥$streakThresholdPercent%",
-          color = if (isCalGateMet) CaloriesStart else Zinc400,
+          color = if (caloriesQualifies) CaloriesStart else Zinc400,
           fontFamily = JetBrainsMonoFontFamily,
           fontWeight = FontWeight.Medium,
           fontSize = 9.5.sp,
@@ -1977,80 +1890,86 @@ private fun DashboardCaloriesAndMacrosCard(
 
     Spacer(modifier = Modifier.height(10.dp))
 
-    // 3. 3-Column Floating Macro Bento Grid (Matches `CompactMacroBentoTile` in `ProtocolSummaryScreen.kt` 1:1)
+    // 3. 3-Column Floating Macro Bento Grid: Protein, Carbs, Fats
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
       DashboardMacroBentoTile(
-        title = "Protein",
+        label = "Protein",
         loggedGrams = loggedProtein,
         targetGrams = targetProtein,
         streakThresholdPercent = streakThresholdPercent,
-        accentColor = ProteinStart,
-        gradientColors = listOf(ProteinEnd, ProteinMid, ProteinStart, PureWhite),
-        testTag = "dashboard_macro_protein",
+        qualifies = proteinQualifies,
+        startColor = ProteinStart,
+        midColor = ProteinMid,
+        endColor = ProteinEnd,
+        testTag = "dashboard_macro_protein_tile",
         modifier = Modifier.weight(1f),
       )
 
       DashboardMacroBentoTile(
-        title = "Carbs",
+        label = "Carbs",
         loggedGrams = loggedCarbs,
         targetGrams = targetCarbs,
         streakThresholdPercent = streakThresholdPercent,
-        accentColor = CarbsStart,
-        gradientColors = listOf(CarbsEnd, CarbsMid, CarbsStart, PureWhite),
-        testTag = "dashboard_macro_carbs",
+        qualifies = carbsQualifies,
+        startColor = CarbsStart,
+        midColor = CarbsMid,
+        endColor = CarbsEnd,
+        testTag = "dashboard_macro_carbs_tile",
         modifier = Modifier.weight(1f),
       )
 
       DashboardMacroBentoTile(
-        title = "Fats",
+        label = "Fats",
         loggedGrams = loggedFats,
         targetGrams = targetFats,
         streakThresholdPercent = streakThresholdPercent,
-        accentColor = FatsStart,
-        gradientColors = listOf(FatsEnd, FatsMid, FatsStart, PureWhite),
-        testTag = "dashboard_macro_fats",
+        qualifies = fatsQualifies,
+        startColor = FatsStart,
+        midColor = FatsMid,
+        endColor = FatsEnd,
+        testTag = "dashboard_macro_fats_tile",
         modifier = Modifier.weight(1f),
       )
     }
   }
 }
 
-/**
- * 1:1 visual match to `CompactMacroBentoTile` in `ProtocolSummaryScreen.kt` (lines 1966–2072):
- * - Uniform vertical pill indicator (`3.5.dp x 11.dp`) + `title` on the left
- * - Clean colored percentage text (`color = accentColor`) on the right — NO bulky colored block!
- * - Large `PureWhite` logged grams + `/target g`
- * - Luminous spectrum progress bar + bottom target status line
- */
 @Composable
 private fun DashboardMacroBentoTile(
-  title: String,
+  label: String,
   loggedGrams: Int,
   targetGrams: Int,
   streakThresholdPercent: Int,
-  accentColor: Color,
-  gradientColors: List<Color>,
+  qualifies: Boolean,
+  startColor: Color,
+  midColor: Color,
+  endColor: Color,
   testTag: String,
   modifier: Modifier = Modifier,
 ) {
-  val safeTarget = targetGrams.coerceAtLeast(10)
+  val safeTarget = targetGrams.coerceAtLeast(1)
   val rawFraction = loggedGrams.toFloat() / safeTarget.toFloat()
   val barFraction = rawFraction.coerceIn(0f, 1f)
   val pct = (rawFraction * 100f).roundToInt()
-  val isPassed = pct >= streakThresholdPercent
-  val remainingGrams = (safeTarget - loggedGrams).coerceAtLeast(0)
+  val remGrams = (safeTarget - loggedGrams).coerceAtLeast(0)
+
+  val animatedFill by animateFloatAsState(
+    targetValue = barFraction,
+    animationSpec = tween(durationMillis = 460, easing = SmoothOutEasing),
+    label = "${label}_macro_fill",
+  )
 
   Column(
     modifier = modifier
       .floating3DInnerTile(
-        cornerRadiusDp = 11.dp,
-        accentColor = accentColor,
-        isHighlighted = isPassed,
+        cornerRadiusDp = 12.dp,
+        accentColor = startColor,
+        isHighlighted = qualifies,
       )
-      .padding(10.5.dp)
+      .padding(11.dp)
       .testTag(testTag),
   ) {
     Row(
@@ -2067,25 +1986,24 @@ private fun DashboardMacroBentoTile(
             .width(3.5.dp)
             .height(11.dp)
             .clip(RoundedCornerShape(2.dp))
-            .background(accentColor),
+            .background(Brush.verticalGradient(listOf(startColor, midColor))),
         )
         Text(
-          text = title,
-          color = Zinc300,
+          text = label,
+          color = Zinc200,
           fontFamily = InterFontFamily,
           fontWeight = FontWeight.SemiBold,
           fontSize = 11.5.sp,
           maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
         )
       }
 
       Text(
-        text = "$pct%",
-        color = accentColor,
+        text = "${pct.coerceAtMost(999)}%",
+        color = startColor,
         fontFamily = JetBrainsMonoFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 10.2.sp,
+        fontSize = 9.8.sp,
       )
     }
 
@@ -2097,66 +2015,99 @@ private fun DashboardMacroBentoTile(
         color = PureWhite,
         fontFamily = JetBrainsMonoFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 20.sp,
-        maxLines = 1,
+        fontSize = 18.sp,
+        lineHeight = 18.sp,
       )
-      Spacer(modifier = Modifier.width(2.dp))
       Text(
-        text = "/${safeTarget}g",
+        text = " /${safeTarget}g",
         color = Zinc400,
         fontFamily = JetBrainsMonoFontFamily,
-        fontSize = 10.5.sp,
-        modifier = Modifier.padding(bottom = 2.dp),
-        maxLines = 1,
+        fontSize = 10.sp,
+        modifier = Modifier.padding(bottom = 1.dp),
       )
     }
 
     Spacer(modifier = Modifier.height(7.dp))
 
     DashboardSpectrumGaugeBar(
-      fillFraction = barFraction,
-      streakThresholdPercent = streakThresholdPercent,
-      gradientColors = gradientColors,
-      accentColor = accentColor,
-      showThresholdMarker = true,
-      barHeight = 6.5.dp,
+      fillFraction = animatedFill,
+      thresholdFraction = streakThresholdPercent / 100f,
+      startColor = startColor,
+      midColor = midColor,
+      endColor = endColor,
+      barHeight = 5.5.dp,
     )
 
     Spacer(modifier = Modifier.height(5.dp))
 
     Text(
-      text = if (remainingGrams > 0) "${remainingGrams}g left" else "Goal ≥$streakThresholdPercent% met",
-      color = if (isPassed) accentColor else Zinc400,
+      text = if (remGrams > 0) "${remGrams}g left" else "Goal ≥$streakThresholdPercent% met",
+      color = if (qualifies) startColor else Zinc400,
       fontFamily = JetBrainsMonoFontFamily,
-      fontWeight = FontWeight.Medium,
       fontSize = 9.sp,
       maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
     )
   }
 }
 
-/**
- * Luminous 3D Spectrum Progress Gauge Bar matching `AnimatedBmiSpectrumGauge` (Step 02)
- * and `SafeRangeTelemetryBar` (Step 04):
- * - Deep recessed capsule track with subtle 25% / 50% / 75% calibration micro-ticks
- * - Glowing color aura (`barAuraPaint`) + multi-stop gradient fill + specular top glass sheen
- * - Glowing reticle beacon at the current fill tip (even at 0%, a crisp ready-beacon sits at the launch origin so the bar never looks dead or flat)
- */
+// ============================================================================
+// SHARED LUMINOUS SPECTRUM GAUGE BAR & HEADER DOT
+// ============================================================================
+
+@Composable
+internal fun DashboardSyncedHeaderDot(
+  startColor: Color,
+  endColor: Color,
+) {
+  Spacer(
+    modifier = Modifier
+      .size(8.dp)
+      .drawWithCache {
+        val radius = size.minDimension / 2f
+        val glowPaint = Paint().apply {
+          isAntiAlias = true
+          asFrameworkPaint().apply {
+            color = android.graphics.Color.argb(
+              110,
+              (startColor.red * 255).roundToInt(),
+              (startColor.green * 255).roundToInt(),
+              (startColor.blue * 255).roundToInt(),
+            )
+            maskFilter = BlurMaskFilter(
+              safeDashboardBlur(radius * 1.3f),
+              BlurMaskFilter.Blur.NORMAL,
+            )
+          }
+        }
+        val dotBrush = Brush.linearGradient(colors = listOf(startColor, endColor))
+
+        onDrawBehind {
+          drawIntoCanvas { canvas ->
+            canvas.drawCircle(center, radius * 1.3f, glowPaint)
+          }
+          drawCircle(
+            brush = dotBrush,
+            radius = radius,
+            center = center,
+          )
+        }
+      },
+  )
+}
+
 @Composable
 internal fun DashboardSpectrumGaugeBar(
   fillFraction: Float,
-  streakThresholdPercent: Int,
-  gradientColors: List<Color>,
-  accentColor: Color = PureWhite,
-  showThresholdMarker: Boolean,
-  barHeight: Dp,
+  thresholdFraction: Float,
+  startColor: Color,
+  midColor: Color,
+  endColor: Color,
+  barHeight: Dp = 7.dp,
   modifier: Modifier = Modifier,
 ) {
-  val animatedFraction by animateFloatAsState(
-    targetValue = fillFraction.coerceIn(0f, 1f),
-    animationSpec = tween(durationMillis = 420, easing = DashboardEaseOut),
-    label = "dashboard_spectrum_bar_fill",
-  )
+  val clampedFill = fillFraction.coerceIn(0f, 1f)
+  val clampedThreshold = thresholdFraction.coerceIn(0.5f, 1f)
 
   Spacer(
     modifier = modifier
@@ -2167,35 +2118,41 @@ internal fun DashboardSpectrumGaugeBar(
         val h = size.height
         val corner = CornerRadius(h / 2f, h / 2f)
 
-        val barAuraPaint = Paint().apply {
+        val auraPaint = Paint().apply {
           isAntiAlias = true
           asFrameworkPaint().apply {
             color = android.graphics.Color.argb(
-              110,
-              (accentColor.red * 255).roundToInt(),
-              (accentColor.green * 255).roundToInt(),
-              (accentColor.blue * 255).roundToInt(),
+              95,
+              (startColor.red * 255).roundToInt(),
+              (startColor.green * 255).roundToInt(),
+              (startColor.blue * 255).roundToInt(),
             )
-            maskFilter = BlurMaskFilter(safeDashboardBlur(h * 1.15f), BlurMaskFilter.Blur.NORMAL)
+            maskFilter = BlurMaskFilter(
+              safeDashboardBlur(h * 1.1f),
+              BlurMaskFilter.Blur.NORMAL,
+            )
           }
         }
-        val reticleHaloPaint = Paint().apply {
+
+        val reticlePaint = Paint().apply {
           isAntiAlias = true
           asFrameworkPaint().apply {
             color = android.graphics.Color.argb(
-              175,
-              (accentColor.red * 255).roundToInt(),
-              (accentColor.green * 255).roundToInt(),
-              (accentColor.blue * 255).roundToInt(),
+              165,
+              (startColor.red * 255).roundToInt(),
+              (startColor.green * 255).roundToInt(),
+              (startColor.blue * 255).roundToInt(),
             )
-            maskFilter = BlurMaskFilter(safeDashboardBlur(h * 0.95f), BlurMaskFilter.Blur.NORMAL)
+            maskFilter = BlurMaskFilter(
+              safeDashboardBlur(h * 0.9f),
+              BlurMaskFilter.Blur.NORMAL,
+            )
           }
         }
 
         onDrawBehind {
           if (w <= 2f || h <= 1f) return@onDrawBehind
 
-          // 1. Recessed 3D Capsule Track
           drawRoundRect(
             color = RecessedTrackFill,
             topLeft = Offset.Zero,
@@ -2207,39 +2164,29 @@ internal fun DashboardSpectrumGaugeBar(
             topLeft = Offset.Zero,
             size = Size(w, h),
             cornerRadius = corner,
-            style = Stroke(width = 1.dp.toPx()),
+            style = Stroke(width = 0.9.dp.toPx()),
           )
 
-          // Subtle calibration micro-ticks along the track
-          for (step in 1..3) {
-            val tickX = w * (step * 0.25f)
+          for (tick in 1..3) {
+            val tickX = w * (tick * 0.25f)
             drawLine(
-              color = Zinc800.copy(alpha = 0.75f),
-              start = Offset(tickX, h * 0.22f),
-              end = Offset(tickX, h * 0.78f),
+              color = PureWhite.copy(alpha = 0.06f),
+              start = Offset(tickX, h * 0.2f),
+              end = Offset(tickX, h * 0.8f),
               strokeWidth = 1.dp.toPx(),
             )
           }
 
-          // 2. Luminous Fill + Aura (Always keeps a minimum glowing launch capsule so 0% still looks alive)
-          val visualFraction = max(animatedFraction, 0.028f)
-          val fillW = (w * visualFraction).coerceIn(h, w)
+          val visualFill = max(clampedFill, 0.028f)
+          val fillW = (w * visualFill).coerceIn(h, w)
 
           drawIntoCanvas { canvas ->
-            canvas.drawRoundRect(
-              0f,
-              0f,
-              fillW,
-              h,
-              h / 2f,
-              h / 2f,
-              barAuraPaint,
-            )
+            canvas.drawRoundRect(0f, 0f, fillW, h, h / 2f, h / 2f, auraPaint)
           }
 
           drawRoundRect(
             brush = Brush.horizontalGradient(
-              colors = gradientColors,
+              colors = listOf(startColor, midColor, endColor),
               startX = 0f,
               endX = fillW.coerceAtLeast(h * 2f),
             ),
@@ -2248,39 +2195,25 @@ internal fun DashboardSpectrumGaugeBar(
             cornerRadius = corner,
           )
 
-          // Top specular glass highlight on the fill bar
-          drawRoundRect(
-            brush = Brush.verticalGradient(
-              colors = listOf(PureWhite.copy(alpha = 0.42f), Color.Transparent),
-              startY = 0f,
-              endY = h * 0.58f,
-            ),
-            topLeft = Offset.Zero,
-            size = Size(fillW, h),
-            cornerRadius = corner,
-          )
-
-          // 3. Crisp Streak Gate Tick (X%)
-          if (showThresholdMarker) {
-            val gateX = (w * (streakThresholdPercent / 100f)).coerceIn(6f, w - 6f)
+          if (clampedThreshold < 0.995f) {
+            val gateX = (w * clampedThreshold).coerceIn(4f, w - 4f)
             drawLine(
-              color = PureWhite.copy(alpha = 0.80f),
+              color = PureWhite.copy(alpha = 0.72f),
               start = Offset(gateX, 0f),
               end = Offset(gateX, h),
-              strokeWidth = 1.5.dp.toPx(),
+              strokeWidth = 1.3.dp.toPx(),
               cap = StrokeCap.Round,
             )
           }
 
-          // 4. Glowing Reticle Beacon at the Fill Tip (Matches PersonalDetailsScreen & ProfileCalibrationScreen)
           val tipX = (fillW - h * 0.45f).coerceIn(h * 0.5f, w - h * 0.5f)
           val tipCenter = Offset(tipX, h / 2f)
           drawIntoCanvas { canvas ->
-            canvas.drawCircle(tipCenter, h * 0.72f, reticleHaloPaint)
+            canvas.drawCircle(tipCenter, h * 0.65f, reticlePaint)
           }
           drawCircle(
             color = PureWhite,
-            radius = (h * 0.28f).coerceAtLeast(2.2f),
+            radius = (h * 0.26f).coerceAtLeast(1.8f),
             center = tipCenter,
           )
         }

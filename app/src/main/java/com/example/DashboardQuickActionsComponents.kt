@@ -118,6 +118,8 @@ private val Zinc900 = Color(0xFF18181B)
 private val Zinc950 = Color(0xFF09090B)
 private val RecessedTrackFill = Color(0xFF07070A)
 private val RecessedTrackBorder = Color(0xFF27272E)
+private val SolidDangerRed = Color(0xFFEF4444)
+private val SolidDangerRedBorder = Color(0xFFF87171)
 
 private val SmoothOutEasing = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
 
@@ -485,22 +487,24 @@ fun DashboardQuickActionsHubCard(
 
               Box(
                 modifier = Modifier
-                  .size(24.dp)
-                  .clip(RoundedCornerShape(6.dp))
-                  .background(Zinc950)
-                  .border(1.dp, Zinc800, RoundedCornerShape(6.dp))
-                  .clickable {
+                  .size(25.dp)
+                  .clip(RoundedCornerShape(7.dp))
+                  .background(SolidDangerRed)
+                  .border(1.dp, SolidDangerRedBorder, RoundedCornerShape(7.dp))
+                  .clickable(role = Role.Button) {
                     haptics.tick()
                     onDeleteSavedQuickItem(item.id)
-                  },
+                  }
+                  .testTag("delete_saved_quick_item_${item.id}"),
                 contentAlignment = Alignment.Center,
               ) {
                 Text(
                   text = "×",
-                  color = Zinc300,
+                  color = PureWhite,
                   fontFamily = JetBrainsMonoFontFamily,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 13.sp,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 14.sp,
+                  lineHeight = 14.sp,
                 )
               }
             }
@@ -732,10 +736,10 @@ private fun QuickActionPopupDialog(
 
           Box(
             modifier = Modifier
-              .size(32.dp)
+              .size(30.dp)
               .clip(RoundedCornerShape(8.dp))
-              .background(Zinc900)
-              .border(1.dp, Zinc700, RoundedCornerShape(8.dp))
+              .background(SolidDangerRed)
+              .border(1.dp, SolidDangerRedBorder, RoundedCornerShape(8.dp))
               .clickable(role = Role.Button, onClick = onDismiss)
               .testTag("quick_action_modal_close"),
             contentAlignment = Alignment.Center,
@@ -744,8 +748,9 @@ private fun QuickActionPopupDialog(
               text = "×",
               color = PureWhite,
               fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.Bold,
+              fontWeight = FontWeight.ExtraBold,
               fontSize = 15.sp,
+              lineHeight = 15.sp,
             )
           }
         }
@@ -1500,10 +1505,11 @@ fun DashboardHydrationCommandCard(
         )
         .padding(13.dp),
     ) {
+      // Dual-Telemetry Split Readout (No clunky right-side box!)
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
       ) {
         Column(modifier = Modifier.weight(1f)) {
           Row(
@@ -1522,19 +1528,19 @@ fun DashboardHydrationCommandCard(
               color = Zinc300,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.SemiBold,
-              fontSize = 10.2.sp,
+              fontSize = 10.sp,
               letterSpacing = 0.8.sp,
             )
           }
-          Spacer(modifier = Modifier.height(7.dp))
+          Spacer(modifier = Modifier.height(6.dp))
           Row(verticalAlignment = Alignment.Bottom) {
             Text(
               text = numberFormat.format(loggedWaterMl),
               color = PureWhite,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.Bold,
-              fontSize = 32.sp,
-              lineHeight = 32.sp,
+              fontSize = 31.sp,
+              lineHeight = 31.sp,
               letterSpacing = (-1.0).sp,
               modifier = Modifier.testTag("hydration_current_ml_text"),
             )
@@ -1544,18 +1550,31 @@ fun DashboardHydrationCommandCard(
               color = Zinc400,
               fontFamily = InterFontFamily,
               fontWeight = FontWeight.Medium,
-              fontSize = 12.5.sp,
+              fontSize = 12.2.sp,
               modifier = Modifier.padding(bottom = 3.dp),
             )
           }
         }
 
-        Column(
+        // Sleek Vertical Telemetry Divider
+        Box(
           modifier = Modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(Zinc950)
-            .border(1.dp, Zinc800, RoundedCornerShape(9.dp))
-            .padding(horizontal = 10.dp, vertical = 7.dp),
+            .padding(horizontal = 12.dp)
+            .width(1.dp)
+            .height(38.dp)
+            .background(
+              Brush.verticalGradient(
+                colors = listOf(
+                  Color.Transparent,
+                  Zinc700,
+                  Color.Transparent,
+                ),
+              ),
+            ),
+        )
+
+        // Unboxed Right Telemetry Readout (Glasses Equivalent)
+        Column(
           horizontalAlignment = Alignment.End,
         ) {
           Row(
@@ -1569,7 +1588,7 @@ fun DashboardHydrationCommandCard(
                 .background(HydrationStart),
             )
             Text(
-              text = "250ML GLASSES",
+              text = "GLASSES (250ML)",
               color = Zinc400,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.SemiBold,
@@ -1577,14 +1596,25 @@ fun DashboardHydrationCommandCard(
               letterSpacing = 0.5.sp,
             )
           }
-          Spacer(modifier = Modifier.height(3.dp))
-          Text(
-            text = String.format(Locale.US, "%.1f / %.1f", glassesDone, glassesTarget),
-            color = PureWhite,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp,
-          )
+          Spacer(modifier = Modifier.height(4.dp))
+          Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+              text = String.format(Locale.US, "%.1f", glassesDone),
+              color = HydrationStart,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 17.5.sp,
+              lineHeight = 17.5.sp,
+            )
+            Text(
+              text = String.format(Locale.US, " / %.1f", glassesTarget),
+              color = Zinc400,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Medium,
+              fontSize = 11.sp,
+              modifier = Modifier.padding(bottom = 1.dp),
+            )
+          }
         }
       }
 
@@ -2103,6 +2133,11 @@ fun DashboardTodayTimelineSection(
             DashboardEntryType.MEAL -> StepsStart
             DashboardEntryType.SINGLE_ITEM -> CaloriesStart
           }
+          val compactTypeTag = when (entry.type) {
+            DashboardEntryType.HYDRATION -> "H₂O"
+            DashboardEntryType.MEAL -> "MEAL"
+            DashboardEntryType.SINGLE_ITEM -> "ITEM"
+          }
 
           Row(
             modifier = Modifier
@@ -2116,114 +2151,137 @@ fun DashboardTodayTimelineSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
           ) {
-            Column(modifier = Modifier.weight(1f)) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            // Left: Chronological Node + Vertical Accent Spine + Title/Telemetry
+            Row(
+              modifier = Modifier.weight(1f),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+              // Sleek Vertical Timeline Node Indicator
+              Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
               ) {
                 Box(
                   modifier = Modifier
-                    .width(3.dp)
-                    .height(11.dp)
-                    .clip(RoundedCornerShape(1.5.dp))
+                    .size(7.dp)
+                    .clip(CircleShape)
                     .background(entryAccent),
                 )
-
+                Spacer(modifier = Modifier.height(3.dp))
                 Box(
                   modifier = Modifier
-                    .clip(RoundedCornerShape(5.dp))
-                    .background(Zinc950)
-                    .border(0.8.dp, Zinc800, RoundedCornerShape(5.dp))
-                    .padding(horizontal = 6.5.dp, vertical = 2.dp),
+                    .width(2.dp)
+                    .height(18.dp)
+                    .clip(RoundedCornerShape(1.dp))
+                    .background(
+                      Brush.verticalGradient(
+                        colors = listOf(entryAccent.copy(alpha = 0.85f), entryAccent.copy(alpha = 0.15f)),
+                      ),
+                    ),
+                )
+              }
+
+              Column(modifier = Modifier.weight(1f)) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
                   Text(
-                    text = entry.formattedTimeAmPm,
+                    text = entry.title,
                     color = PureWhite,
+                    fontFamily = InterFontFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                  )
+
+                  Text(
+                    text = "• $compactTypeTag",
+                    color = entryAccent,
                     fontFamily = JetBrainsMonoFontFamily,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 9.5.sp,
+                    fontSize = 9.2.sp,
+                    letterSpacing = 0.5.sp,
                   )
                 }
 
-                // Clean colored category label without any bulky box
+                Spacer(modifier = Modifier.height(3.dp))
+
+                val subLine = if (entry.type == DashboardEntryType.HYDRATION) {
+                  "+${numberFormat.format(entry.hydrationMl)} ml cellular hydration"
+                } else {
+                  val macroSummary = "+${numberFormat.format(entry.caloriesKcal)} kcal • ${entry.proteinGrams}g P • ${entry.carbsGrams}g C • ${entry.fatsGrams}g F"
+                  if (entry.subtitle.isNotBlank()) "$macroSummary (${entry.subtitle})" else macroSummary
+                }
                 Text(
-                  text = entry.type.badgeLabel,
-                  color = entryAccent,
+                  text = subLine,
+                  color = Zinc300,
                   fontFamily = JetBrainsMonoFontFamily,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 9.2.sp,
-                  letterSpacing = 0.5.sp,
+                  fontSize = 10.sp,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
                 )
               }
-
-              Spacer(modifier = Modifier.height(5.dp))
-
-              Text(
-                text = entry.title,
-                color = PureWhite,
-                fontFamily = InterFontFamily,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 13.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-              )
-
-              val subLine = if (entry.type == DashboardEntryType.HYDRATION) {
-                "+${numberFormat.format(entry.hydrationMl)} ml H₂O"
-              } else {
-                val macroSummary = "+${numberFormat.format(entry.caloriesKcal)} kcal • ${entry.proteinGrams}g P • ${entry.carbsGrams}g C • ${entry.fatsGrams}g F"
-                if (entry.subtitle.isNotBlank()) "$macroSummary (${entry.subtitle})" else macroSummary
-              }
-              Text(
-                text = subLine,
-                color = Zinc300,
-                fontFamily = JetBrainsMonoFontFamily,
-                fontSize = 10.2.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-              )
             }
 
             Spacer(modifier = Modifier.width(10.dp))
 
-            Box(
-              modifier = Modifier
-                .size(38.dp)
-                .clip(RoundedCornerShape(9.dp))
-                .background(Zinc950)
-                .border(1.dp, Zinc800, RoundedCornerShape(9.dp))
-                .clickable(role = Role.Button) {
-                  haptics.warning()
-                  onDeleteEntry(entry)
-                }
-                .testTag("timeline_delete_${entry.id}"),
-              contentAlignment = Alignment.Center,
+            // Right: Clean Monospace Timestamp + Solid Red Delete Button
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(9.dp),
             ) {
-              Canvas(modifier = Modifier.size(14.dp)) {
-                val w = size.width
-                val h = size.height
-                val stroke = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-                drawLine(
-                  color = PureWhite,
-                  start = Offset(w * 0.18f, h * 0.24f),
-                  end = Offset(w * 0.82f, h * 0.24f),
-                  strokeWidth = stroke.width,
-                  cap = StrokeCap.Round,
-                )
-                drawLine(
-                  color = PureWhite,
-                  start = Offset(w * 0.38f, h * 0.14f),
-                  end = Offset(w * 0.62f, h * 0.14f),
-                  strokeWidth = stroke.width,
-                  cap = StrokeCap.Round,
-                )
-                val body = Path().apply {
-                  moveTo(w * 0.26f, h * 0.28f)
-                  lineTo(w * 0.32f, h * 0.86f)
-                  lineTo(w * 0.68f, h * 0.86f)
-                  lineTo(w * 0.74f, h * 0.28f)
+              Text(
+                text = entry.formattedTimeAmPm,
+                color = Zinc400,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 9.8.sp,
+                letterSpacing = 0.3.sp,
+              )
+
+              Box(
+                modifier = Modifier
+                  .size(34.dp)
+                  .clip(RoundedCornerShape(8.dp))
+                  .background(SolidDangerRed)
+                  .border(1.dp, SolidDangerRedBorder, RoundedCornerShape(8.dp))
+                  .clickable(role = Role.Button) {
+                    haptics.warning()
+                    onDeleteEntry(entry)
+                  }
+                  .testTag("timeline_delete_${entry.id}"),
+                contentAlignment = Alignment.Center,
+              ) {
+                Canvas(modifier = Modifier.size(14.dp)) {
+                  val w = size.width
+                  val h = size.height
+                  val stroke = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                  drawLine(
+                    color = PureWhite,
+                    start = Offset(w * 0.18f, h * 0.24f),
+                    end = Offset(w * 0.82f, h * 0.24f),
+                    strokeWidth = stroke.width,
+                    cap = StrokeCap.Round,
+                  )
+                  drawLine(
+                    color = PureWhite,
+                    start = Offset(w * 0.38f, h * 0.14f),
+                    end = Offset(w * 0.62f, h * 0.14f),
+                    strokeWidth = stroke.width,
+                    cap = StrokeCap.Round,
+                  )
+                  val body = Path().apply {
+                    moveTo(w * 0.26f, h * 0.28f)
+                    lineTo(w * 0.32f, h * 0.86f)
+                    lineTo(w * 0.68f, h * 0.86f)
+                    lineTo(w * 0.74f, h * 0.28f)
+                  }
+                  drawPath(path = body, color = PureWhite, style = stroke)
                 }
-                drawPath(path = body, color = PureWhite, style = stroke)
               }
             }
           }
