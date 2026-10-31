@@ -147,9 +147,15 @@ class MainActivity : ComponentActivity() {
       statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
       navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
     )
+    val action = intent?.action.orEmpty()
+    val launchedFromHealthConnect = action == "androidx.health.ACTION_SHOW_ONBOARDING" ||
+      action == "android.health.connect.action.SHOW_ONBOARDING" ||
+      action == "androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" ||
+      action == "android.intent.action.VIEW_PERMISSION_USAGE"
+
     setContent {
       MyApplicationTheme {
-        BioSyncApp()
+        BioSyncApp(launchedFromHealthConnect = launchedFromHealthConnect)
       }
     }
   }
@@ -158,13 +164,19 @@ class MainActivity : ComponentActivity() {
 private fun safeBlurRadius(radius: Float): Float = radius.coerceAtLeast(0.5f)
 
 @Composable
-fun BioSyncApp() {
+fun BioSyncApp(
+  launchedFromHealthConnect: Boolean = false,
+) {
   val context = LocalContext.current
   val initialStored = remember { BioSyncLocalStore.load(context) }
 
   // 0 = Welcome, 1 = Profile (Step 01 of 04), 2 = Personal Details (Step 02 of 04),
-  // 3 = Blueprint (Step 03 of 04)
-  var currentStep by rememberSaveable { mutableIntStateOf(0) }
+  // 3 = Blueprint (Step 03 of 04), 4 = Protocol Summary (Step 04 of 04), 5 = Live Dashboard
+  var currentStep by rememberSaveable {
+    mutableIntStateOf(if (launchedFromHealthConnect && initialStored.protocolLockedIn) 4 else 0)
+  }
+  var isQuickEditMode by rememberSaveable { mutableStateOf(false) }
+  var quickEditFocusSection by rememberSaveable { mutableStateOf<String?>(null) }
 
   // Persisted Step 01 Profile State
   var subjectName by rememberSaveable { mutableStateOf(initialStored.subjectName) }
@@ -192,7 +204,6 @@ fun BioSyncApp() {
   var selectedExperienceLevelName by rememberSaveable { mutableStateOf(initialStored.experienceLevel.name) }
   var selectedTargetPaceName by rememberSaveable { mutableStateOf(initialStored.targetPace.name) }
   var selectedDayOneName by rememberSaveable { mutableStateOf(initialStored.dayOne.name) }
-  var selectedScheduleCadenceName by rememberSaveable { mutableStateOf(initialStored.scheduleCadence.name) }
   var selectedMealFrequencyName by rememberSaveable { mutableStateOf(initialStored.mealFrequency.name) }
   var caffeineAlcoholYes by rememberSaveable { mutableStateOf(initialStored.caffeineAlcoholYes) }
   var selectedSodiumFrequencyName by rememberSaveable { mutableStateOf(initialStored.sodiumFrequency.name) }
@@ -210,6 +221,8 @@ fun BioSyncApp() {
   var customHydrationMl by rememberSaveable { mutableIntStateOf(initialStored.customHydrationMl) }
   var customStepsCount by rememberSaveable { mutableIntStateOf(initialStored.customStepsCount) }
   var protocolLockedIn by rememberSaveable { mutableStateOf(initialStored.protocolLockedIn) }
+  var protocolLockedAtEpochMillis by rememberSaveable { mutableStateOf(initialStored.protocolLockedAtEpochMillis) }
+  var dayOneAnchorStartEpochMillis by rememberSaveable { mutableStateOf(initialStored.dayOneAnchorStartEpochMillis) }
 
   val currentHeightUnit = remember(selectedHeightUnitName) {
     runCatching { HeightUnit.valueOf(selectedHeightUnitName) }.getOrDefault(HeightUnit.CM)
@@ -219,7 +232,7 @@ fun BioSyncApp() {
   }
   val currentActivityLevel = remember(selectedActivityLevelName) {
     runCatching { ActivityLevelOption.valueOf(selectedActivityLevelName) }
-      .getOrDefault(ActivityLevelOption.MODERATE)
+      .getOrDefault(ActivityLevelOption.SEDENTARY)
   }
   val currentWorkoutDays = remember(selectedWorkoutDaysCsv, currentActivityLevel) {
     if (currentActivityLevel == ActivityLevelOption.SEDENTARY) {
@@ -262,10 +275,6 @@ fun BioSyncApp() {
     runCatching { DayOfWeekOption.valueOf(selectedDayOneName) }
       .getOrDefault(DayOfWeekOption.MONDAY)
   }
-  val currentScheduleCadence = remember(selectedScheduleCadenceName) {
-    runCatching { ScheduleCadenceOption.valueOf(selectedScheduleCadenceName) }
-      .getOrDefault(ScheduleCadenceOption.UNIFORM_DAILY)
-  }
   val currentMealFrequency = remember(selectedMealFrequencyName) {
     runCatching { MealFrequencyOption.valueOf(selectedMealFrequencyName) }
       .getOrDefault(MealFrequencyOption.MEALS_3)
@@ -303,7 +312,6 @@ fun BioSyncApp() {
     currentExperienceLevel,
     currentTargetPace,
     currentDayOne,
-    currentScheduleCadence,
     currentMealFrequency,
     caffeineAlcoholYes,
     currentSodiumFrequency,
@@ -319,6 +327,8 @@ fun BioSyncApp() {
     customHydrationMl,
     customStepsCount,
     protocolLockedIn,
+    protocolLockedAtEpochMillis,
+    dayOneAnchorStartEpochMillis,
   ) {
     BioSyncLocalStore.save(
       context = context,
@@ -342,7 +352,6 @@ fun BioSyncApp() {
         experienceLevel = currentExperienceLevel,
         targetPace = currentTargetPace,
         dayOne = currentDayOne,
-        scheduleCadence = currentScheduleCadence,
         mealFrequency = currentMealFrequency,
         caffeineAlcoholYes = caffeineAlcoholYes,
         sodiumFrequency = currentSodiumFrequency,
@@ -358,9 +367,18 @@ fun BioSyncApp() {
         customHydrationMl = customHydrationMl,
         customStepsCount = customStepsCount,
         protocolLockedIn = protocolLockedIn,
+        protocolLockedAtEpochMillis = protocolLockedAtEpochMillis,
+        dayOneAnchorStartEpochMillis = dayOneAnchorStartEpochMillis,
+        decidedDailyStepsGoal = customStepsCount,
       ),
     )
   }
+
+  // Keep internal Health Connect & hardware step sensor sync active whenever permissions are granted or launched from Health Connect
+  rememberBioSyncStepSyncController(
+    decidedDailyStepsGoal = customStepsCount,
+    autoRequestPermissionsOnStart = launchedFromHealthConnect,
+  )
 
   AnimatedContent(
     targetState = currentStep,
@@ -391,6 +409,8 @@ fun BioSyncApp() {
       0 -> {
         BioSyncWelcomeScreen(
           onNavigateToCalibration = {
+            isQuickEditMode = false
+            quickEditFocusSection = null
             currentStep = 1
           },
         )
@@ -398,7 +418,13 @@ fun BioSyncApp() {
       1 -> {
         ProfileCalibrationScreen(
           onNavigateBack = {
-            currentStep = 0
+            if (isQuickEditMode) {
+              isQuickEditMode = false
+              quickEditFocusSection = null
+              currentStep = 4
+            } else {
+              currentStep = 0
+            }
           },
           onNavigateToPersonalDetails = { name, sex, age ->
             subjectName = name
@@ -416,6 +442,17 @@ fun BioSyncApp() {
           onMonthPersist = { selectedMonth = it },
           initialYear = selectedYear,
           onYearPersist = { selectedYear = it },
+          isQuickEditMode = isQuickEditMode,
+          initialFocusSection = quickEditFocusSection,
+          onQuickEditReturnToSummary = { name, sex, age ->
+            subjectName = name
+            selectedSex = sex
+            calculatedAgeYears = age
+            isQuickEditMode = false
+            quickEditFocusSection = null
+            isCustomTargetsMode = false
+            currentStep = 4
+          },
         )
       }
       2 -> {
@@ -432,12 +469,26 @@ fun BioSyncApp() {
           selectedWeightUnit = currentWeightUnit,
           onSelectWeightUnit = { selectedWeightUnitName = it.name },
           onNavigateBack = {
-            currentStep = 1
+            if (isQuickEditMode) {
+              isQuickEditMode = false
+              quickEditFocusSection = null
+              currentStep = 4
+            } else {
+              currentStep = 1
+            }
           },
           onNavigateToBlueprint = { currentStep = 3 },
+          isQuickEditMode = isQuickEditMode,
+          initialFocusSection = quickEditFocusSection,
+          onQuickEditReturnToSummary = {
+            isQuickEditMode = false
+            quickEditFocusSection = null
+            isCustomTargetsMode = false
+            currentStep = 4
+          },
         )
       }
-      else -> {
+      3 -> {
         BlueprintScreen(
           subjectName = subjectName,
           ageYears = calculatedAgeYears,
@@ -446,7 +497,6 @@ fun BioSyncApp() {
           onSelectActivityLevel = { level ->
             selectedActivityLevelName = level.name
             if (level == ActivityLevelOption.SEDENTARY) {
-              selectedScheduleCadenceName = ScheduleCadenceOption.UNIFORM_DAILY.name
               selectedWorkoutDaysCsv = ""
             } else {
               val defaults = DailyTargetsEngine.defaultWorkoutDaysFor(level)
@@ -472,9 +522,12 @@ fun BioSyncApp() {
           selectedTargetPace = currentTargetPace,
           onSelectTargetPace = { selectedTargetPaceName = it.name },
           selectedDayOne = currentDayOne,
-          onSelectDayOne = { selectedDayOneName = it.name },
-          selectedScheduleCadence = currentScheduleCadence,
-          onSelectScheduleCadence = { selectedScheduleCadenceName = it.name },
+          onSelectDayOne = { newDayOne ->
+            selectedDayOneName = newDayOne.name
+            if (protocolLockedIn) {
+              dayOneAnchorStartEpochMillis = BioSyncLocalStore.computeNextDayOneAnchorEpochMillis(newDayOne)
+            }
+          },
           selectedMealFrequency = currentMealFrequency,
           onSelectMealFrequency = { selectedMealFrequencyName = it.name },
           caffeineAlcoholYes = caffeineAlcoholYes,
@@ -484,10 +537,129 @@ fun BioSyncApp() {
           selectedStreakThreshold = currentStreakOption,
           onSelectStreakThreshold = { selectedStreakPercent = it.percentage },
           onNavigateBack = {
-            currentStep = 2
+            if (isQuickEditMode) {
+              isQuickEditMode = false
+              quickEditFocusSection = null
+              currentStep = 4
+            } else {
+              currentStep = 2
+            }
           },
           onCompleteBlueprint = {
+            isQuickEditMode = false
+            quickEditFocusSection = null
+            isCustomTargetsMode = false
+            currentStep = 4
+          },
+          isQuickEditMode = isQuickEditMode,
+          initialFocusSection = quickEditFocusSection,
+          onQuickEditReturnToSummary = {
+            isQuickEditMode = false
+            quickEditFocusSection = null
+            isCustomTargetsMode = false
+            currentStep = 4
+          },
+        )
+      }
+      4 -> {
+        ProtocolSummaryScreen(
+          subjectName = subjectName,
+          selectedSex = selectedSex,
+          birthDay = selectedDay,
+          birthMonthZeroBased = selectedMonth,
+          birthYear = selectedYear,
+          ageYears = calculatedAgeYears,
+          heightCm = heightCm,
+          heightUnit = currentHeightUnit,
+          weightKg = weightKg,
+          weightUnit = currentWeightUnit,
+          activityLevel = currentActivityLevel,
+          selectedWorkoutDays = currentWorkoutDays,
+          onUpdateWorkoutDays = { days ->
+            selectedWorkoutDaysCsv = DayOfWeekOption.entries
+              .filter { it in days }
+              .joinToString(",") { it.name }
+          },
+          occupationLoad = currentOccupationLoad,
+          objective = currentObjective,
+          trainingModality = currentTrainingModality,
+          workoutDuration = currentWorkoutDuration,
+          experienceLevel = currentExperienceLevel,
+          targetPace = currentTargetPace,
+          dayOne = currentDayOne,
+          mealFrequency = currentMealFrequency,
+          caffeineAlcoholYes = caffeineAlcoholYes,
+          sodiumFrequency = currentSodiumFrequency,
+          streakThreshold = currentStreakOption,
+          climateBand = currentClimateBand,
+          bodyFatOverrideEnabled = bodyFatOverrideEnabled,
+          onToggleBodyFatOverride = { bodyFatOverrideEnabled = it },
+          bodyFatPercent = bodyFatPercent,
+          onBodyFatPercentChange = { bodyFatPercent = it },
+          isCustomTargetsMode = isCustomTargetsMode,
+          onToggleCustomTargetsMode = { isCustomTargetsMode = it },
+          customCaloriesKcal = customCaloriesKcal,
+          onCustomCaloriesChange = { customCaloriesKcal = it },
+          customProteinGrams = customProteinGrams,
+          onCustomProteinChange = { customProteinGrams = it },
+          customCarbsGrams = customCarbsGrams,
+          onCustomCarbsChange = { customCarbsGrams = it },
+          customFatsGrams = customFatsGrams,
+          onCustomFatsChange = { customFatsGrams = it },
+          customHydrationMl = customHydrationMl,
+          onCustomHydrationChange = { customHydrationMl = it },
+          customStepsCount = customStepsCount,
+          onCustomStepsChange = { customStepsCount = it },
+          protocolLockedIn = protocolLockedIn,
+          onLockInProtocol = {
+            val nowMs = System.currentTimeMillis()
             protocolLockedIn = true
+            protocolLockedAtEpochMillis = nowMs
+            dayOneAnchorStartEpochMillis = BioSyncLocalStore.computeNextDayOneAnchorEpochMillis(
+              dayOne = currentDayOne,
+              fromEpochMillis = nowMs,
+            )
+            currentStep = 5
+          },
+          onNavigateBack = {
+            isQuickEditMode = false
+            quickEditFocusSection = null
+            currentStep = 3
+          },
+          onQuickEditStep01 = { focus ->
+            isQuickEditMode = true
+            quickEditFocusSection = focus
+            currentStep = 1
+          },
+          onQuickEditStep02 = { focus ->
+            isQuickEditMode = true
+            quickEditFocusSection = focus
+            currentStep = 2
+          },
+          onQuickEditStep03 = { focus ->
+            isQuickEditMode = true
+            quickEditFocusSection = focus
+            currentStep = 3
+          },
+        )
+      }
+      else -> {
+        BioSyncDashboardScreen(
+          subjectName = subjectName,
+          targetCaloriesKcal = customCaloriesKcal,
+          targetProteinGrams = customProteinGrams,
+          targetCarbsGrams = customCarbsGrams,
+          targetFatsGrams = customFatsGrams,
+          targetHydrationMl = customHydrationMl,
+          targetStepsCount = customStepsCount,
+          streakThreshold = currentStreakOption,
+          mealFrequency = currentMealFrequency,
+          activityLevel = currentActivityLevel,
+          selectedWorkoutDays = currentWorkoutDays,
+          onOpenProtocolSummary = {
+            isQuickEditMode = false
+            quickEditFocusSection = null
+            currentStep = 4
           },
         )
       }

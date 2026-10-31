@@ -315,29 +315,6 @@ enum class DayOfWeekOption(
 }
 
 /**
- * 6. Weekly Schedule Cadence (Uniform Daily vs Active + Rest Days)
- */
-enum class ScheduleCadenceOption(
-  val shortTag: String,
-  val badgeLabel: String,
-  val description: String,
-  val accentColor: Color,
-) {
-  UNIFORM_DAILY(
-    shortTag = "UNIFORM 7-DAY",
-    badgeLabel = "FLAT DAILY TARGETS",
-    description = "Same targets all 7 days",
-    accentColor = Color(0xFF38BDF8),
-  ),
-  REST_DAYS(
-    shortTag = "TRAINING / REST SPLIT",
-    badgeLabel = "CARB & CAL CYCLING",
-    description = "Higher fuel on active days",
-    accentColor = Color(0xFFA78BFA),
-  ),
-}
-
-/**
  * 7. Meal Frequency per Day
  */
 enum class MealFrequencyOption(
@@ -1010,7 +987,7 @@ private fun TrainingModalityCard(
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// SECTION B: METABOLIC PACE & CYCLE (Target Pace TDEE + Day 1 + Uniform/Rest)
+// SECTION B: METABOLIC PACE & CYCLE (Target Pace TDEE + Day 1 Anchor)
 // ═════════════════════════════════════════════════════════════════════════════
 
 @Composable
@@ -1019,12 +996,6 @@ internal fun MetabolicPaceCycleSection(
   onSelectPace: (TargetPaceOption) -> Unit,
   selectedDayOne: DayOfWeekOption,
   onSelectDayOne: (DayOfWeekOption) -> Unit,
-  selectedCadence: ScheduleCadenceOption,
-  onSelectCadence: (ScheduleCadenceOption) -> Unit,
-  selectedActivityLevel: ActivityLevelOption = ActivityLevelOption.MODERATE,
-  selectedWorkoutDays: Set<DayOfWeekOption> = emptySet(),
-  onOpenWorkoutDaysPicker: () -> Unit = {},
-  selectedObjective: BlueprintObjectiveOption,
   borderFlashProvider: () -> Float,
   metrics: BlueprintResponsiveMetrics,
 ) {
@@ -1278,177 +1249,6 @@ internal fun MetabolicPaceCycleSection(
                   fontWeight = FontWeight.Bold,
                   fontSize = metrics.spScaled(9.8f, 8.6f, 11f),
                   maxLines = 1,
-                )
-              }
-            }
-          }
-        }
-
-        HorizontalDivider(color = ExtZinc850, thickness = 0.8.dp)
-
-        // ── Sub-block 3: Weekly Distribution Cadence (Uniform Daily vs Active + Rest Days) ──
-        // Note: When SEDENTARY ("Little / No Exercise") is selected, do NOT mention Workout / Rest Split!
-        Column(
-          modifier = Modifier.fillMaxWidth(),
-          verticalArrangement = Arrangement.spacedBy((7.5f * metrics.scale).coerceIn(6f, 9.5f).dp),
-        ) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-          ) {
-            Text(
-              text = stringResource(R.string.blueprint_schedule_cadence_label),
-              color = ExtZinc400,
-              fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.Medium,
-              fontSize = metrics.spScaled(9.4f, 8.2f, 10.6f),
-              letterSpacing = 0.9.sp,
-            )
-            if (selectedActivityLevel == ActivityLevelOption.SEDENTARY) {
-              Text(
-                text = "SEDENTARY • UNIFORM 7-DAY",
-                color = PureWhite,
-                fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = metrics.spScaled(8.4f, 7.4f, 9.6f),
-                letterSpacing = 0.5.sp,
-              )
-            }
-          }
-
-          val visibleCadenceOptions = if (selectedActivityLevel == ActivityLevelOption.SEDENTARY) {
-            listOf(ScheduleCadenceOption.UNIFORM_DAILY)
-          } else {
-            ScheduleCadenceOption.entries
-          }
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy((8f * metrics.scale).coerceIn(6.5f, 11f).dp),
-          ) {
-            visibleCadenceOptions.forEach { cadence ->
-              val isSelected = if (selectedActivityLevel == ActivityLevelOption.SEDENTARY) {
-                true
-              } else {
-                cadence == selectedCadence
-              }
-              val cadenceTitle = when (cadence) {
-                ScheduleCadenceOption.UNIFORM_DAILY -> stringResource(R.string.blueprint_cadence_uniform)
-                ScheduleCadenceOption.REST_DAYS -> stringResource(R.string.blueprint_cadence_rest_days)
-              }
-              val cardCorner = RoundedCornerShape((9.5f * metrics.scale).coerceIn(8f, 11.5f).dp)
-              Column(
-                modifier = Modifier
-                  .weight(1f)
-                  .clip(cardCorner)
-                  .background(if (isSelected) PureWhite else ExtZinc950)
-                  .border(
-                    width = if (isSelected) 1.25.dp else 0.85.dp,
-                    color = if (isSelected) PureWhite else ExtZinc800,
-                    shape = cardCorner,
-                  )
-                  .semantics { selected = isSelected }
-                  .clickable(
-                    role = Role.RadioButton,
-                    onClick = { onSelectCadence(cadence) },
-                  )
-                  .padding(
-                    horizontal = (10f * metrics.scale).coerceIn(8f, 12.5f).dp,
-                    vertical = (9f * metrics.scale).coerceIn(7.5f, 11.5f).dp,
-                  )
-                  .testTag("schedule_cadence_${cadence.name.lowercase()}"),
-                verticalArrangement = Arrangement.spacedBy(3.5.dp),
-              ) {
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                  Text(
-                    text = cadence.shortTag,
-                    color = if (isSelected) ObsidianBlack.copy(alpha = 0.72f) else cadence.accentColor,
-                    fontFamily = JetBrainsMonoFontFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = metrics.spScaled(7.8f, 6.8f, 8.8f),
-                    letterSpacing = 0.5.sp,
-                  )
-                  Canvas(modifier = Modifier.size(5.5.dp)) {
-                    drawCircle(color = if (isSelected) ObsidianBlack else cadence.accentColor)
-                  }
-                }
-                Text(
-                  text = cadenceTitle,
-                  color = if (isSelected) ObsidianBlack else PureWhite,
-                  fontFamily = InterFontFamily,
-                  fontWeight = FontWeight.SemiBold,
-                  fontSize = metrics.spScaled(12.6f, 11f, 14.2f),
-                  letterSpacing = (-0.2).sp,
-                  maxLines = 1,
-                  overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                  text = cadence.description,
-                  color = if (isSelected) ObsidianBlack.copy(alpha = 0.78f) else ExtZinc300,
-                  fontFamily = InterFontFamily,
-                  fontWeight = FontWeight.Medium,
-                  fontSize = metrics.spScaled(9.8f, 8.6f, 11.2f),
-                  maxLines = 1,
-                  overflow = TextOverflow.Ellipsis,
-                )
-              }
-            }
-          }
-
-          if (selectedActivityLevel == ActivityLevelOption.LIGHT || selectedActivityLevel == ActivityLevelOption.MODERATE) {
-            val sortedDays = DayOfWeekOption.entries.filter { it in selectedWorkoutDays }
-            val daysSummary = if (sortedDays.isEmpty()) {
-              "TAP TO SELECT WORKOUT DAYS"
-            } else {
-              sortedDays.joinToString(" • ") { it.shortCode }
-            }
-            val restCount = (7 - sortedDays.size).coerceIn(0, 7)
-            Row(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape((9f * metrics.scale).dp))
-                .background(ExtZinc950)
-                .border(0.9.dp, ExtZinc800, RoundedCornerShape((9f * metrics.scale).dp))
-                .clickable(role = Role.Button, onClick = onOpenWorkoutDaysPicker)
-                .padding(horizontal = (11f * metrics.scale).dp, vertical = (9f * metrics.scale).dp)
-                .testTag("pace_cycle_workout_days_button"),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-              Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                  text = "WORKOUT SCHEDULE (${sortedDays.size} WORKOUT / $restCount REST)",
-                  color = ExtZinc400,
-                  fontFamily = JetBrainsMonoFontFamily,
-                  fontWeight = FontWeight.SemiBold,
-                  fontSize = metrics.spScaled(8.6f, 7.6f, 9.6f),
-                  letterSpacing = 0.6.sp,
-                )
-                Text(
-                  text = daysSummary,
-                  color = PureWhite,
-                  fontFamily = JetBrainsMonoFontFamily,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = metrics.spScaled(11.0f, 9.8f, 12.2f),
-                )
-              }
-              Box(
-                modifier = Modifier
-                  .clip(RoundedCornerShape(6.dp))
-                  .background(PureWhite)
-                  .padding(horizontal = 9.dp, vertical = 5.dp),
-              ) {
-                Text(
-                  text = "CHOOSE DAYS",
-                  color = ObsidianBlack,
-                  fontFamily = JetBrainsMonoFontFamily,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = metrics.spScaled(8.6f, 7.6f, 9.6f),
                 )
               }
             }
@@ -1845,7 +1645,8 @@ private fun DiureticTogglePill(
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// WORKOUT DAYS SELECTION POPUP MODAL (FOR LIGHT 1–3D/WK & MODERATE 3–5D/WK)
+// WORKOUT / REST DAYS SELECTION POPUP MODAL
+// (FOR LIGHT 1–3D/WK, MODERATE 3–5D/WK & VERY ACTIVE 6–7D/WK)
 // ═════════════════════════════════════════════════════════════════════════════
 
 @Composable
@@ -1855,9 +1656,18 @@ internal fun WorkoutDaysPickerDialog(
   onConfirmDays: (Set<DayOfWeekOption>) -> Unit,
   onDismiss: () -> Unit,
 ) {
-  val isLight = activityLevel == ActivityLevelOption.LIGHT
-  val minDays = if (isLight) 1 else 3
-  val maxDays = if (isLight) 3 else 5
+  val minDays = when (activityLevel) {
+    ActivityLevelOption.LIGHT -> 1
+    ActivityLevelOption.MODERATE -> 3
+    ActivityLevelOption.VERY_ACTIVE -> 6
+    ActivityLevelOption.SEDENTARY -> 0
+  }
+  val maxDays = when (activityLevel) {
+    ActivityLevelOption.LIGHT -> 3
+    ActivityLevelOption.MODERATE -> 5
+    ActivityLevelOption.VERY_ACTIVE -> 7
+    ActivityLevelOption.SEDENTARY -> 0
+  }
   val defaultDays = remember(activityLevel) {
     DailyTargetsEngine.defaultWorkoutDaysFor(activityLevel)
   }
@@ -1872,11 +1682,28 @@ internal fun WorkoutDaysPickerDialog(
 
   val workoutCount = draftDays.size
   val restCount = (7 - workoutCount).coerceAtLeast(0)
-  val tierLabel = if (isLight) "LIGHT ACTIVITY • 1–3 DAYS / WEEK" else "MODERATE ACTIVITY • 3–5 DAYS / WEEK"
-  val recommendationNote = if (isLight) {
-    "Defaulted to max 3 workout days & 4 rest days. Tap any day below to customize which specific days you train."
-  } else {
-    "Select 3 to 5 workout days. BioSync will calculate higher energy, carbs, water & steps on your workout days and recovery targets on rest days."
+  val tierLabel = when (activityLevel) {
+    ActivityLevelOption.LIGHT -> "LIGHT ACTIVITY • 1–3 DAYS / WEEK"
+    ActivityLevelOption.MODERATE -> "MODERATE ACTIVITY • 3–5 DAYS / WEEK"
+    ActivityLevelOption.VERY_ACTIVE -> "VERY ACTIVE • 6–7 DAYS / WEEK"
+    ActivityLevelOption.SEDENTARY -> "SEDENTARY"
+  }
+  val dialogTitle = when (activityLevel) {
+    ActivityLevelOption.VERY_ACTIVE -> "Which days will you work out or rest?"
+    else -> "Which days will you work out?"
+  }
+  val recommendationNote = when (activityLevel) {
+    ActivityLevelOption.LIGHT ->
+      "Defaulted to 3 workout days & 4 rest days. Tap any day below to select 1 to 3 workout days."
+    ActivityLevelOption.MODERATE ->
+      "Select 3 to 5 workout days (2 to 4 rest days). Tap any day below to customize your weekly training schedule."
+    ActivityLevelOption.VERY_ACTIVE ->
+      "Select 6 or 7 workout days (0 or 1 rest day). Tap any day below to set your rest day or full 7-day training week."
+    ActivityLevelOption.SEDENTARY -> ""
+  }
+  val defaultBtnLabel = when (activityLevel) {
+    ActivityLevelOption.VERY_ACTIVE -> "DEFAULT (6W / 1R)"
+    else -> "MAX DEFAULT (${maxDays}D)"
   }
 
   Dialog(
@@ -1936,7 +1763,7 @@ internal fun WorkoutDaysPickerDialog(
         }
 
         Text(
-          text = "Which days will you work out?",
+          text = dialogTitle,
           color = PureWhite,
           fontFamily = InterFontFamily,
           fontWeight = FontWeight.ExtraBold,
@@ -1972,7 +1799,15 @@ internal fun WorkoutDaysPickerDialog(
                 )
                 .clickable(role = Role.Checkbox) {
                   draftDays = if (isSelected) {
-                    if (draftDays.size > minDays) draftDays - day else draftDays
+                    if (draftDays.size > minDays) {
+                      draftDays - day
+                    } else if (activityLevel == ActivityLevelOption.VERY_ACTIVE) {
+                      // In Very Active (min 6 workout days = max 1 rest day), tapping a different day to make it REST
+                      // automatically switches the single rest day to this newly tapped day!
+                      (DayOfWeekOption.entries.toSet() - day)
+                    } else {
+                      draftDays
+                    }
                   } else {
                     if (draftDays.size < maxDays) {
                       draftDays + day
@@ -2008,7 +1843,8 @@ internal fun WorkoutDaysPickerDialog(
 
         // Summary Strip of Selected Workout vs Rest Days
         val workoutNames = DayOfWeekOption.entries.filter { it in draftDays }.joinToString(", ") { it.shortCode }
-        val restNames = DayOfWeekOption.entries.filter { it !in draftDays }.joinToString(", ") { it.shortCode }
+        val restDaysList = DayOfWeekOption.entries.filter { it !in draftDays }
+        val restNames = if (restDaysList.isEmpty()) "NONE (7/7 ACTIVE)" else restDaysList.joinToString(", ") { it.shortCode }
         Column(
           modifier = Modifier
             .fillMaxWidth()
@@ -2034,7 +1870,7 @@ internal fun WorkoutDaysPickerDialog(
           )
         }
 
-        // Action Buttons (Use Max Default vs Confirm Days)
+        // Action Buttons (Use Default vs Confirm Days)
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2052,7 +1888,7 @@ internal fun WorkoutDaysPickerDialog(
             contentAlignment = Alignment.Center,
           ) {
             Text(
-              text = "MAX DEFAULT (${maxDays}D)",
+              text = defaultBtnLabel,
               color = PureWhite,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.Bold,

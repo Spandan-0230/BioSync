@@ -372,8 +372,6 @@ fun BlueprintScreen(
   onSelectTargetPace: (TargetPaceOption) -> Unit = {},
   selectedDayOne: DayOfWeekOption = DayOfWeekOption.MONDAY,
   onSelectDayOne: (DayOfWeekOption) -> Unit = {},
-  selectedScheduleCadence: ScheduleCadenceOption = ScheduleCadenceOption.UNIFORM_DAILY,
-  onSelectScheduleCadence: (ScheduleCadenceOption) -> Unit = {},
   selectedMealFrequency: MealFrequencyOption = MealFrequencyOption.MEALS_3,
   onSelectMealFrequency: (MealFrequencyOption) -> Unit = {},
   caffeineAlcoholYes: Boolean = false,
@@ -397,8 +395,16 @@ fun BlueprintScreen(
   val borderFlashPhase = remember { Animatable(0f) }
   var workoutDaysDialogActivity by remember { mutableStateOf<ActivityLevelOption?>(null) }
 
-  // Top STEP 03 OF 04 progress bar: animates from Step 02 (0.50f) to Step 03 (0.75f) on entry
+  // Top STEP 03 OF 04 progress bar: animates from Step 02 (0.50f) to Step 03 (0.75f) on entry.
+  // Also auto-pop up the workout/rest days selector if Light, Moderate, or Very Active was saved.
   LaunchedEffect(Unit) {
+    if ((initialFocusSection == null || initialFocusSection == "activity") &&
+      (selectedActivityLevel == ActivityLevelOption.LIGHT ||
+        selectedActivityLevel == ActivityLevelOption.MODERATE ||
+        selectedActivityLevel == ActivityLevelOption.VERY_ACTIVE)
+    ) {
+      workoutDaysDialogActivity = selectedActivityLevel
+    }
     headerStepPhase.snapTo(0f)
     headerStepPhase.animateTo(
       targetValue = 1f,
@@ -593,7 +599,6 @@ fun BlueprintScreen(
                 onSelectActivityLevel(level)
                 when (level) {
                   ActivityLevelOption.SEDENTARY -> {
-                    onSelectScheduleCadence(ScheduleCadenceOption.UNIFORM_DAILY)
                     onUpdateWorkoutDays(emptySet())
                   }
                   ActivityLevelOption.LIGHT -> {
@@ -611,10 +616,14 @@ fun BlueprintScreen(
                     workoutDaysDialogActivity = ActivityLevelOption.MODERATE
                   }
                   ActivityLevelOption.VERY_ACTIVE -> {
-                    onUpdateWorkoutDays(DailyTargetsEngine.defaultWorkoutDaysFor(ActivityLevelOption.VERY_ACTIVE))
+                    val defaultVeryActiveDays = DailyTargetsEngine.defaultWorkoutDaysFor(ActivityLevelOption.VERY_ACTIVE)
+                    if (selectedWorkoutDays.size !in 6..7) {
+                      onUpdateWorkoutDays(defaultVeryActiveDays)
+                    }
+                    workoutDaysDialogActivity = ActivityLevelOption.VERY_ACTIVE
                   }
                 }
-              } else if (level == ActivityLevelOption.LIGHT || level == ActivityLevelOption.MODERATE) {
+              } else if (level != ActivityLevelOption.SEDENTARY) {
                 workoutDaysDialogActivity = level
               }
             },
@@ -704,7 +713,7 @@ fun BlueprintScreen(
 
         Spacer(modifier = Modifier.height(metrics.sectionGap))
 
-        // 5. Section 4: Metabolic Pace & Cycle (Target Pace TDEE + Day 01 Anchor + Uniform/Rest Days)
+        // 5. Section 4: Metabolic Pace & Cycle (Target Pace TDEE + Day 01 Anchor)
         Box(
           modifier = Modifier
             .fillMaxWidth()
@@ -731,28 +740,6 @@ fun BlueprintScreen(
                 haptics.tick()
               }
             },
-            selectedCadence = if (selectedActivityLevel == ActivityLevelOption.SEDENTARY) {
-              ScheduleCadenceOption.UNIFORM_DAILY
-            } else {
-              selectedScheduleCadence
-            },
-            onSelectCadence = { cadence ->
-              if (selectedActivityLevel == ActivityLevelOption.SEDENTARY) {
-                onSelectScheduleCadence(ScheduleCadenceOption.UNIFORM_DAILY)
-              } else if (cadence != selectedScheduleCadence) {
-                haptics.selection()
-                onSelectScheduleCadence(cadence)
-              } else {
-                haptics.tick()
-              }
-            },
-            selectedActivityLevel = selectedActivityLevel,
-            selectedWorkoutDays = selectedWorkoutDays,
-            onOpenWorkoutDaysPicker = {
-              haptics.selection()
-              workoutDaysDialogActivity = selectedActivityLevel
-            },
-            selectedObjective = selectedObjective,
             borderFlashProvider = borderFlashProvider,
             metrics = metrics,
           )
@@ -841,11 +828,6 @@ fun BlueprintScreen(
           selectedExperienceLevel = selectedExperienceLevel,
           selectedTargetPace = selectedTargetPace,
           selectedDayOne = selectedDayOne,
-          selectedScheduleCadence = if (selectedActivityLevel == ActivityLevelOption.SEDENTARY) {
-            ScheduleCadenceOption.UNIFORM_DAILY
-          } else {
-            selectedScheduleCadence
-          },
           selectedMealFrequency = selectedMealFrequency,
           caffeineAlcoholYes = caffeineAlcoholYes,
           selectedSodiumFrequency = selectedSodiumFrequency,
@@ -874,9 +856,7 @@ fun BlueprintScreen(
   }
 
   val activeDialogActivity = workoutDaysDialogActivity
-  if (activeDialogActivity != null &&
-    (activeDialogActivity == ActivityLevelOption.LIGHT || activeDialogActivity == ActivityLevelOption.MODERATE)
-  ) {
+  if (activeDialogActivity != null && activeDialogActivity != ActivityLevelOption.SEDENTARY) {
     WorkoutDaysPickerDialog(
       activityLevel = activeDialogActivity,
       initialSelectedDays = selectedWorkoutDays,
@@ -1348,7 +1328,7 @@ private fun ActivityLevelSection(
           testTag = "activity_option_very_active",
         )
 
-        if (selectedLevel == ActivityLevelOption.LIGHT || selectedLevel == ActivityLevelOption.MODERATE) {
+        if (selectedLevel != ActivityLevelOption.SEDENTARY) {
           val orderedDays = DayOfWeekOption.entries.filter { it in selectedWorkoutDays }
           val wCount = orderedDays.size
           val rCount = (7 - wCount).coerceAtLeast(0)
@@ -3388,7 +3368,6 @@ private fun BlueprintSummaryMatrixCard(
   selectedExperienceLevel: ExperienceLevelOption,
   selectedTargetPace: TargetPaceOption,
   selectedDayOne: DayOfWeekOption,
-  selectedScheduleCadence: ScheduleCadenceOption,
   selectedMealFrequency: MealFrequencyOption,
   caffeineAlcoholYes: Boolean,
   selectedSodiumFrequency: SodiumFrequencyOption,
@@ -3411,11 +3390,10 @@ private fun BlueprintSummaryMatrixCard(
   }
   val activitySubValue = when (selectedActivityLevel) {
     ActivityLevelOption.SEDENTARY -> "0W / 7R • SEDENTARY"
-    ActivityLevelOption.LIGHT, ActivityLevelOption.MODERATE -> {
-      val wCount = selectedWorkoutDays.size.coerceIn(1, 6)
+    ActivityLevelOption.LIGHT, ActivityLevelOption.MODERATE, ActivityLevelOption.VERY_ACTIVE -> {
+      val wCount = selectedWorkoutDays.size.coerceIn(1, 7)
       "${wCount}W / ${7 - wCount}R • ${DayOfWeekOption.entries.filter { it in selectedWorkoutDays }.joinToString(",") { it.shortCode }}"
     }
-    ActivityLevelOption.VERY_ACTIVE -> "6W / 1R • ${selectedActivityLevel.cadenceBadge}"
   }
   val objectiveLabel = when (selectedObjective) {
     BlueprintObjectiveOption.LOSE_FAT -> stringResource(R.string.blueprint_objective_lose_fat_title)
@@ -3426,14 +3404,6 @@ private fun BlueprintSummaryMatrixCard(
     ExperienceLevelOption.BEGINNER -> stringResource(R.string.blueprint_exp_beginner)
     ExperienceLevelOption.INTERMEDIATE -> stringResource(R.string.blueprint_exp_intermediate)
     ExperienceLevelOption.ADVANCED -> stringResource(R.string.blueprint_exp_advanced)
-  }
-  val cadenceLabel = if (selectedActivityLevel == ActivityLevelOption.SEDENTARY) {
-    stringResource(R.string.blueprint_cadence_uniform)
-  } else {
-    when (selectedScheduleCadence) {
-      ScheduleCadenceOption.UNIFORM_DAILY -> stringResource(R.string.blueprint_cadence_uniform)
-      ScheduleCadenceOption.REST_DAYS -> stringResource(R.string.blueprint_cadence_rest_days)
-    }
   }
   val sodiumLabel = when (selectedSodiumFrequency) {
     SodiumFrequencyOption.RARELY -> stringResource(R.string.blueprint_sodium_rarely)
@@ -3563,7 +3533,7 @@ private fun BlueprintSummaryMatrixCard(
         SummaryMetricTile(
           label = "PACE & CYCLE",
           value = "${selectedTargetPace.title} • D1 ${selectedDayOne.shortCode}",
-          subValue = cadenceLabel.uppercase(),
+          subValue = "${selectedTargetPace.weeklyRateKg} • DAY 01 = ${selectedDayOne.fullName.uppercase()}",
           dotColor = selectedTargetPace.accentColor,
           onClick = onClickPaceCycleTile,
           metrics = metrics,

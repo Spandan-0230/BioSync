@@ -695,6 +695,7 @@ fun PersonalDetailsScreen(
   onNavigateBack: () -> Unit,
   onNavigateToBlueprint: () -> Unit = {},
   isQuickEditMode: Boolean = false,
+  initialFocusSection: String? = null,
   onQuickEditReturnToSummary: () -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
@@ -811,9 +812,12 @@ fun PersonalDetailsScreen(
       var heightSectionTopY by remember { mutableIntStateOf(0) }
       var weightSectionTopY by remember { mutableIntStateOf(0) }
 
-      // Always redirect to the very top of the page when entering Personal Details
-      LaunchedEffect(Unit) {
-        scrollState.scrollTo(0)
+      LaunchedEffect(initialFocusSection, heightSectionTopY, weightSectionTopY) {
+        when (initialFocusSection) {
+          "height" -> if (heightSectionTopY > 0) scrollState.animateScrollTo((heightSectionTopY - 16).coerceAtLeast(0))
+          "weight" -> if (weightSectionTopY > 0) scrollState.animateScrollTo((weightSectionTopY - 16).coerceAtLeast(0))
+          else -> scrollState.scrollTo(0)
+        }
       }
 
       // Automatically scroll up while writing/editing Height or Weight so the active field

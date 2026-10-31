@@ -123,14 +123,6 @@ enum class ClimateBandOption(
 }
 
 /**
- * Which day profile is currently displayed when Workout / Rest Split is active.
- */
-enum class SplitDayFocus {
-  WORKOUT_DAY,
-  REST_DAY,
-}
-
-/**
  * Safety Gate Status.
  */
 enum class SafetyGateType {
@@ -235,12 +227,7 @@ data class DailyTargetsCalculationReport(
   val tdeeKcalExact: Float,
   val tdeeKcalRounded: Int,
 
-  // Baseline Uniform Targets (7-day average)
-  val uniformCaloriesKcal: Int,
-  val uniformCarbsGrams: Int,
-  val uniformSteps: Int,
-
-  // Active Recommended Targets (Synced with Uniform vs Workout/Rest Split & active SplitDayFocus)
+  // Active Recommended Targets
   val recommendedCaloriesKcal: Int,
   val calorieDeltaFromTdeeKcal: Int,
   val weeklyWeightRatePercent: Float,
@@ -260,7 +247,7 @@ data class DailyTargetsCalculationReport(
   val fatCeilingGrams: Int,
   val fatCalorieSharePct: Int,
 
-  // Carbohydrates & Fibre (Synced with active schedule split)
+  // Carbohydrates & Fibre
   val recommendedCarbsGrams: Int,
   val carbsFloorGrams: Int,
   val carbsCeilingGrams: Int,
@@ -270,43 +257,32 @@ data class DailyTargetsCalculationReport(
   val maxFreeSugarGrams: Int,
   val maxSodiumMg: Int,
 
-  // Daily Steps (Synced with active schedule split)
+  // Daily Steps
   val recommendedSteps: Int,
-  val workoutDaySteps: Int,
-  val restDaySteps: Int,
   val stepsFloor: Int,
   val stepsCeiling: Int,
   val strideLengthMeters: Float,
   val estimatedWalkingKm: Float,
   val informationalWalkingKcal: Int,
 
-  // Hydration (ml/day, Synced with active schedule split)
+  // Hydration (ml/day)
   val baseWaterMl: Int,
   val climateWaterAddMl: Int,
   val occupationWaterAddMl: Int,
   val caffeineWaterAddMl: Int,
   val sodiumWaterAddMl: Int,
   val exerciseWaterAddOnWorkoutDayMl: Int,
-  val restDayWaterMl: Int,
-  val workoutDayWaterMl: Int,
-  val uniformDayWaterMl: Int,
   val primaryRecommendedWaterMl: Int,
   val waterFloorMl: Int,
   val waterCeilingMl: Int,
   val waterGlasses250Ml: Float,
   val wakingHourlyReminderMl: Int,
 
-  // Uniform vs Workout/Rest Day Split
+  // Weekly Workout & Rest Day Schedule
   val trainingDaysPerWeek: Int,
   val restDaysPerWeek: Int,
   val selectedWorkoutDays: Set<DayOfWeekOption>,
   val selectedRestDays: Set<DayOfWeekOption>,
-  val workoutDayCaloriesKcal: Int,
-  val restDayCaloriesKcal: Int,
-  val workoutDayCarbsGrams: Int,
-  val restDayCarbsGrams: Int,
-  val swingFractionPhi: Float,
-  val activeSplitDayFocus: SplitDayFocus,
 
   // Meal Frequency Split (Synced with active calories & protein)
   val mealCount: Int,
@@ -373,13 +349,11 @@ object DailyTargetsEngine {
     workoutDuration: WorkoutDurationOption,
     experienceLevel: ExperienceLevelOption,
     targetPace: TargetPaceOption,
-    scheduleCadence: ScheduleCadenceOption,
     mealFrequency: MealFrequencyOption,
     caffeineAlcoholYes: Boolean,
     sodiumFrequency: SodiumFrequencyOption,
     climateBand: ClimateBandOption = ClimateBandOption.defaultForCurrentDate(),
     bodyFatPercentOverride: Float? = null,
-    splitDayFocus: SplitDayFocus = SplitDayFocus.WORKOUT_DAY,
     selectedWorkoutDays: Set<DayOfWeekOption> = emptySet(),
     highAltitude2500m: Boolean = false,
   ): DailyTargetsCalculationReport {
@@ -539,7 +513,10 @@ object DailyTargetsEngine {
         4 -> 1.520f
         else -> 1.550f // Max 5 days/week
       }
-      ActivityLevelOption.VERY_ACTIVE -> 1.725f
+      ActivityLevelOption.VERY_ACTIVE -> when (trainingDaysPerWeek) {
+        7 -> 1.750f
+        else -> 1.725f // 6 days/week
+      }
     }
     val occupationPalAddOn = occupationLoad.palAddOn
     val teenPalAddOn = if (isTeen || isUnder13) 0.10f else 0.00f
@@ -547,7 +524,7 @@ object DailyTargetsEngine {
     val tdeeKcalExact = bmrKcalExact * totalActivityFactor
     val tdeeKcalRounded = roundToNearest5(tdeeKcalExact)
 
-    // ── Baseline Uniform Objective Calories ────────────────────────────────
+    // ── Objective Calories ─────────────────────────────────────────────────
     val minSexFloor = if (isMale) 1500f else 1200f
     val calorieSafetyFloorFloat = max(minSexFloor, 0.90f * bmrKcalExact)
     val calorieSafetyFloorKcal = roundToNearest5(calorieSafetyFloorFloat)
@@ -561,7 +538,7 @@ object DailyTargetsEngine {
     var weeklyWeightRatePercent = 0f
     var estimatedWeeklyKgChange = 0f
 
-    val uniformCaloriesKcal: Int = when (effectiveObjective) {
+    val recommendedCaloriesKcal: Int = when (effectiveObjective) {
       BlueprintObjectiveOption.MAINTAIN -> {
         weeklyWeightRatePercent = 0f
         estimatedWeeklyKgChange = 0f
@@ -682,14 +659,14 @@ object DailyTargetsEngine {
     }
 
     val proteinFloorFloat = 0.8f * effectiveWeightKg
-    val proteinCeilingFloat = min(2.5f * effectiveWeightKg, (0.35f * uniformCaloriesKcal) / 4f)
+    val proteinCeilingFloat = min(2.5f * effectiveWeightKg, (0.35f * recommendedCaloriesKcal) / 4f)
     val proteinFloorGrams = proteinFloorFloat.roundToInt().coerceAtLeast(30)
     val proteinCeilingGrams = max(proteinFloorGrams, proteinCeilingFloat.roundToInt())
 
     val rawProteinGrams = (proteinFactorGPerKgEff * effectiveWeightKg).roundToInt()
     val recommendedProteinGrams = rawProteinGrams.coerceIn(proteinFloorGrams, proteinCeilingGrams)
 
-    // ── Fat (F, grams — constant across Workout & Rest days) ───────────────
+    // ── Fat (F, grams) ─────────────────────────────────────────────────────
     val fatShareFraction = when {
       isTeen || isUnder13 || isSenior60Plus -> 0.30f
       effectiveObjective == BlueprintObjectiveOption.LOSE_FAT ->
@@ -701,85 +678,30 @@ object DailyTargetsEngine {
     val fatTargetSharePct = (fatShareFraction * 100f).roundToInt()
 
     val minFatPerKg = if (isMale) 0.5f else 0.6f
-    val fatFloorFloat = max(minFatPerKg * effectiveWeightKg, (0.20f * uniformCaloriesKcal) / 9f)
+    val fatFloorFloat = max(minFatPerKg * effectiveWeightKg, (0.20f * recommendedCaloriesKcal) / 9f)
     val maxFatShare = if (isTeen || isUnder13) 0.35f else 0.30f
-    val fatCeilingFloat = (maxFatShare * uniformCaloriesKcal) / 9f
+    val fatCeilingFloat = (maxFatShare * recommendedCaloriesKcal) / 9f
 
     val fatFloorGrams = fatFloorFloat.roundToInt().coerceAtLeast(25)
     val fatCeilingGrams = max(fatFloorGrams, fatCeilingFloat.roundToInt())
 
-    var recommendedFatsGrams = ((fatShareFraction * uniformCaloriesKcal) / 9f)
+    var recommendedFatsGrams = ((fatShareFraction * recommendedCaloriesKcal) / 9f)
       .roundToInt()
       .coerceIn(fatFloorGrams, fatCeilingGrams)
 
-    // ── Baseline Uniform Carbohydrates (K, grams) ──────────────────────────
-    var uniformCarbsGrams = ((uniformCaloriesKcal - 4 * recommendedProteinGrams - 9 * recommendedFatsGrams) / 4f)
+    // ── Carbohydrates (K, grams) ───────────────────────────────────────────
+    var recommendedCarbsGrams = ((recommendedCaloriesKcal - 4 * recommendedProteinGrams - 9 * recommendedFatsGrams) / 4f)
       .roundToInt()
       .coerceAtLeast(0)
 
-    if (uniformCarbsGrams < 130 && recommendedFatsGrams > fatFloorGrams) {
-      val neededCarbGrams = 130 - uniformCarbsGrams
+    if (recommendedCarbsGrams < 130 && recommendedFatsGrams > fatFloorGrams) {
+      val neededCarbGrams = 130 - recommendedCarbsGrams
       val neededKcal = neededCarbGrams * 4f
       val reducibleFatGrams = (neededKcal / 9f).roundToInt()
       recommendedFatsGrams = max(fatFloorGrams, recommendedFatsGrams - reducibleFatGrams)
-      uniformCarbsGrams = ((uniformCaloriesKcal - 4 * recommendedProteinGrams - 9 * recommendedFatsGrams) / 4f)
+      recommendedCarbsGrams = ((recommendedCaloriesKcal - 4 * recommendedProteinGrams - 9 * recommendedFatsGrams) / 4f)
         .roundToInt()
         .coerceAtLeast(0)
-    }
-
-    // ── Uniform Days vs Workout / Rest Days Split (Synced across C, Carbs, H2O, Steps) ──
-    val expSwingPhi = when (experienceLevel) {
-      ExperienceLevelOption.BEGINNER -> 0.05f
-      ExperienceLevelOption.INTERMEDIATE -> 0.08f
-      ExperienceLevelOption.ADVANCED -> 0.10f
-    }
-    var swingPhi = if (trainingDaysPerWeek > 0 && restDaysPerWeek > 0) {
-      min(expSwingPhi, 0.15f * restDaysPerWeek.toFloat() / trainingDaysPerWeek.toFloat())
-    } else {
-      0f
-    }
-
-    var workoutDayCaloriesKcal = uniformCaloriesKcal
-    var restDayCaloriesKcal = uniformCaloriesKcal
-    var workoutDayCarbsGrams = uniformCarbsGrams
-    var restDayCarbsGrams = uniformCarbsGrams
-
-    if (trainingDaysPerWeek > 0 && restDaysPerWeek > 0) {
-      workoutDayCaloriesKcal = roundToNearest5(uniformCaloriesKcal * (1f + swingPhi))
-      restDayCaloriesKcal = roundToNearest5(
-        uniformCaloriesKcal * (1f - swingPhi * (trainingDaysPerWeek.toFloat() / restDaysPerWeek.toFloat())),
-      )
-      workoutDayCarbsGrams = uniformCarbsGrams + ((workoutDayCaloriesKcal - uniformCaloriesKcal) / 4f).roundToInt()
-      restDayCarbsGrams = (uniformCarbsGrams - ((uniformCaloriesKcal - restDayCaloriesKcal) / 4f).roundToInt())
-        .coerceAtLeast(0)
-
-      if (uniformCarbsGrams >= 130 && restDayCarbsGrams < 130) {
-        val maxCarbDrop = (uniformCarbsGrams - 130).coerceAtLeast(0)
-        val maxCalDrop = maxCarbDrop * 4f
-        val safePhi = (maxCalDrop * restDaysPerWeek.toFloat()) /
-          (uniformCaloriesKcal.toFloat() * trainingDaysPerWeek.toFloat())
-        swingPhi = min(swingPhi, safePhi.coerceAtLeast(0f))
-        workoutDayCaloriesKcal = roundToNearest5(uniformCaloriesKcal * (1f + swingPhi))
-        restDayCaloriesKcal = roundToNearest5(
-          uniformCaloriesKcal * (1f - swingPhi * (trainingDaysPerWeek.toFloat() / restDaysPerWeek.toFloat())),
-        )
-        workoutDayCarbsGrams = uniformCarbsGrams + ((workoutDayCaloriesKcal - uniformCaloriesKcal) / 4f).roundToInt()
-        restDayCarbsGrams = (uniformCarbsGrams - ((uniformCaloriesKcal - restDayCaloriesKcal) / 4f).roundToInt())
-          .coerceAtLeast(130)
-      }
-    }
-
-    // Active recommended Calories & Carbs synced with Uniform vs Workout/Rest Split!
-    val isSplitMode = scheduleCadence == ScheduleCadenceOption.REST_DAYS && trainingDaysPerWeek > 0
-    val recommendedCaloriesKcal = if (isSplitMode) {
-      if (splitDayFocus == SplitDayFocus.WORKOUT_DAY) workoutDayCaloriesKcal else restDayCaloriesKcal
-    } else {
-      uniformCaloriesKcal
-    }
-    val recommendedCarbsGrams = if (isSplitMode) {
-      if (splitDayFocus == SplitDayFocus.WORKOUT_DAY) workoutDayCarbsGrams else restDayCarbsGrams
-    } else {
-      uniformCarbsGrams
     }
 
     val calorieDeltaFromTdeeKcal = recommendedCaloriesKcal - tdeeKcalRounded
@@ -804,7 +726,7 @@ object DailyTargetsEngine {
     val fatCalorieSharePct = ((9f * recommendedFatsGrams / totalMacroCalories) * 100f).roundToInt()
     val carbsCalorieSharePct = (100 - proteinCalorieSharePct - fatCalorieSharePct).coerceIn(0, 100)
 
-    // ── Daily Steps (Synced with Uniform vs Workout/Rest Split) ────────────
+    // ── Daily Steps ────────────────────────────────────────────────────────
     val tierBaseSteps = when (activityLevel) {
       ActivityLevelOption.SEDENTARY -> 5000
       ActivityLevelOption.LIGHT -> 7000
@@ -823,30 +745,14 @@ object DailyTargetsEngine {
       else -> 12000
     }
     val rawSteps = (tierBaseSteps + objectiveStepTweak).coerceIn(stepsFloor, stepsCeiling)
-    val uniformSteps = roundToNearest500(rawSteps.toFloat()).coerceIn(stepsFloor, stepsCeiling)
-    val workoutDaySteps = if (trainingDaysPerWeek > 0) {
-      (uniformSteps + 1000).coerceIn(stepsFloor, stepsCeiling)
-    } else {
-      uniformSteps
-    }
-    val restDaySteps = if (trainingDaysPerWeek > 0) {
-      (uniformSteps - 1000).coerceIn(stepsFloor, stepsCeiling)
-    } else {
-      uniformSteps
-    }
-
-    val recommendedSteps = if (isSplitMode) {
-      if (splitDayFocus == SplitDayFocus.WORKOUT_DAY) workoutDaySteps else restDaySteps
-    } else {
-      uniformSteps
-    }
+    val recommendedSteps = roundToNearest500(rawSteps.toFloat()).coerceIn(stepsFloor, stepsCeiling)
 
     val strideFactor = if (isMale) 0.415f else 0.413f
     val strideLengthMeters = strideFactor * heightMeters
     val estimatedWalkingKm = (recommendedSteps * strideLengthMeters) / 1000f
     val informationalWalkingKcal = (recommendedSteps * safeWeightKg * 0.0004f).roundToInt()
 
-    // ── Hydration (ml/day, Synced with Uniform vs Workout/Rest Split) ──────
+    // ── Hydration (ml/day) ─────────────────────────────────────────────────
     val waterPerKgFactor = when {
       isTeen || isUnder13 -> 38f
       isSenior65Plus -> 30f
@@ -863,7 +769,7 @@ object DailyTargetsEngine {
       SodiumFrequencyOption.OFTEN -> 350
     }
 
-    val restDayWaterRaw = baseWaterFloat +
+    val baselineDailyWaterRaw = baseWaterFloat +
       climateWaterAddMl +
       occupationWaterAddMl +
       caffeineWaterAddMl +
@@ -877,27 +783,17 @@ object DailyTargetsEngine {
     }
     val exerciseWaterAddFloat = workoutMinutes * modalitySweatRateMlPerMin * climateBand.sweatRateMultiplier
     val exerciseWaterAddOnWorkoutDayMl = roundToNearest10(exerciseWaterAddFloat)
-    val workoutDayWaterRaw = restDayWaterRaw + exerciseWaterAddFloat
-
-    val uniformWaterRaw = (trainingDaysPerWeek * workoutDayWaterRaw + restDaysPerWeek * restDayWaterRaw) / 7f
+    val dailyWaterRaw = baselineDailyWaterRaw + (trainingDaysPerWeek / 7f) * exerciseWaterAddFloat
 
     val waterFloorMl = if (isTeen || isUnder13) 1200 else 1500
     val waterCeilingMl = 5000
 
-    val restDayWaterMl = roundToNearest10(restDayWaterRaw).coerceIn(waterFloorMl, waterCeilingMl)
-    val workoutDayWaterMl = roundToNearest10(workoutDayWaterRaw).coerceIn(waterFloorMl, waterCeilingMl)
-    val uniformDayWaterMl = roundToNearest10(uniformWaterRaw).coerceIn(waterFloorMl, waterCeilingMl)
-
-    val primaryRecommendedWaterMl = if (isSplitMode) {
-      if (splitDayFocus == SplitDayFocus.WORKOUT_DAY) workoutDayWaterMl else restDayWaterMl
-    } else {
-      uniformDayWaterMl
-    }
+    val primaryRecommendedWaterMl = roundToNearest10(dailyWaterRaw).coerceIn(waterFloorMl, waterCeilingMl)
 
     val waterGlasses250Ml = primaryRecommendedWaterMl / 250f
     val wakingHourlyReminderMl = roundToNearest10(primaryRecommendedWaterMl / 16f)
 
-    // ── Meal Frequency Split (Synced with active Calories & Carbs) ─────────
+    // ── Meal Frequency Split ───────────────────────────────────────────────
     val mealCount = mealFrequency.count.coerceIn(2, 6)
     val mainMealsCount = min(3, mealCount)
     val snackMealsCount = (mealCount - 3).coerceAtLeast(0)
@@ -944,9 +840,6 @@ object DailyTargetsEngine {
       totalActivityFactor = totalActivityFactor,
       tdeeKcalExact = tdeeKcalExact,
       tdeeKcalRounded = tdeeKcalRounded,
-      uniformCaloriesKcal = uniformCaloriesKcal,
-      uniformCarbsGrams = uniformCarbsGrams,
-      uniformSteps = uniformSteps,
       recommendedCaloriesKcal = recommendedCaloriesKcal,
       calorieDeltaFromTdeeKcal = calorieDeltaFromTdeeKcal,
       weeklyWeightRatePercent = weeklyWeightRatePercent,
@@ -970,8 +863,6 @@ object DailyTargetsEngine {
       maxFreeSugarGrams = maxFreeSugarGrams,
       maxSodiumMg = maxSodiumMg,
       recommendedSteps = recommendedSteps,
-      workoutDaySteps = workoutDaySteps,
-      restDaySteps = restDaySteps,
       stepsFloor = stepsFloor,
       stepsCeiling = stepsCeiling,
       strideLengthMeters = strideLengthMeters,
@@ -983,9 +874,6 @@ object DailyTargetsEngine {
       caffeineWaterAddMl = caffeineWaterAddMl,
       sodiumWaterAddMl = sodiumWaterAddMl,
       exerciseWaterAddOnWorkoutDayMl = exerciseWaterAddOnWorkoutDayMl,
-      restDayWaterMl = restDayWaterMl,
-      workoutDayWaterMl = workoutDayWaterMl,
-      uniformDayWaterMl = uniformDayWaterMl,
       primaryRecommendedWaterMl = primaryRecommendedWaterMl,
       waterFloorMl = waterFloorMl,
       waterCeilingMl = waterCeilingMl,
@@ -995,12 +883,6 @@ object DailyTargetsEngine {
       restDaysPerWeek = restDaysPerWeek,
       selectedWorkoutDays = effectiveWorkoutDays,
       selectedRestDays = effectiveRestDays,
-      workoutDayCaloriesKcal = workoutDayCaloriesKcal,
-      restDayCaloriesKcal = restDayCaloriesKcal,
-      workoutDayCarbsGrams = workoutDayCarbsGrams,
-      restDayCarbsGrams = restDayCarbsGrams,
-      swingFractionPhi = swingPhi,
-      activeSplitDayFocus = splitDayFocus,
       mealCount = mealCount,
       mainMealsCount = mainMealsCount,
       snackMealsCount = snackMealsCount,

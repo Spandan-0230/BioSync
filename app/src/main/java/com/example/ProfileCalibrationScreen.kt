@@ -569,6 +569,7 @@ fun ProfileCalibrationScreen(
   initialYear: Int = 1994,
   onYearPersist: (Int) -> Unit = {},
   isQuickEditMode: Boolean = false,
+  initialFocusSection: String? = null,
   onQuickEditReturnToSummary: (subjectName: String, selectedSex: String, calculatedAgeYears: Int) -> Unit = { _, _, _ -> },
   modifier: Modifier = Modifier,
 ) {
@@ -673,9 +674,13 @@ fun ProfileCalibrationScreen(
       var fullNameTopY by remember { mutableIntStateOf(0) }
       var bioSexTopY by remember { mutableIntStateOf(0) }
 
-      // Always redirect to the very top of the page when entering the Profile Section
-      LaunchedEffect(Unit) {
-        scrollState.scrollTo(0)
+      LaunchedEffect(initialFocusSection, fullNameTopY, bioSexTopY) {
+        when (initialFocusSection) {
+          "name" -> if (fullNameTopY > 0) scrollState.animateScrollTo((fullNameTopY - 16).coerceAtLeast(0))
+          "sex" -> if (bioSexTopY > 0) scrollState.animateScrollTo((bioSexTopY - 16).coerceAtLeast(0))
+          "dob" -> if (bioSexTopY > 0) scrollState.animateScrollTo((bioSexTopY + 60).coerceAtLeast(0))
+          else -> scrollState.scrollTo(0)
+        }
       }
 
       // Automatically scroll up while writing/editing so the active section and Chronometric Status

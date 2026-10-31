@@ -117,9 +117,6 @@
     <string name="blueprint_pace_normal">Normal</string>
     <string name="blueprint_pace_fast">Fast</string>
     <string name="blueprint_day_one_label">PROTOCOL DAY 01 ANCHOR</string>
-    <string name="blueprint_schedule_cadence_label">WEEKLY DISTRIBUTION CADENCE</string>
-    <string name="blueprint_cadence_uniform">Uniform Daily</string>
-    <string name="blueprint_cadence_rest_days">Active + Rest Days</string>
 
     <string name="blueprint_section_nutrition_hydration">Nutrition &amp; Hydration Calibration</string>
     <string name="blueprint_meal_frequency_label">MEAL FREQUENCY PER DAY</string>
@@ -130,4 +127,16 @@
     <string name="blueprint_sodium_sometimes">Sometimes</string>
     <string name="blueprint_sodium_often">Often</string>
     <string name="blueprint_occupation_label">OCCUPATION PHYSICAL LOAD</string>
+
+    <!-- Protocol Summary Screen (Step 04 of 04) -->
+    <string name="summary_header_step">STEP 04 OF 04</string>
+    <string name="summary_eyebrow">PROTOCOL SYNTHESIS</string>
+    <string name="summary_title">Protocol Summary</string>
+    <string name="summary_subtitle">Your daily targets and full biometric dossier. Hold any target to inspect its scientific calculation, or switch to Custom Edit to adjust goals.</string>
+    <string name="summary_mode_recommended">RECOMMENDED</string>
+    <string name="summary_mode_custom">CUSTOM EDIT</string>
+    <string name="summary_daily_energy_label">DAILY ENERGY GOAL</string>
+    <string name="summary_cta_lock_protocol">Lock In Daily Protocol</string>
+    <string name="summary_cta_protocol_locked">Protocol Active • Update Anytime</string>
+    <string name="cd_back_to_blueprint">Return to Blueprint</string>
 </resources>
