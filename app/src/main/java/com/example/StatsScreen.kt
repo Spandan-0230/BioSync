@@ -595,6 +595,9 @@ fun BioSyncStatsScreen(
   activityLevel: ActivityLevelOption,
   selectedWorkoutDays: Set<DayOfWeekOption>,
   protocolLockedAtEpochMillis: Long = 0L,
+  dayOneAnchorStartEpochMillis: Long = 0L,
+  dayOneInitialCountdownCompleted: Boolean = false,
+  showStatsOption: Boolean = true,
   onNavigateHome: () -> Unit,
   onOpenSettingsPage: () -> Unit,
   modifier: Modifier = Modifier,
@@ -1223,9 +1226,15 @@ fun BioSyncStatsScreen(
       }
     }
 
+    val isWaitingForInitialDayOneBottomBar = !dayOneInitialCountdownCompleted &&
+      dayOneAnchorStartEpochMillis > 0L &&
+      System.currentTimeMillis() < dayOneAnchorStartEpochMillis
+    val effectiveShowStats = showStatsOption && !isWaitingForInitialDayOneBottomBar
+
     // Centered Floating Bottom Bar (Home • Stats • Settings)
     BioSyncFloatingBottomBar(
       activeDestination = BioSyncFloatingNavDestination.STATS,
+      showStatsOption = effectiveShowStats,
       onSelectHome = onNavigateHome,
       onSelectStats = {},
       onSelectSettings = onOpenSettingsPage,

@@ -238,6 +238,9 @@ fun BioSyncSettingsScreen(
   activeFatsGrams: Int,
   activeHydrationMl: Int,
   activeStepsCount: Int,
+  dayOneAnchorStartEpochMillis: Long = 0L,
+  dayOneInitialCountdownCompleted: Boolean = false,
+  showStatsOption: Boolean = true,
   onNavigateBackToDashboard: () -> Unit,
   onNavigateToStats: () -> Unit = {},
   onEditStep01FromSettings: (focusSection: String?) -> Unit,
@@ -543,11 +546,21 @@ fun BioSyncSettingsScreen(
         )
       }
 
-      // Centered Floating Bottom Navigation Bar (Home • Stats • Settings)
+      val isWaitingForInitialDayOneBottomBar = !dayOneInitialCountdownCompleted &&
+        dayOneAnchorStartEpochMillis > 0L &&
+        liveNowEpochMs < dayOneAnchorStartEpochMillis
+      val effectiveShowStats = showStatsOption && !isWaitingForInitialDayOneBottomBar
+
+      // Centered Floating Bottom Navigation Bar (Home • Stats • Settings; Stats locked during Day 01 Clock Timer)
       BioSyncFloatingBottomBar(
         activeDestination = BioSyncFloatingNavDestination.SETTINGS,
+        showStatsOption = effectiveShowStats,
         onSelectHome = onNavigateBackToDashboard,
-        onSelectStats = onNavigateToStats,
+        onSelectStats = {
+          if (effectiveShowStats) {
+            onNavigateToStats()
+          }
+        },
         onSelectSettings = {},
         modifier = Modifier.align(Alignment.BottomCenter),
       )

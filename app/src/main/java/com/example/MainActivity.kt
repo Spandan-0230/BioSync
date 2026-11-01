@@ -940,13 +940,28 @@ fun BioSyncApp(
             currentStep = 6
           },
           onOpenStatsPage = {
-            isQuickEditMode = false
-            quickEditFocusSection = null
-            currentStep = 7
+            val isAnchorLockActive = !dayOneInitialCountdownCompleted &&
+              dayOneAnchorStartEpochMillis > 0L &&
+              System.currentTimeMillis() < dayOneAnchorStartEpochMillis
+            if (!isAnchorLockActive) {
+              isQuickEditMode = false
+              quickEditFocusSection = null
+              currentStep = 7
+            }
           },
         )
       }
       7 -> {
+        val isDayOneAnchorActive = !dayOneInitialCountdownCompleted &&
+          dayOneAnchorStartEpochMillis > 0L &&
+          System.currentTimeMillis() < dayOneAnchorStartEpochMillis
+
+        if (isDayOneAnchorActive) {
+          LaunchedEffect(Unit) {
+            currentStep = 5
+          }
+        }
+
         BioSyncStatsScreen(
           subjectName = subjectName,
           ageYears = calculatedAgeYears,
@@ -964,6 +979,9 @@ fun BioSyncApp(
           activityLevel = currentActivityLevel,
           selectedWorkoutDays = currentWorkoutDays,
           protocolLockedAtEpochMillis = protocolLockedAtEpochMillis,
+          dayOneAnchorStartEpochMillis = dayOneAnchorStartEpochMillis,
+          dayOneInitialCountdownCompleted = dayOneInitialCountdownCompleted,
+          showStatsOption = !isDayOneAnchorActive,
           onNavigateHome = {
             isQuickEditMode = false
             quickEditFocusSection = null
@@ -978,6 +996,10 @@ fun BioSyncApp(
         )
       }
       else -> {
+        val isDayOneAnchorActive = !dayOneInitialCountdownCompleted &&
+          dayOneAnchorStartEpochMillis > 0L &&
+          System.currentTimeMillis() < dayOneAnchorStartEpochMillis
+
         BioSyncSettingsScreen(
           subjectName = subjectName,
           selectedSex = selectedSex,
@@ -1016,15 +1038,23 @@ fun BioSyncApp(
           activeFatsGrams = customFatsGrams,
           activeHydrationMl = customHydrationMl,
           activeStepsCount = customStepsCount,
+          dayOneAnchorStartEpochMillis = dayOneAnchorStartEpochMillis,
+          dayOneInitialCountdownCompleted = dayOneInitialCountdownCompleted,
+          showStatsOption = !isDayOneAnchorActive,
           onNavigateBackToDashboard = {
             isQuickEditMode = false
             quickEditFocusSection = null
             currentStep = 5
           },
           onNavigateToStats = {
-            isQuickEditMode = false
-            quickEditFocusSection = null
-            currentStep = 7
+            val isAnchorLockActive = !dayOneInitialCountdownCompleted &&
+              dayOneAnchorStartEpochMillis > 0L &&
+              System.currentTimeMillis() < dayOneAnchorStartEpochMillis
+            if (!isAnchorLockActive) {
+              isQuickEditMode = false
+              quickEditFocusSection = null
+              currentStep = 7
+            }
           },
           onBackupRestored = applyRestoredBackupBundle,
           onEditStep01FromSettings = { focus ->
