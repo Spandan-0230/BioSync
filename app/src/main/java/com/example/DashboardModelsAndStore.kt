@@ -6,6 +6,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
@@ -397,6 +398,171 @@ data class DailyHistoricalRecord(
 )
 
 /**
+ * BioSync Streak Protocol Engine
+ *
+ * Efficient Streak Architecture with 2-Day Grace Buffer:
+ * 1. Pillar Qualification: A calendar day is qualified for the streak when all 6 pillars
+ *    (Steps, Calories, Protein, Carbs, Fats, Water) meet or exceed the streak threshold (e.g. 80%).
+ * 2. Daily Reset: On every new calendar day, today's telemetry (calories, macros, hydration, steps,
+ *    and timeline entries) resets to 0 fresh. The previous day's telemetry is archived into dailyHistoryMap.
+ * 3. 2-Day Buffer Rule:
+ *    - If the user achieves consecutive days (e.g. 3 days), the streak counter grows (1, 2, 3...).
+ *    - If the user misses a day, a grace buffer of up to 2 days is granted to protect the streak.
+ *    - Day +1 after last completed day: 0 full missed days (today active), streak held.
+ *    - Day +2 after last completed day: 1 full missed day, buffer day 1 active, streak held.
+ *    - If the user achieves within the 2-day buffer (daysElapsed <= 2), the streak extends by +1 (e.g. 3 -> 4).
+ *    - If the user misses both buffer days and still has not achieved the desired goal (daysElapsed > 2),
+ *      the 2-day buffer expires and the streak number immediately resets to 0!
+ *    - When the streak is 0, achieving the goal begins a fresh streak at 1.
+ */
+object BioSyncStreakEngine {
+  const val BUFFER_DAYS_ALLOWED = 2
+
+  /**
+   * Calculates the number of whole calendar days between two dayKey strings (YYYY-MM-DD).
+   * Returns a positive integer when `toDayKey` is after `fromDayKey`.
+   */
+  fun daysBetween(fromDayKey: String, toDayKey: String): Int {
+    if (fromDayKey.isBlank() || toDayKey.isBlank()) return 0
+    if (fromDayKey == toDayKey) return 0
+    return runCatching {
+      val partsFrom = fromDayKey.split("-").map { it.toInt() }
+      val partsTo = toDayKey.split("-").map { it.toInt() }
+      if (partsFrom.size != 3 || partsTo.size != 3) return 0
+      val c1 = Calendar.getInstance().apply {
+        set(partsFrom[0], partsFrom[1] - 1, partsFrom[2], 12, 0, 0)
+        set(Calendar.MILLISECOND, 0)
+      }
+      val c2 = Calendar.getInstance().apply {
+        set(partsTo[0], partsTo[1] - 1, partsTo[2], 12, 0, 0)
+        set(Calendar.MILLISECOND, 0)
+      }
+      val diffMillis = c2.timeInMillis - c1.timeInMillis
+      ((diffMillis + 43_200_000L) / 86_400_000L).toInt()
+    }.getOrDefault(0)
+  }
+
+  data class StreakEvaluation(
+    val streakDays: Int,
+    val lastCompletedDayKey: String,
+    val isInBufferGrace: Boolean,
+    val bufferDaysRemaining: Int,
+    val isBufferExpired: Boolean,
+  )
+
+  /**
+   * Evaluates the active streak given stored progress, today's completion status, and the 2-day buffer.
+   */
+  fun evaluateStreak(
+    storedBaseStreak: Int,
+    lastCompletedDayKey: String,
+    todayKey: String,
+    todayQualified: Boolean,
+  ): StreakEvaluation {
+    if (lastCompletedDayKey.isBlank() || storedBaseStreak <= 0) {
+      return if (todayQualified) {
+        StreakEvaluation(
+          streakDays = 1,
+          lastCompletedDayKey = todayKey,
+          isInBufferGrace = false,
+          bufferDaysRemaining = BUFFER_DAYS_ALLOWED,
+          isBufferExpired = false,
+        )
+      } else {
+        StreakEvaluation(
+          streakDays = 0,
+          lastCompletedDayKey = "",
+          isInBufferGrace = false,
+          bufferDaysRemaining = BUFFER_DAYS_ALLOWED,
+          isBufferExpired = false,
+        )
+      }
+    }
+
+    val daysElapsed = daysBetween(lastCompletedDayKey, todayKey)
+
+    if (daysElapsed <= 0) {
+      // Completed today (or future)
+      return if (todayQualified) {
+        StreakEvaluation(
+          streakDays = storedBaseStreak.coerceAtLeast(1),
+          lastCompletedDayKey = todayKey,
+          isInBufferGrace = false,
+          bufferDaysRemaining = BUFFER_DAYS_ALLOWED,
+          isBufferExpired = false,
+        )
+      } else {
+        // Was marked completed today, but un-qualified (e.g. food item deleted)
+        val reverted = (storedBaseStreak - 1).coerceAtLeast(0)
+        StreakEvaluation(
+          streakDays = reverted,
+          lastCompletedDayKey = "",
+          isInBufferGrace = false,
+          bufferDaysRemaining = BUFFER_DAYS_ALLOWED,
+          isBufferExpired = false,
+        )
+      }
+    }
+
+    // Days elapsed > 0
+    if (todayQualified) {
+      return if (daysElapsed <= BUFFER_DAYS_ALLOWED) {
+        // Completed within the 2-day buffer window! Streak continues and increments!
+        StreakEvaluation(
+          streakDays = storedBaseStreak + 1,
+          lastCompletedDayKey = todayKey,
+          isInBufferGrace = false,
+          bufferDaysRemaining = BUFFER_DAYS_ALLOWED,
+          isBufferExpired = false,
+        )
+      } else {
+        // Buffer was exceeded! Restart streak from 1.
+        StreakEvaluation(
+          streakDays = 1,
+          lastCompletedDayKey = todayKey,
+          isInBufferGrace = false,
+          bufferDaysRemaining = BUFFER_DAYS_ALLOWED,
+          isBufferExpired = true,
+        )
+      }
+    } else {
+      // Today is NOT yet qualified
+      return if (daysElapsed <= BUFFER_DAYS_ALLOWED) {
+        // Still within the 2-day buffer! Streak is preserved.
+        val bufferUsed = (daysElapsed - 1).coerceAtLeast(0)
+        val remaining = (BUFFER_DAYS_ALLOWED - bufferUsed).coerceAtLeast(0)
+        StreakEvaluation(
+          streakDays = storedBaseStreak,
+          lastCompletedDayKey = lastCompletedDayKey,
+          isInBufferGrace = bufferUsed > 0,
+          bufferDaysRemaining = remaining,
+          isBufferExpired = false,
+        )
+      } else {
+        // Buffer has been exceeded! Streak resets to 0.
+        StreakEvaluation(
+          streakDays = 0,
+          lastCompletedDayKey = "",
+          isInBufferGrace = false,
+          bufferDaysRemaining = 0,
+          isBufferExpired = true,
+        )
+      }
+    }
+  }
+
+  fun findLatestHistoricalCompletedDay(
+    historyMap: Map<String, DailyHistoricalRecord>,
+    excludingDayKey: String,
+  ): String {
+    return historyMap.values
+      .filter { it.streakQualified && it.dayKey != excludingDayKey }
+      .maxByOrNull { it.dayKey }
+      ?.dayKey ?: ""
+  }
+}
+
+/**
  * Snapshot of the persisted Dashboard state (Saved Quick Items, Created Single Items for the
  * Meal Builder, Today's Timeline logs, Streak counter, and Complete Historical Day-by-Day Database).
  */
@@ -426,6 +592,62 @@ object DashboardLocalStore {
   private fun prefs(context: Context): SharedPreferences =
     context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+  fun rolloverToDate(
+    context: Context,
+    currentData: DashboardStoredData,
+    targetDayKey: String,
+  ): DashboardStoredData {
+    if (currentData.dayKey == targetDayKey) return currentData
+
+    val oldDayKey = currentData.dayKey
+    val historyMap = currentData.dailyHistoryMap.toMutableMap()
+
+    // 1. Archive the previous day's telemetry into dailyHistoryMap
+    val existingOld = historyMap[oldDayKey]
+    val entries = currentData.todayTimelineEntries
+    val oldCal = entries.sumOf { it.caloriesKcal }.coerceAtLeast(0)
+    val oldPro = entries.sumOf { it.proteinGrams }.coerceAtLeast(0)
+    val oldCarb = entries.sumOf { it.carbsGrams }.coerceAtLeast(0)
+    val oldFat = entries.sumOf { it.fatsGrams }.coerceAtLeast(0)
+    val oldWat = entries.sumOf { it.hydrationMl }.coerceAtLeast(0)
+    val oldSteps = currentData.manualStepsToday.coerceAtLeast(0)
+
+    if (entries.isNotEmpty() || oldSteps > 0 || existingOld != null) {
+      historyMap[oldDayKey] = (existingOld ?: DailyHistoricalRecord(dayKey = oldDayKey)).copy(
+        stepsCount = max(existingOld?.stepsCount ?: 0, oldSteps),
+        caloriesKcal = max(existingOld?.caloriesKcal ?: 0, oldCal),
+        proteinGrams = max(existingOld?.proteinGrams ?: 0, oldPro),
+        carbsGrams = max(existingOld?.carbsGrams ?: 0, oldCarb),
+        fatsGrams = max(existingOld?.fatsGrams ?: 0, oldFat),
+        hydrationMl = max(existingOld?.hydrationMl ?: 0, oldWat),
+        timelineEntries = entries,
+        updatedAtEpochMs = System.currentTimeMillis(),
+      )
+    }
+
+    // 2. Evaluate streak according to the 2-day buffer rule:
+    // When a new day begins, today's goals have NOT been met yet (todayQualified = false)
+    val eval = BioSyncStreakEngine.evaluateStreak(
+      storedBaseStreak = currentData.baseStreakDays,
+      lastCompletedDayKey = currentData.lastCompletedStreakDayKey,
+      todayKey = targetDayKey,
+      todayQualified = false,
+    )
+
+    // 3. New day state: ALL progress bars strictly reset to 0, timeline empty
+    val newDayData = currentData.copy(
+      dayKey = targetDayKey,
+      baseStreakDays = eval.streakDays,
+      lastCompletedStreakDayKey = eval.lastCompletedDayKey,
+      manualStepsToday = 0,
+      todayTimelineEntries = emptyList(),
+      dailyHistoryMap = historyMap,
+    )
+
+    save(context, newDayData)
+    return newDayData
+  }
+
   fun load(context: Context): DashboardStoredData {
     val p = prefs(context)
     val todayKey = DashboardTimeFormatter.currentDayKey()
@@ -441,42 +663,22 @@ object DashboardLocalStore {
       p.getString(KEY_DAILY_HISTORY_MAP_JSON, "{}") ?: "{}",
     ).toMutableMap()
 
-    // If the calendar day rolled over, archive storedDayKey's timeline in dailyHistoryMap before starting fresh today
-    val timelineEntries = if (storedDayKey == todayKey) {
-      parsedStoredTimeline
-    } else {
-      if (parsedStoredTimeline.isNotEmpty() || storedManualSteps > 0) {
-        val existingPrev = loadedHistoryMap[storedDayKey]
-        val prevCal = parsedStoredTimeline.sumOf { it.caloriesKcal }.coerceAtLeast(0)
-        val prevPro = parsedStoredTimeline.sumOf { it.proteinGrams }.coerceAtLeast(0)
-        val prevCarb = parsedStoredTimeline.sumOf { it.carbsGrams }.coerceAtLeast(0)
-        val prevFat = parsedStoredTimeline.sumOf { it.fatsGrams }.coerceAtLeast(0)
-        val prevWat = parsedStoredTimeline.sumOf { it.hydrationMl }.coerceAtLeast(0)
-        loadedHistoryMap[storedDayKey] = (existingPrev ?: DailyHistoricalRecord(dayKey = storedDayKey)).copy(
-          stepsCount = max(existingPrev?.stepsCount ?: 0, storedManualSteps),
-          caloriesKcal = max(existingPrev?.caloriesKcal ?: 0, prevCal),
-          proteinGrams = max(existingPrev?.proteinGrams ?: 0, prevPro),
-          carbsGrams = max(existingPrev?.carbsGrams ?: 0, prevCarb),
-          fatsGrams = max(existingPrev?.fatsGrams ?: 0, prevFat),
-          hydrationMl = max(existingPrev?.hydrationMl ?: 0, prevWat),
-          timelineEntries = parsedStoredTimeline,
-          updatedAtEpochMs = System.currentTimeMillis(),
-        )
-      }
-      loadedHistoryMap[todayKey]?.timelineEntries ?: emptyList()
-    }
-    val manualStepsToday = if (storedDayKey == todayKey) storedManualSteps else 0
-
-    return DashboardStoredData(
-      dayKey = todayKey,
+    val rawData = DashboardStoredData(
+      dayKey = storedDayKey,
       baseStreakDays = baseStreak,
       lastCompletedStreakDayKey = lastStreakDay,
-      manualStepsToday = manualStepsToday,
+      manualStepsToday = storedManualSteps,
       allCreatedSingleItems = createdSingles,
       savedQuickItems = savedQuick,
-      todayTimelineEntries = timelineEntries,
+      todayTimelineEntries = parsedStoredTimeline,
       dailyHistoryMap = loadedHistoryMap,
     )
+
+    return if (storedDayKey != todayKey) {
+      rolloverToDate(context, rawData, todayKey)
+    } else {
+      rawData
+    }
   }
 
   fun save(context: Context, data: DashboardStoredData) {

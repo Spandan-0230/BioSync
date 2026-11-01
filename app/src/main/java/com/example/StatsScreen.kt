@@ -648,7 +648,16 @@ fun BioSyncStatsScreen(
     targetSteps,
     streakThresholdPercent,
     isTodayWorkoutDay,
+    dashboardData.dayKey,
   ) {
+    val currentDayKey = DashboardTimeFormatter.currentDayKey()
+    if (dashboardData.dayKey != currentDayKey) {
+      val rolledOver = DashboardLocalStore.rolloverToDate(context, dashboardData, currentDayKey)
+      dashboardData = rolledOver
+      BioSyncHealthStepManager.resetForNewDay(context, currentDayKey)
+      return@LaunchedEffect
+    }
+
     val entries = dashboardData.todayTimelineEntries
     val cal = entries.sumOf { it.caloriesKcal }.coerceAtLeast(0)
     val pro = entries.sumOf { it.proteinGrams }.coerceAtLeast(0)

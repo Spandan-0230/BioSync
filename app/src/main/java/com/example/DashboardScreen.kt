@@ -574,21 +574,28 @@ fun BioSyncDashboardScreen(
 
   LaunchedEffect(allSixMet, dashboardData.dayKey) {
     val todayKey = DashboardTimeFormatter.currentDayKey()
-    if (allSixMet && dashboardData.lastCompletedStreakDayKey != todayKey) {
-      haptics.confirm()
+    if (dashboardData.dayKey != todayKey) return@LaunchedEffect
+
+    val eval = BioSyncStreakEngine.evaluateStreak(
+      storedBaseStreak = dashboardData.baseStreakDays,
+      lastCompletedDayKey = dashboardData.lastCompletedStreakDayKey,
+      todayKey = todayKey,
+      todayQualified = allSixMet,
+    )
+    if (eval.streakDays != dashboardData.baseStreakDays || eval.lastCompletedDayKey != dashboardData.lastCompletedStreakDayKey) {
+      if (allSixMet && eval.streakDays > dashboardData.baseStreakDays) {
+        haptics.confirm()
+      }
+      val fallbackLastKey = if (!allSixMet && eval.lastCompletedDayKey.isBlank()) {
+        BioSyncStreakEngine.findLatestHistoricalCompletedDay(dashboardData.dailyHistoryMap, todayKey)
+      } else {
+        eval.lastCompletedDayKey
+      }
       persistDashboardData(
         dashboardData.copy(
           dayKey = todayKey,
-          baseStreakDays = dashboardData.baseStreakDays + 1,
-          lastCompletedStreakDayKey = todayKey,
-        ),
-      )
-    } else if (!allSixMet && dashboardData.lastCompletedStreakDayKey == todayKey) {
-      persistDashboardData(
-        dashboardData.copy(
-          dayKey = todayKey,
-          baseStreakDays = (dashboardData.baseStreakDays - 1).coerceAtLeast(0),
-          lastCompletedStreakDayKey = "",
+          baseStreakDays = eval.streakDays,
+          lastCompletedStreakDayKey = fallbackLastKey,
         ),
       )
     }
@@ -607,7 +614,16 @@ fun BioSyncDashboardScreen(
     streakThresholdPercent,
     allSixMet,
     isActiveWorkoutDay,
+    dashboardData.dayKey,
   ) {
+    val currentDayKey = DashboardTimeFormatter.currentDayKey()
+    if (dashboardData.dayKey != currentDayKey) {
+      val rolledOver = DashboardLocalStore.rolloverToDate(context, dashboardData, currentDayKey)
+      dashboardData = rolledOver
+      BioSyncHealthStepManager.resetForNewDay(context, currentDayKey)
+      return@LaunchedEffect
+    }
+
     val synced = DashboardLocalStore.withSyncedTodayRecord(
       data = dashboardData,
       liveSteps = liveSteps,
@@ -633,7 +649,9 @@ fun BioSyncDashboardScreen(
       liveNowEpochMs = tickMs
       val newDayKey = DashboardTimeFormatter.currentDayKey(tickMs)
       if (newDayKey != dashboardData.dayKey) {
-        dashboardData = DashboardLocalStore.load(context)
+        val rolledOver = DashboardLocalStore.rolloverToDate(context, dashboardData, newDayKey)
+        dashboardData = rolledOver
+        BioSyncHealthStepManager.resetForNewDay(context, newDayKey)
         pendingDeletedItem = null
       }
       val pending = pendingDeletedItem
@@ -814,10 +832,26 @@ fun BioSyncDashboardScreen(
             metrics = metrics,
           )
         } else {
+          val liveStreakEval = remember(
+            dashboardData.baseStreakDays,
+            dashboardData.lastCompletedStreakDayKey,
+            dashboardData.dayKey,
+            allSixMet,
+          ) {
+            BioSyncStreakEngine.evaluateStreak(
+              storedBaseStreak = dashboardData.baseStreakDays,
+              lastCompletedDayKey = dashboardData.lastCompletedStreakDayKey,
+              todayKey = dashboardData.dayKey,
+              todayQualified = allSixMet,
+            )
+          }
+
           // 2. PRIORITY #1 TOP BLOCK: STREAK PROTOCOL ENGINE (Positioned directly above Chronometric Reverse Telemetry)
           DashboardCombinedStreakHeroCard(
-            streakDays = dashboardData.baseStreakDays,
+            streakDays = liveStreakEval.streakDays,
             streakThresholdPercent = streakThresholdPercent,
+            isInBufferGrace = liveStreakEval.isInBufferGrace,
+            bufferDaysRemaining = liveStreakEval.bufferDaysRemaining,
             liveSteps = liveSteps,
             targetSteps = targetSteps,
             loggedCalories = loggedCalories,
@@ -2505,6 +2539,8 @@ private fun DashboardChronometricReverseCountdownCard(
 private fun DashboardCombinedStreakHeroCard(
   streakDays: Int,
   streakThresholdPercent: Int,
+  isInBufferGrace: Boolean = false,
+  bufferDaysRemaining: Int = BioSyncStreakEngine.BUFFER_DAYS_ALLOWED,
   liveSteps: Int,
   targetSteps: Int,
   loggedCalories: Int,
@@ -2623,17 +2659,22 @@ private fun DashboardCombinedStreakHeroCard(
           .clip(RoundedCornerShape(8.dp))
           .background(
             brush = Brush.horizontalGradient(
-              colors = if (allSixMet) {
-                listOf(streakGold, streakEmber)
-              } else {
-                listOf(PureWhite, streakPlatinum)
+              colors = when {
+                allSixMet -> listOf(streakGold, streakEmber)
+                isInBufferGrace -> listOf(Color(0xFFF59E0B), Color(0xFFD97706))
+                else -> listOf(PureWhite, streakPlatinum)
               },
             ),
           )
           .padding(horizontal = 9.dp, vertical = 4.dp),
       ) {
         Text(
-          text = if (allSixMet) "+1 STREAK LOCKED" else "GATE ≥ $streakThresholdPercent%",
+          text = when {
+            allSixMet -> "+1 STREAK EXTENDED"
+            isInBufferGrace -> "2D BUFFER • ${bufferDaysRemaining}D LEFT"
+            streakDays == 0 -> "DAY 01 GATE ≥ $streakThresholdPercent%"
+            else -> "GATE ≥ $streakThresholdPercent%"
+          },
           color = ObsidianBlack,
           fontFamily = JetBrainsMonoFontFamily,
           fontWeight = FontWeight.ExtraBold,
@@ -2750,8 +2791,12 @@ private fun DashboardCombinedStreakHeroCard(
 
           Column {
             Text(
-              text = "ACTIVE STREAK CHAIN",
-              color = Zinc300,
+              text = when {
+                isInBufferGrace -> "2-DAY BUFFER SHIELD ACTIVE"
+                streakDays == 0 -> "DAY 01 STREAK PRIMED"
+                else -> "ACTIVE STREAK CHAIN"
+              },
+              color = if (isInBufferGrace) streakGold else Zinc300,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.Bold,
               fontSize = 9.4.sp,
@@ -2761,7 +2806,7 @@ private fun DashboardCombinedStreakHeroCard(
             Row(verticalAlignment = Alignment.Bottom) {
               Text(
                 text = "$streakDays",
-                color = PureWhite,
+                color = if (streakDays > 0) PureWhite else Zinc400,
                 fontFamily = JetBrainsMonoFontFamily,
                 fontWeight = FontWeight.ExtraBold,
                 fontSize = 36.sp,
@@ -2772,7 +2817,7 @@ private fun DashboardCombinedStreakHeroCard(
               Spacer(modifier = Modifier.width(6.dp))
               Text(
                 text = if (streakDays == 1) "DAY STREAK" else "DAYS STREAK",
-                color = streakGold,
+                color = if (streakDays > 0) streakGold else Zinc500,
                 fontFamily = JetBrainsMonoFontFamily,
                 fontWeight = FontWeight.Bold,
                 fontSize = 10.5.sp,

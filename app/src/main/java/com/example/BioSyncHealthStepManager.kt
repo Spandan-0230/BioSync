@@ -448,6 +448,33 @@ object BioSyncHealthStepManager {
     probeHardwareStepCounterNow(context)
   }
 
+  fun resetForNewDay(context: Context, newDayKey: String) {
+    val appContext = context.applicationContext
+    synchronized(stateLock) {
+      currentDayKeyStr = newDayKey
+      syncedHealthConnectSteps = 0
+      syncedHealthConnectDistanceMeters = 0f
+      sensorBaselineAtSync = lastSeenRawCounter
+      localStepsSinceSync = 0
+    }
+    BioSyncLocalStore.saveStepTelemetrySnapshot(
+      context = appContext,
+      todaySyncedSteps = 0,
+      todayDistanceMeters = 0f,
+      stepSensorDayKey = newDayKey,
+      stepSensorBaselineCounter = lastSeenRawCounter,
+      stepSensorLastRawCounter = lastSeenRawCounter,
+    )
+    _syncState.value = _syncState.value.copy(
+      liveTodaySteps = 0,
+      healthConnectSteps = 0,
+      hardwareSensorSteps = 0,
+      liveDistanceMeters = 0f,
+      lastStepDetectedEpochMillis = 0L,
+      isActivelyWalking = false,
+    )
+  }
+
   fun initializeFromLocalStore(context: Context, currentDecidedGoal: Int) {
     val appContext = context.applicationContext
     activeAppContext = appContext
