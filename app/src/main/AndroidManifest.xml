@@ -109,6 +109,12 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- One-time Day 01 Anchor launch countdown alarm receiver -->
+        <receiver
+            android:name=".BioSyncDayOneAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
     </application>
 
 </manifest>

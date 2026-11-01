@@ -1,7 +1,13 @@
 package com.example
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.BlurMaskFilter
+import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -85,6 +91,12 @@ import com.example.ui.theme.CaloriesStart
 import com.example.ui.theme.CarbsEnd
 import com.example.ui.theme.CarbsMid
 import com.example.ui.theme.CarbsStart
+import com.example.ui.theme.ChronoBirthdayEnd
+import com.example.ui.theme.ChronoBirthdayMid
+import com.example.ui.theme.ChronoBirthdayStart
+import com.example.ui.theme.ChronoDayEnd
+import com.example.ui.theme.ChronoDayMid
+import com.example.ui.theme.ChronoDayStart
 import com.example.ui.theme.FatsEnd
 import com.example.ui.theme.FatsMid
 import com.example.ui.theme.FatsStart
@@ -101,6 +113,9 @@ import com.example.ui.theme.PureWhite
 import com.example.ui.theme.StepsEnd
 import com.example.ui.theme.StepsMid
 import com.example.ui.theme.StepsStart
+import com.example.ui.theme.StreakReadinessEnd
+import com.example.ui.theme.StreakReadinessMid
+import com.example.ui.theme.StreakReadinessStart
 import java.text.NumberFormat
 import java.util.Calendar
 import java.util.Locale
@@ -432,6 +447,11 @@ fun BioSyncDashboardScreen(
   mealFrequency: MealFrequencyOption,
   activityLevel: ActivityLevelOption,
   selectedWorkoutDays: Set<DayOfWeekOption>,
+  dayOne: DayOfWeekOption = DayOfWeekOption.MONDAY,
+  protocolLockedAtEpochMillis: Long = 0L,
+  dayOneAnchorStartEpochMillis: Long = 0L,
+  dayOneInitialCountdownCompleted: Boolean = true,
+  onDayOneCountdownFinished: () -> Unit = {},
   onOpenProtocolSummary: () -> Unit,
   onOpenSettingsPage: () -> Unit = onOpenProtocolSummary,
   modifier: Modifier = Modifier,
@@ -683,18 +703,79 @@ fun BioSyncDashboardScreen(
 
         Spacer(modifier = Modifier.height(metrics.sectionGap))
 
-        // 1B. CHRONOMETRIC REVERSE COUNTDOWN DECK (Day Remaining to End + Next Birthday Reverse Countdown)
-        DashboardChronometricReverseCountdownCard(
-          nowEpochMs = liveNowEpochMs,
-          ageYears = ageYears,
-          birthDay = birthDay,
-          birthMonthZeroBased = birthMonthZeroBased,
-          birthYear = birthYear,
-          borderFlashProgress = if (activeFlashCardIndex == 6) cardFlashProgress else 0f,
-          metrics = metrics,
-        )
+        val isWaitingForInitialDayOne = !dayOneInitialCountdownCompleted &&
+          dayOneAnchorStartEpochMillis > 0L &&
+          liveNowEpochMs < dayOneAnchorStartEpochMillis
 
-        Spacer(modifier = Modifier.height(metrics.sectionGap))
+        val notificationPermLauncher = rememberLauncherForActivityResult(
+          contract = ActivityResultContracts.RequestPermission(),
+        ) { _ -> }
+
+        LaunchedEffect(isWaitingForInitialDayOne, dayOneAnchorStartEpochMillis) {
+          if (isWaitingForInitialDayOne) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+              val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+              ) == PackageManager.PERMISSION_GRANTED
+              if (!granted) {
+                runCatching {
+                  notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+              }
+            }
+            BioSyncDayOneNotificationHelper.scheduleOneTimeDayOneAlarm(
+              context = context,
+              triggerAtEpochMillis = dayOneAnchorStartEpochMillis,
+            )
+          }
+        }
+
+        // One-time trigger when the initial Day 01 Anchor countdown reaches 00:00:00
+        LaunchedEffect(
+          dayOneInitialCountdownCompleted,
+          dayOneAnchorStartEpochMillis,
+          liveNowEpochMs >= dayOneAnchorStartEpochMillis,
+        ) {
+          if (
+            !dayOneInitialCountdownCompleted &&
+            dayOneAnchorStartEpochMillis > 0L &&
+            liveNowEpochMs >= dayOneAnchorStartEpochMillis
+          ) {
+            haptics.confirm()
+            BioSyncDayOneNotificationHelper.fireDayOneStartedNotificationOnce(
+              context = context,
+              subjectName = subjectName,
+              dayOne = dayOne,
+            )
+            onDayOneCountdownFinished()
+          }
+        }
+
+        if (isWaitingForInitialDayOne) {
+          // ONE-TIME INITIAL DAY 01 ANCHOR LAUNCH COUNTDOWN SCREEN
+          // Shown ONLY before the user's selected Day 1 weekday arrives for the very first time.
+          DashboardInitialDayOneCountdownView(
+            dayOne = dayOne,
+            nowEpochMs = liveNowEpochMs,
+            lockedAtEpochMs = protocolLockedAtEpochMillis,
+            anchorStartEpochMs = dayOneAnchorStartEpochMillis,
+            ambientPhase = ambientPulse,
+            metrics = metrics,
+          )
+        } else {
+          // 1B. CHRONOMETRIC REVERSE COUNTDOWN DECK (Day Remaining to End + Next Birthday Reverse Countdown)
+          DashboardChronometricReverseCountdownCard(
+            nowEpochMs = liveNowEpochMs,
+            ageYears = ageYears,
+            birthDay = birthDay,
+            birthMonthZeroBased = birthMonthZeroBased,
+            birthYear = birthYear,
+            borderFlashProgress = if (activeFlashCardIndex == 6) cardFlashProgress else 0f,
+            metrics = metrics,
+          )
+
+          Spacer(modifier = Modifier.height(metrics.sectionGap))
 
         // 2. FLOATING COMBINED DAILY STREAK CARD (Attractive 3x2 Pillar Bento Grid)
         DashboardCombinedStreakHeroCard(
@@ -829,6 +910,8 @@ fun BioSyncDashboardScreen(
               carbsGrams = itemToLog.carbsGrams,
               fatsGrams = itemToLog.fatsGrams,
               hydrationMl = 0,
+              colorArgb = itemToLog.colorArgb,
+              mixedFromColorArgbs = itemToLog.mixedFromColorArgbs,
             )
             persistDashboardData(
               dashboardData.copy(
@@ -852,6 +935,8 @@ fun BioSyncDashboardScreen(
               carbsGrams = savedItem.carbsGrams,
               fatsGrams = savedItem.fatsGrams,
               hydrationMl = 0,
+              colorArgb = savedItem.colorArgb,
+              mixedFromColorArgbs = savedItem.mixedFromColorArgbs,
             )
             persistDashboardData(
               dashboardData.copy(
@@ -860,9 +945,16 @@ fun BioSyncDashboardScreen(
             )
           },
           onDeleteSavedQuickItem = { itemId ->
+            val targetToDelete = dashboardData.savedQuickItems.firstOrNull { it.id == itemId }
             persistDashboardData(
               dashboardData.copy(
                 savedQuickItems = dashboardData.savedQuickItems.filterNot { it.id == itemId },
+                allCreatedSingleItems = dashboardData.allCreatedSingleItems.filterNot { item ->
+                  item.id == itemId ||
+                    (targetToDelete != null &&
+                      !targetToDelete.isMeal &&
+                      item.name.equals(targetToDelete.name, ignoreCase = true))
+                },
               ),
             )
           },
@@ -910,7 +1002,399 @@ fun BioSyncDashboardScreen(
           haptics = haptics,
           numberFormat = numberFormat,
         )
+        }
       }
+    }
+  }
+}
+
+// ============================================================================
+// ONE-TIME DAY 01 ANCHOR LAUNCH COUNTDOWN VIEW
+// Shown strictly once when the user locks in Step 04 with an upcoming Day 1 weekday.
+// Once the timer hits 00:00:00, a notification fires and the full Dashboard unlocks permanently.
+// ============================================================================
+
+@Composable
+private fun DashboardInitialDayOneCountdownView(
+  dayOne: DayOfWeekOption,
+  nowEpochMs: Long,
+  lockedAtEpochMs: Long,
+  anchorStartEpochMs: Long,
+  ambientPhase: Float,
+  metrics: DashboardResponsiveMetrics,
+) {
+  val remainingMs = (anchorStartEpochMs - nowEpochMs).coerceAtLeast(0L)
+  val totalSecs = (remainingMs / 1000L).coerceAtLeast(0L)
+  val daysLeft = (totalSecs / 86_400L).toInt()
+  val hoursLeft = ((totalSecs % 86_400L) / 3600L).toInt()
+  val minsLeft = ((totalSecs % 3600L) / 60L).toInt()
+  val secsLeft = (totalSecs % 60L).toInt()
+
+  val totalSpanMs = if (lockedAtEpochMs in 1 until anchorStartEpochMs) {
+    (anchorStartEpochMs - lockedAtEpochMs).coerceAtLeast(1_000L)
+  } else {
+    (7L * 86_400_000L)
+  }
+  val progressFraction = (1f - (remainingMs.toFloat() / totalSpanMs.toFloat())).coerceIn(0.05f, 0.99f)
+  val progressPercent = (progressFraction * 100f).roundToInt().coerceIn(1, 99)
+
+  val targetDateFormatted = remember(anchorStartEpochMs) {
+    val cal = Calendar.getInstance().apply { timeInMillis = anchorStartEpochMs }
+    val monthStr = DashboardMonthShortNames.getOrElse(cal.get(Calendar.MONTH)) { "NOV" }
+    val dayNum = cal.get(Calendar.DAY_OF_MONTH).toString().padStart(2, '0')
+    val yearNum = cal.get(Calendar.YEAR)
+    "$monthStr $dayNum, $yearNum • 12:00 AM"
+  }
+
+  val warmTitanium = Color(0xFFE5DEC9)
+  val warmTitaniumMuted = Color(0xFFC8BFA8)
+  val brushedSilver = Color(0xFFE4E4E7)
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .floating3DProtocolCard(
+        cornerRadiusDp = metrics.cardCornerRadius,
+        topRimTint = warmTitanium,
+      )
+      .padding(metrics.cardPadding)
+      .testTag("dashboard_initial_day_one_countdown_card"),
+    horizontalAlignment = Alignment.CenterHorizontally,
+  ) {
+    // Top Status Bar: Horological Dial Node + Sculpted Platinum Emblem
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        DashboardSyncedHeaderDot(
+          startColor = PureWhite,
+          endColor = warmTitanium,
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+          Text(
+            text = "DAY 01 ANCHOR LAUNCH VAULT",
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(10.4f, 8.8f, 11.8f),
+            letterSpacing = 0.9.sp,
+          )
+          Text(
+            text = "CHRONO SEALED UNTIL 00:00:00",
+            color = warmTitaniumMuted,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = metrics.spScaled(7.5f, 6.6f, 8.5f),
+            letterSpacing = 0.6.sp,
+          )
+        }
+      }
+
+      Row(
+        modifier = Modifier
+          .clip(RoundedCornerShape(7.dp))
+          .background(
+            brush = Brush.horizontalGradient(
+              colors = listOf(PureWhite, warmTitanium, brushedSilver),
+            ),
+          )
+          .border(0.9.dp, PureWhite, RoundedCornerShape(7.dp))
+          .padding(start = 6.dp, end = 8.dp, top = 3.5.dp, bottom = 3.5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+      ) {
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(ObsidianBlack)
+            .padding(horizontal = 4.5.dp, vertical = 1.5.dp),
+        ) {
+          Text(
+            text = "01×",
+            color = warmTitanium,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(7.4f, 6.5f, 8.4f),
+          )
+        }
+        Text(
+          text = "LAUNCH GATE",
+          color = ObsidianBlack,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = metrics.spScaled(8.0f, 7.0f, 9.0f),
+          letterSpacing = 0.5.sp,
+        )
+      }
+    }
+
+    Spacer(modifier = Modifier.height((18f * metrics.scale).coerceIn(12f, 22f).dp))
+
+    // Sculpted 3D Haute-Horlogerie Platinum & Warm Titanium Orbital Chronometer Ring
+    val ringSize = (186f * metrics.scale).coerceIn(150f, 214f).dp
+    Box(
+      modifier = Modifier.size(ringSize),
+      contentAlignment = Alignment.Center,
+    ) {
+      Canvas(modifier = Modifier.fillMaxSize()) {
+        val strokePx = 8.5.dp.toPx()
+        val innerRadius = (size.minDimension / 2f) - strokePx
+        val centerOffset = Offset(size.width / 2f, size.height / 2f)
+
+        // Subtle radial platinum halo
+        drawCircle(
+          brush = Brush.radialGradient(
+            colors = listOf(
+              warmTitanium.copy(alpha = 0.10f),
+              PureWhite.copy(alpha = 0.03f),
+              Color.Transparent,
+            ),
+            center = centerOffset,
+            radius = size.minDimension * 0.52f,
+          ),
+          radius = size.minDimension * 0.52f,
+          center = centerOffset,
+        )
+
+        // Outer recessed carbon-obsidian track
+        drawCircle(
+          color = Color(0xFF0E0E12),
+          radius = innerRadius,
+          center = centerOffset,
+          style = Stroke(width = strokePx),
+        )
+
+        // Inner and outer metallic bezel hairlines
+        drawCircle(
+          color = PureWhite.copy(alpha = 0.16f),
+          radius = innerRadius + strokePx * 0.52f,
+          center = centerOffset,
+          style = Stroke(width = 0.8.dp.toPx()),
+        )
+        drawCircle(
+          color = warmTitanium.copy(alpha = 0.14f),
+          radius = innerRadius - strokePx * 0.52f,
+          center = centerOffset,
+          style = Stroke(width = 0.8.dp.toPx()),
+        )
+
+        // Specular Brushed Platinum & Warm Titanium progress arc
+        drawArc(
+          brush = Brush.sweepGradient(
+            colors = listOf(
+              Color(0xFF71717A),
+              warmTitaniumMuted,
+              warmTitanium,
+              PureWhite,
+              warmTitanium,
+            ),
+          ),
+          startAngle = -90f,
+          sweepAngle = 360f * progressFraction,
+          useCenter = false,
+          style = Stroke(width = strokePx, cap = StrokeCap.Round),
+        )
+
+        // Inner 60-tooth precision watchmaker bezel tick ring
+        val tickRadius = innerRadius - 12.dp.toPx()
+        for (i in 0 until 60) {
+          val isMajor = i % 5 == 0
+          val angleRad = Math.toRadians((i * 6.0) - 90.0 + sin(ambientPhase.toDouble()) * 1.2)
+          val startR = tickRadius - if (isMajor) 5.5.dp.toPx() else 2.5.dp.toPx()
+          val sx = centerOffset.x + (cos(angleRad) * startR).toFloat()
+          val sy = centerOffset.y + (sin(angleRad) * startR).toFloat()
+          val ex = centerOffset.x + (cos(angleRad) * tickRadius).toFloat()
+          val ey = centerOffset.y + (sin(angleRad) * tickRadius).toFloat()
+          drawLine(
+            color = if (isMajor) warmTitanium.copy(alpha = 0.52f) else Zinc700.copy(alpha = 0.38f),
+            start = Offset(sx, sy),
+            end = Offset(ex, ey),
+            strokeWidth = if (isMajor) 1.35.dp.toPx() else 0.8.dp.toPx(),
+            cap = StrokeCap.Round,
+          )
+        }
+      }
+
+      Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+      ) {
+        Text(
+          text = "DAY 01 ANCHOR",
+          color = warmTitaniumMuted,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = metrics.spScaled(8.4f, 7.4f, 9.6f),
+          letterSpacing = 1.0.sp,
+        )
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(
+          text = dayOne.fullName.uppercase(),
+          color = PureWhite,
+          fontFamily = InterFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = metrics.spScaled(20f, 16.5f, 23f),
+          letterSpacing = (-0.4).sp,
+        )
+        Spacer(modifier = Modifier.height(5.dp))
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+              brush = Brush.horizontalGradient(
+                colors = listOf(PureWhite, warmTitanium),
+              ),
+            )
+            .border(0.8.dp, PureWhite, RoundedCornerShape(6.dp))
+            .padding(horizontal = 9.dp, vertical = 2.5.dp),
+        ) {
+          Text(
+            text = "$progressPercent% CALIBRATED",
+            color = ObsidianBlack,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(8.2f, 7.2f, 9.4f),
+            letterSpacing = 0.5.sp,
+          )
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height((18f * metrics.scale).coerceIn(12f, 22f).dp))
+
+    // 4-Chamber Mechanical Split-Flap / Keycap Countdown Grid (DAYS : HOURS : MINS : SECS)
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(metrics.bentoGap),
+    ) {
+      val timeUnits = listOf(
+        "DAYS" to String.format(Locale.US, "%02d", daysLeft),
+        "HOURS" to String.format(Locale.US, "%02d", hoursLeft),
+        "MINS" to String.format(Locale.US, "%02d", minsLeft),
+        "SECS" to String.format(Locale.US, "%02d", secsLeft),
+      )
+      timeUnits.forEach { (unitLabel, unitValue) ->
+        val isSecs = unitLabel == "SECS"
+        Column(
+          modifier = Modifier
+            .weight(1f)
+            .floating3DInnerTile(
+              cornerRadiusDp = 11.dp,
+              accentColor = if (isSecs) warmTitanium else PureWhite,
+            )
+            .padding(vertical = (11f * metrics.scale).coerceIn(8.5f, 14f).dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center,
+        ) {
+          Text(
+            text = unitValue,
+            color = if (isSecs) warmTitanium else PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(22f, 18f, 26f),
+            letterSpacing = (-0.5).sp,
+            maxLines = 1,
+          )
+          Spacer(modifier = Modifier.height(3.dp))
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(4.dp))
+              .background(if (isSecs) warmTitanium.copy(alpha = 0.16f) else Color(0xFF070709))
+              .border(
+                width = 0.6.dp,
+                color = if (isSecs) warmTitanium.copy(alpha = 0.45f) else Color(0xFF232329),
+                shape = RoundedCornerShape(4.dp),
+              )
+              .padding(horizontal = 6.dp, vertical = 1.5.dp),
+          ) {
+            Text(
+              text = unitLabel,
+              color = if (isSecs) warmTitanium else Zinc400,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = metrics.spScaled(7.6f, 6.6f, 8.8f),
+              letterSpacing = 0.7.sp,
+              maxLines = 1,
+            )
+          }
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height(14.dp))
+
+    // Target Unlock Date & Notification Horological Dossier Box
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(12.dp))
+        .background(
+          brush = Brush.verticalGradient(
+            colors = listOf(Color(0xFF0B0B0E), Color(0xFF050507)),
+          ),
+        )
+        .border(
+          width = 1.dp,
+          brush = Brush.horizontalGradient(
+            colors = listOf(
+              PureWhite.copy(alpha = 0.32f),
+              warmTitanium.copy(alpha = 0.28f),
+              Color(0xFF222227),
+            ),
+          ),
+          shape = RoundedCornerShape(12.dp),
+        )
+        .padding(horizontal = 13.dp, vertical = 11.dp),
+      verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          text = "PROTOCOL UNLOCK WINDOW",
+          color = warmTitaniumMuted,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = metrics.spScaled(8.4f, 7.4f, 9.6f),
+          letterSpacing = 0.7.sp,
+        )
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+              brush = Brush.horizontalGradient(
+                colors = listOf(PureWhite, warmTitanium),
+              ),
+            )
+            .padding(horizontal = 7.5.dp, vertical = 2.5.dp),
+        ) {
+          Text(
+            text = targetDateFormatted,
+            color = ObsidianBlack,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(8.4f, 7.4f, 9.6f),
+            letterSpacing = 0.3.sp,
+          )
+        }
+      }
+
+      HorizontalDivider(color = Color(0xFF1F1F24), thickness = 0.8.dp)
+
+      Text(
+        text = "Your full Daily Protocol Dashboard will unlock automatically when this one-time chronometer reaches 00:00:00, and a system notification will alert you to begin Day 01.",
+        color = Zinc300,
+        fontFamily = InterFontFamily,
+        fontSize = metrics.spScaled(11.2f, 9.8f, 12.5f),
+        lineHeight = metrics.spScaled(16f, 14f, 18f),
+      )
     }
   }
 }
@@ -1357,7 +1841,7 @@ private fun DashboardTopNavigationHeader(
               modifier = Modifier
                 .size(4.5.dp)
                 .clip(CircleShape)
-                .background(StepsStart),
+                .background(ChronoBirthdayStart),
             )
             Text(
               text = "BIOMETRIC DOB",
@@ -1645,7 +2129,7 @@ private fun DashboardChronometricReverseCountdownCard(
       .fillMaxWidth()
       .floating3DProtocolCard(
         cornerRadiusDp = metrics.cardCornerRadius,
-        topRimTint = PureWhite,
+        topRimTint = ChronoDayStart,
         borderFlashProgress = borderFlashProgress,
       )
       .padding(metrics.cardPadding)
@@ -1660,8 +2144,8 @@ private fun DashboardChronometricReverseCountdownCard(
     ) {
       Row(verticalAlignment = Alignment.CenterVertically) {
         DashboardSyncedHeaderDot(
-          startColor = PureWhite,
-          endColor = HydrationStart,
+          startColor = ChronoDayStart,
+          endColor = ChronoBirthdayStart,
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
@@ -1678,9 +2162,9 @@ private fun DashboardChronometricReverseCountdownCard(
 
       Text(
         text = "LIVE SYNC • 1S",
-        color = Zinc400,
+        color = ChronoBirthdayStart,
         fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.SemiBold,
         fontSize = metrics.spScaled(9.2f, 8f, 10.6f),
         letterSpacing = 0.6.sp,
       )
@@ -1690,13 +2174,13 @@ private fun DashboardChronometricReverseCountdownCard(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.spacedBy(metrics.bentoGap),
     ) {
-      // Chamber 1: Day Remaining to End Reverse Countdown
+      // Chamber 1: Day Remaining to End Reverse Countdown (Signature Electric Amethyst-Violet)
       Column(
         modifier = Modifier
           .weight(1f)
           .floating3DInnerTile(
             cornerRadiusDp = 12.dp,
-            accentColor = HydrationStart,
+            accentColor = ChronoDayStart,
           )
           .padding(metrics.innerTilePadding)
           .testTag("dashboard_day_remaining_tile"),
@@ -1715,7 +2199,11 @@ private fun DashboardChronometricReverseCountdownCard(
                 .width(3.dp)
                 .height(11.dp)
                 .clip(RoundedCornerShape(1.5.dp))
-                .background(HydrationStart),
+                .background(
+                  brush = Brush.verticalGradient(
+                    colors = listOf(ChronoDayStart, ChronoDayMid),
+                  ),
+                ),
             )
             Text(
               text = "DAY REMAINING",
@@ -1730,7 +2218,7 @@ private fun DashboardChronometricReverseCountdownCard(
 
           Text(
             text = "$dayRemainingPct% LEFT",
-            color = HydrationStart,
+            color = ChronoDayStart,
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.Bold,
             fontSize = metrics.spScaled(8.8f, 7.5f, 10f),
@@ -1765,11 +2253,11 @@ private fun DashboardChronometricReverseCountdownCard(
 
         Spacer(modifier = Modifier.height(7.dp))
 
-        // Reverse Progress Bar (Drains as day nears midnight)
+        // Reverse Progress Bar (Unique Electric Amethyst -> Lavender -> Specular Tip)
         Canvas(
           modifier = Modifier
             .fillMaxWidth()
-            .height(5.dp),
+            .height(5.5.dp),
         ) {
           val r = CornerRadius(size.height / 2f, size.height / 2f)
           drawRoundRect(
@@ -1780,7 +2268,7 @@ private fun DashboardChronometricReverseCountdownCard(
           val fillW = (size.width * dayRemainingFraction.coerceIn(0.05f, 1f)).coerceAtLeast(size.height)
           drawRoundRect(
             brush = Brush.horizontalGradient(
-              colors = listOf(HydrationMid, HydrationStart, PureWhite),
+              colors = listOf(ChronoDayEnd, ChronoDayMid, ChronoDayStart, PureWhite),
               startX = 0f,
               endX = fillW,
             ),
@@ -1790,13 +2278,13 @@ private fun DashboardChronometricReverseCountdownCard(
         }
       }
 
-      // Chamber 2: Next Birthday Reverse Countdown
+      // Chamber 2: Next Birthday Reverse Countdown (Signature Burnished Copper -> Warm Champagne Rose-Gold)
       Column(
         modifier = Modifier
           .weight(1f)
           .floating3DInnerTile(
             cornerRadiusDp = 12.dp,
-            accentColor = StepsStart,
+            accentColor = ChronoBirthdayStart,
           )
           .padding(metrics.innerTilePadding)
           .testTag("dashboard_next_birthday_tile"),
@@ -1815,7 +2303,11 @@ private fun DashboardChronometricReverseCountdownCard(
                 .width(3.dp)
                 .height(11.dp)
                 .clip(RoundedCornerShape(1.5.dp))
-                .background(StepsStart),
+                .background(
+                  brush = Brush.verticalGradient(
+                    colors = listOf(ChronoBirthdayStart, ChronoBirthdayMid),
+                  ),
+                ),
             )
             Text(
               text = "NEXT BIRTHDAY",
@@ -1830,7 +2322,7 @@ private fun DashboardChronometricReverseCountdownCard(
 
           Text(
             text = nextBirthdayDateLabel,
-            color = StepsStart,
+            color = ChronoBirthdayStart,
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.Bold,
             fontSize = metrics.spScaled(8.8f, 7.5f, 10f),
@@ -1869,11 +2361,11 @@ private fun DashboardChronometricReverseCountdownCard(
 
         Spacer(modifier = Modifier.height(7.dp))
 
-        // Annual Birthday Countdown Progress Bar
+        // Annual Birthday Countdown Progress Bar (Unique Deep Bronze -> Burnished Copper -> Warm Champagne)
         Canvas(
           modifier = Modifier
             .fillMaxWidth()
-            .height(5.dp),
+            .height(5.5.dp),
         ) {
           val r = CornerRadius(size.height / 2f, size.height / 2f)
           drawRoundRect(
@@ -1884,7 +2376,7 @@ private fun DashboardChronometricReverseCountdownCard(
           val fillW = (size.width * bdayCycleProgress.coerceIn(0.05f, 1f)).coerceAtLeast(size.height)
           drawRoundRect(
             brush = Brush.horizontalGradient(
-              colors = listOf(StepsMid, StepsStart, PureWhite),
+              colors = listOf(ChronoBirthdayEnd, ChronoBirthdayMid, ChronoBirthdayStart, PureWhite),
               startX = 0f,
               endX = fillW,
             ),
@@ -1991,7 +2483,15 @@ private fun DashboardCombinedStreakHeroCard(
       Box(
         modifier = Modifier
           .clip(RoundedCornerShape(8.dp))
-          .background(if (allSixMet) StepsStart else HydrationStart)
+          .background(
+            brush = Brush.horizontalGradient(
+              colors = if (allSixMet) {
+                listOf(StreakReadinessStart, StreakReadinessMid)
+              } else {
+                listOf(PureWhite, StreakReadinessStart)
+              },
+            ),
+          )
           .padding(horizontal = 9.dp, vertical = 4.dp),
       ) {
         Text(
@@ -2018,7 +2518,7 @@ private fun DashboardCombinedStreakHeroCard(
         .fillMaxWidth()
         .floating3DInnerTile(
           cornerRadiusDp = 12.dp,
-          accentColor = if (allSixMet) StepsStart else PureWhite,
+          accentColor = StreakReadinessStart,
           isHighlighted = allSixMet,
         )
         .padding(horizontal = 13.dp, vertical = 11.dp),
@@ -2038,7 +2538,11 @@ private fun DashboardCombinedStreakHeroCard(
                 .width(3.5.dp)
                 .height(12.dp)
                 .clip(RoundedCornerShape(2.dp))
-                .background(if (allSixMet) StepsStart else PureWhite),
+                .background(
+                  brush = Brush.verticalGradient(
+                    colors = listOf(StreakReadinessStart, StreakReadinessMid),
+                  ),
+                ),
             )
             Text(
               text = "COMBINED DAILY STREAK",
@@ -2085,7 +2589,7 @@ private fun DashboardCombinedStreakHeroCard(
             )
             Text(
               text = "${(overallReadinessFraction * 100).roundToInt()}%",
-              color = if (allSixMet) StepsStart else PureWhite,
+              color = StreakReadinessStart,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.Bold,
               fontSize = 17.sp,
@@ -2094,7 +2598,7 @@ private fun DashboardCombinedStreakHeroCard(
           Spacer(modifier = Modifier.height(2.dp))
           Text(
             text = "$qualifiedCount of 6 pillars ≥$streakThresholdPercent%",
-            color = if (allSixMet) StepsStart else Zinc400,
+            color = if (allSixMet) StreakReadinessStart else Zinc400,
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.Medium,
             fontSize = 9.8.sp,
@@ -2107,9 +2611,9 @@ private fun DashboardCombinedStreakHeroCard(
       DashboardSpectrumGaugeBar(
         fillFraction = animatedReadiness,
         thresholdFraction = streakThresholdPercent / 100f,
-        startColor = if (allSixMet) StepsStart else Zinc300,
-        midColor = if (allSixMet) StepsMid else PureWhite,
-        endColor = PureWhite,
+        startColor = StreakReadinessEnd,
+        midColor = StreakReadinessMid,
+        endColor = StreakReadinessStart,
         barHeight = 6.5.dp,
       )
     }

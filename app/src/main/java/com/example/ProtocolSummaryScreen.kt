@@ -227,6 +227,7 @@ fun ProtocolSummaryScreen(
   experienceLevel: ExperienceLevelOption,
   targetPace: TargetPaceOption,
   dayOne: DayOfWeekOption,
+  onSelectDayOne: (DayOfWeekOption) -> Unit = {},
   mealFrequency: MealFrequencyOption,
   caffeineAlcoholYes: Boolean,
   sodiumFrequency: SodiumFrequencyOption,
@@ -702,6 +703,19 @@ fun ProtocolSummaryScreen(
         )
 
         Spacer(modifier = Modifier.height(metrics.sectionGap))
+
+        // 5B. First-Time Only: Day 01 Protocol Anchor Selector Card (Only shown before initial lock-in)
+        if (!protocolLockedIn && !isReturnToSettings) {
+          Step04InitialDayOneAnchorSelectorCard(
+            selectedDayOne = dayOne,
+            onSelectDayOne = { chosenDay ->
+              haptics.selection()
+              onSelectDayOne(chosenDay)
+            },
+            metrics = metrics,
+          )
+          Spacer(modifier = Modifier.height(metrics.sectionGap))
+        }
 
         // 6. Primary Lock In Protocol Button & Encrypted Footer
         SummaryLockInFooterSection(
@@ -3521,6 +3535,474 @@ private fun DossierMatrixTile(
       maxLines = 1,
       overflow = TextOverflow.Ellipsis,
     )
+  }
+}
+
+// ─── First-Time Only: Step 04 Day 01 Protocol Anchor Selector Card ──────────
+
+@Composable
+private fun Step04InitialDayOneAnchorSelectorCard(
+  selectedDayOne: DayOfWeekOption,
+  onSelectDayOne: (DayOfWeekOption) -> Unit,
+  metrics: SummaryResponsiveMetrics,
+) {
+  val isSelectedToday = remember(selectedDayOne) {
+    BioSyncLocalStore.isSameWeekdayAsToday(selectedDayOne)
+  }
+  val cardShape = RoundedCornerShape(metrics.cardCornerRadius)
+  val warmTitanium = Color(0xFFE5DEC9)
+  val warmTitaniumMuted = Color(0xFFC8BFA8)
+  val brushedSilver = Color(0xFFE4E4E7)
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(cardShape)
+      .drawWithCache {
+        val cornerPx = metrics.cardCornerRadius.toPx()
+        val bodyBrush = Brush.verticalGradient(
+          colorStops = arrayOf(
+            0.0f to Color(0xFF17171B),
+            0.35f to Color(0xFF0E0E12),
+            1.0f to Color(0xFF060608),
+          ),
+        )
+        val topCrownGlow = Brush.radialGradient(
+          colors = listOf(
+            warmTitanium.copy(alpha = 0.14f),
+            PureWhite.copy(alpha = 0.05f),
+            Color.Transparent,
+          ),
+          center = Offset(size.width * 0.25f, 0f),
+          radius = size.width * 0.85f,
+        )
+        val outerBevelBrush = Brush.verticalGradient(
+          colorStops = arrayOf(
+            0.0f to PureWhite.copy(alpha = 0.42f),
+            0.25f to warmTitanium.copy(alpha = 0.22f),
+            0.7f to Color(0xFF27272A),
+            1.0f to Color(0xFF141417),
+          ),
+        )
+        onDrawBehind {
+          drawRoundRect(
+            brush = bodyBrush,
+            cornerRadius = CornerRadius(cornerPx, cornerPx),
+          )
+          drawRoundRect(
+            brush = topCrownGlow,
+            cornerRadius = CornerRadius(cornerPx, cornerPx),
+          )
+          drawRoundRect(
+            brush = outerBevelBrush,
+            cornerRadius = CornerRadius(cornerPx, cornerPx),
+            style = Stroke(width = 1.15.dp.toPx()),
+          )
+          // Precision top specular edge highlight
+          drawLine(
+            brush = Brush.horizontalGradient(
+              colors = listOf(
+                Color.Transparent,
+                PureWhite.copy(alpha = 0.62f),
+                warmTitanium.copy(alpha = 0.48f),
+                Color.Transparent,
+              ),
+            ),
+            start = Offset(cornerPx * 0.9f, 0.8.dp.toPx()),
+            end = Offset(size.width - cornerPx * 0.9f, 0.8.dp.toPx()),
+            strokeWidth = 1.dp.toPx(),
+          )
+        }
+      }
+      .padding(metrics.cardPadding)
+      .testTag("step04_day_one_anchor_card"),
+    verticalArrangement = Arrangement.spacedBy(11.dp),
+  ) {
+    // Top Header Row: Horological Emblem + Sculpted Brushed-Platinum Launch Gate Pill
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        // 3D Metallic Chronometer Dial Node
+        Box(
+          modifier = Modifier
+            .size(18.dp)
+            .clip(RoundedCornerShape(5.dp))
+            .background(
+              brush = Brush.linearGradient(
+                colors = listOf(PureWhite, warmTitanium),
+              ),
+            )
+            .border(0.8.dp, PureWhite, RoundedCornerShape(5.dp)),
+          contentAlignment = Alignment.Center,
+        ) {
+          Canvas(modifier = Modifier.size(10.dp)) {
+            val r = size.minDimension / 2f
+            drawCircle(
+              color = ObsidianBlack,
+              radius = r,
+              style = Stroke(width = 1.3.dp.toPx()),
+            )
+            drawLine(
+              color = ObsidianBlack,
+              start = center,
+              end = Offset(center.x, center.y - r * 0.62f),
+              strokeWidth = 1.3.dp.toPx(),
+              cap = StrokeCap.Round,
+            )
+            drawLine(
+              color = ObsidianBlack,
+              start = center,
+              end = Offset(center.x + r * 0.48f, center.y),
+              strokeWidth = 1.3.dp.toPx(),
+              cap = StrokeCap.Round,
+            )
+          }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+          Text(
+            text = "DAY 01 PROTOCOL ANCHOR",
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(10.2f, 8.8f, 11.6f),
+            letterSpacing = 0.8.sp,
+          )
+          Text(
+            text = "CHRONO IGNITION CALIBRATION",
+            color = warmTitaniumMuted,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = metrics.spScaled(7.5f, 6.6f, 8.5f),
+            letterSpacing = 0.6.sp,
+          )
+        }
+      }
+
+      // Sculpted Dual-Tone Brushed Platinum & Obsidian "1-TIME LAUNCH GATE" Emblem
+      Row(
+        modifier = Modifier
+          .clip(RoundedCornerShape(7.dp))
+          .background(
+            brush = Brush.horizontalGradient(
+              colors = listOf(PureWhite, warmTitanium, brushedSilver),
+            ),
+          )
+          .border(
+            width = 0.9.dp,
+            color = PureWhite,
+            shape = RoundedCornerShape(7.dp),
+          )
+          .padding(start = 6.dp, end = 8.dp, top = 3.5.dp, bottom = 3.5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+      ) {
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(ObsidianBlack)
+            .padding(horizontal = 4.5.dp, vertical = 1.5.dp),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            text = "01×",
+            color = warmTitanium,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(7.4f, 6.5f, 8.4f),
+            letterSpacing = 0.3.sp,
+          )
+        }
+        Text(
+          text = "LAUNCH GATE",
+          color = ObsidianBlack,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = metrics.spScaled(8.0f, 7.0f, 9.0f),
+          letterSpacing = 0.5.sp,
+        )
+      }
+    }
+
+    Text(
+      text = "Select the weekday you want to begin your Day 01 protocol. Choosing today's weekday unlocks your Dashboard immediately without any timer; choosing an upcoming day arms a one-time countdown until 12:00 AM.",
+      color = Zinc300,
+      fontFamily = InterFontFamily,
+      fontSize = metrics.spScaled(11.3f, 10f, 12.6f),
+      lineHeight = metrics.spScaled(16.2f, 14.4f, 18.2f),
+    )
+
+    // Recessed Horological Keycap Rack (7-Day Tactile Selector)
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(12.dp))
+        .background(Color(0xFF050507))
+        .border(
+          width = 1.dp,
+          brush = Brush.verticalGradient(
+            colors = listOf(Color(0xFF222227), Color(0xFF121216)),
+          ),
+          shape = RoundedCornerShape(12.dp),
+        )
+        .padding(horizontal = (6f * metrics.scale).coerceIn(4.5f, 8f).dp, vertical = (6.5f * metrics.scale).coerceIn(5f, 8.5f).dp),
+      horizontalArrangement = Arrangement.spacedBy((5f * metrics.scale).coerceIn(3.5f, 7f).dp),
+    ) {
+      DayOfWeekOption.entries.forEach { option ->
+        val isSelected = option == selectedDayOne
+        val isTodayOption = BioSyncLocalStore.isSameWeekdayAsToday(option)
+        val chipCorner = (8.5f * metrics.scale).coerceIn(6.5f, 10.5f).dp
+        val chipShape = RoundedCornerShape(chipCorner)
+
+        Column(
+          modifier = Modifier
+            .weight(1f)
+            .clip(chipShape)
+            .drawWithCache {
+              val rPx = chipCorner.toPx()
+              val fillBrush = when {
+                isSelected -> Brush.verticalGradient(
+                  colorStops = arrayOf(
+                    0.0f to PureWhite,
+                    0.55f to Color(0xFFF2EFE9),
+                    1.0f to warmTitanium,
+                  ),
+                )
+                isTodayOption -> Brush.verticalGradient(
+                  colors = listOf(Color(0xFF1D1C1A), Color(0xFF10100E)),
+                )
+                else -> Brush.verticalGradient(
+                  colors = listOf(Color(0xFF141418), Color(0xFF0A0A0D)),
+                )
+              }
+              val strokeBrush = when {
+                isSelected -> Brush.verticalGradient(
+                  colors = listOf(PureWhite, warmTitaniumMuted),
+                )
+                isTodayOption -> Brush.verticalGradient(
+                  colors = listOf(warmTitanium.copy(alpha = 0.78f), warmTitaniumMuted.copy(alpha = 0.32f)),
+                )
+                else -> Brush.verticalGradient(
+                  colors = listOf(PureWhite.copy(alpha = 0.16f), Color(0xFF1F1F24)),
+                )
+              }
+              onDrawBehind {
+                drawRoundRect(
+                  brush = fillBrush,
+                  cornerRadius = CornerRadius(rPx, rPx),
+                )
+                drawRoundRect(
+                  brush = strokeBrush,
+                  cornerRadius = CornerRadius(rPx, rPx),
+                  style = Stroke(width = if (isSelected || isTodayOption) 1.15.dp.toPx() else 0.85.dp.toPx()),
+                )
+                // Top keycap specular rim
+                drawLine(
+                  color = if (isSelected) PureWhite else PureWhite.copy(alpha = if (isTodayOption) 0.35f else 0.14f),
+                  start = Offset(rPx * 0.7f, 0.8.dp.toPx()),
+                  end = Offset(size.width - rPx * 0.7f, 0.8.dp.toPx()),
+                  strokeWidth = 0.9.dp.toPx(),
+                )
+              }
+            }
+            .clickable(
+              role = Role.RadioButton,
+              onClick = { onSelectDayOne(option) },
+            )
+            .padding(vertical = (7.5f * metrics.scale).coerceIn(6f, 9.5f).dp, horizontal = 2.dp)
+            .testTag("step04_day_one_chip_${option.name.lowercase()}"),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center,
+        ) {
+          // Top micro-tick indicator
+          Box(
+            modifier = Modifier
+              .width(if (isSelected) 12.dp else 6.dp)
+              .height(2.dp)
+              .clip(CircleShape)
+              .background(
+                when {
+                  isSelected -> ObsidianBlack
+                  isTodayOption -> warmTitanium
+                  else -> Zinc700
+                },
+              ),
+          )
+
+          Spacer(modifier = Modifier.height(4.dp))
+
+          Text(
+            text = option.shortCode,
+            color = when {
+              isSelected -> ObsidianBlack
+              isTodayOption -> warmTitanium
+              else -> PureWhite
+            },
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(10.2f, 8.6f, 11.6f),
+            maxLines = 1,
+          )
+
+          Spacer(modifier = Modifier.height(3.5.dp))
+
+          // Bottom micro-capsule inside each keycap
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(4.dp))
+              .background(
+                when {
+                  isSelected -> ObsidianBlack
+                  isTodayOption -> warmTitanium.copy(alpha = 0.16f)
+                  else -> Color(0xFF070709)
+                },
+              )
+              .border(
+                width = 0.6.dp,
+                color = when {
+                  isSelected -> ObsidianBlack
+                  isTodayOption -> warmTitanium.copy(alpha = 0.45f)
+                  else -> Color(0xFF232329)
+                },
+                shape = RoundedCornerShape(4.dp),
+              )
+              .padding(horizontal = 4.dp, vertical = 1.5.dp),
+            contentAlignment = Alignment.Center,
+          ) {
+            Text(
+              text = when {
+                isTodayOption && isSelected -> "NOW"
+                isTodayOption -> "TODAY"
+                isSelected -> "DAY 1"
+                else -> "D01"
+              },
+              color = when {
+                isSelected -> PureWhite
+                isTodayOption -> warmTitanium
+                else -> Zinc500
+              },
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = metrics.spScaled(6.6f, 5.8f, 7.5f),
+              maxLines = 1,
+            )
+          }
+        }
+      }
+    }
+
+    // Bespoke Two-Chamber 3D Metallic Telemetry Console (replaces generic blue/green status box)
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(11.dp))
+        .background(
+          brush = Brush.horizontalGradient(
+            colors = listOf(Color(0xFF08080B), Color(0xFF101014), Color(0xFF08080B)),
+          ),
+        )
+        .border(
+          width = 1.dp,
+          brush = Brush.horizontalGradient(
+            colors = listOf(
+              PureWhite.copy(alpha = 0.35f),
+              warmTitanium.copy(alpha = 0.28f),
+              Color(0xFF27272A),
+            ),
+          ),
+          shape = RoundedCornerShape(11.dp),
+        )
+        .padding(horizontal = 11.dp, vertical = 9.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      // Left Brushed-Platinum / Warm-Titanium Mode Monolith
+      Column(
+        modifier = Modifier
+          .clip(RoundedCornerShape(7.dp))
+          .background(
+            brush = if (isSelectedToday) {
+              Brush.verticalGradient(colors = listOf(PureWhite, brushedSilver))
+            } else {
+              Brush.verticalGradient(colors = listOf(warmTitanium, warmTitaniumMuted))
+            },
+          )
+          .border(0.8.dp, PureWhite, RoundedCornerShape(7.dp))
+          .padding(horizontal = 8.dp, vertical = 5.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+      ) {
+        Text(
+          text = if (isSelectedToday) "INSTANT" else "00:00:00",
+          color = ObsidianBlack,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = metrics.spScaled(8.0f, 7.0f, 9.0f),
+          letterSpacing = 0.4.sp,
+          maxLines = 1,
+        )
+        Text(
+          text = if (isSelectedToday) "BYPASS" else "LOCK GATE",
+          color = Color(0xFF27272A),
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = metrics.spScaled(6.6f, 5.8f, 7.4f),
+          letterSpacing = 0.4.sp,
+          maxLines = 1,
+        )
+      }
+
+      // Right Two-Line Crisp Horological Readout
+      Column(
+        modifier = Modifier.weight(1f),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          Box(
+            modifier = Modifier
+              .size(5.dp)
+              .clip(CircleShape)
+              .background(if (isSelectedToday) PureWhite else warmTitanium),
+          )
+          Text(
+            text = if (isSelectedToday) {
+              "TODAY IS ${selectedDayOne.fullName.uppercase()} • IMMEDIATE PROTOCOL START"
+            } else {
+              "UPCOMING ${selectedDayOne.fullName.uppercase()} • 1-TIME LAUNCH COUNTDOWN"
+            },
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(8.6f, 7.5f, 9.8f),
+            letterSpacing = 0.4.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+        Text(
+          text = if (isSelectedToday) {
+            "Zero countdown wait — Dashboard unlocks immediately upon lock-in."
+          } else {
+            "Dashboard stays sealed until 12:00 AM ${selectedDayOne.fullName}, then fires a 1-time alert."
+          },
+          color = warmTitaniumMuted,
+          fontFamily = InterFontFamily,
+          fontWeight = FontWeight.Medium,
+          fontSize = metrics.spScaled(10.0f, 8.8f, 11.2f),
+          maxLines = 2,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
+    }
   }
 }
 

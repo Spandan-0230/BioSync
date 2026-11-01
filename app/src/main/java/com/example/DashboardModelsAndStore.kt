@@ -3,12 +3,15 @@ package com.example
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.runtime.Immutable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -21,9 +24,116 @@ enum class DashboardEntryType(
 }
 
 /**
+ * Curated & Custom Color Alchemy engine for Quick Actions Single Items & Combined Meals.
+ * Supports:
+ * - 12 distinct signature color swatches
+ * - Custom 360° HSV spectrum & Hex color creation
+ * - Perceptual optical color mixing when combining 2+ Single Items into a Meal
+ */
+@Immutable
+data class QuickColorPreset(
+  val name: String,
+  val argb: Long,
+)
+
+object QuickItemColorAlchemy {
+  val presets: List<QuickColorPreset> = listOf(
+    QuickColorPreset("Solar Amber", 0xFFFFB703L),
+    QuickColorPreset("Crimson Ruby", 0xFFF43F5EL),
+    QuickColorPreset("Electric Amethyst", 0xFFA855F7L),
+    QuickColorPreset("Neon Orchid", 0xFFEC4899L),
+    QuickColorPreset("Champagne Gold", 0xFFE5DEC9L),
+    QuickColorPreset("Sunset Coral", 0xFFFF6B4AL),
+    QuickColorPreset("Cyber Emerald", 0xFF10B981L),
+    QuickColorPreset("Arctic Cyan", 0xFF06B6D4L),
+    QuickColorPreset("Royal Indigo", 0xFF6366F1L),
+    QuickColorPreset("Lime Chartreuse", 0xFFA3E635L),
+    QuickColorPreset("Burnished Copper", 0xFFD97736L),
+    QuickColorPreset("Brushed Platinum", 0xFFE4E4E7L),
+  )
+
+  fun defaultColorForItem(name: String, isMeal: Boolean): Long {
+    val hash = kotlin.math.abs(name.trim().lowercase(Locale.US).hashCode())
+    return if (isMeal) {
+      presets[(hash + 2) % presets.size].argb
+    } else {
+      presets[hash % presets.size].argb
+    }
+  }
+
+  fun argbToColor(argb: Long): Color {
+    val safe = if (argb == 0L) 0xFFFFB703L else (argb or 0xFF000000L)
+    return Color(safe.toInt())
+  }
+
+  fun colorToArgbLong(color: Color): Long {
+    return (color.toArgb().toLong() and 0xFFFFFFFFL) or 0xFF000000L
+  }
+
+  /**
+   * Mixes 2 or more Single Item colors into a vibrant, perceptually balanced Combined Meal color
+   * using root-mean-square RGB + chroma preservation so mixed colors stay luminous and rich.
+   */
+  fun mixItemColors(argbs: List<Long>): Long {
+    val valid = argbs.filter { it != 0L }
+    if (valid.isEmpty()) return 0xFFA855F7L
+    if (valid.size == 1) return valid.first() or 0xFF000000L
+
+    var sumR2 = 0.0
+    var sumG2 = 0.0
+    var sumB2 = 0.0
+    for (raw in valid) {
+      val c = argbToColor(raw)
+      sumR2 += (c.red * c.red).toDouble()
+      sumG2 += (c.green * c.green).toDouble()
+      sumB2 += (c.blue * c.blue).toDouble()
+    }
+    val n = valid.size.toDouble()
+    var r = sqrt(sumR2 / n).toFloat().coerceIn(0f, 1f)
+    var g = sqrt(sumG2 / n).toFloat().coerceIn(0f, 1f)
+    var b = sqrt(sumB2 / n).toFloat().coerceIn(0f, 1f)
+
+    // Boost saturation slightly if opposite colors partially cancelled out
+    val hsv = FloatArray(3)
+    android.graphics.Color.RGBToHSV(
+      (r * 255).roundToInt().coerceIn(0, 255),
+      (g * 255).roundToInt().coerceIn(0, 255),
+      (b * 255).roundToInt().coerceIn(0, 255),
+      hsv,
+    )
+    hsv[1] = (hsv[1] * 1.18f).coerceIn(0.35f, 0.95f)
+    hsv[2] = hsv[2].coerceIn(0.78f, 1.0f)
+    val boostedInt = android.graphics.Color.HSVToColor(hsv)
+    return (boostedInt.toLong() and 0xFFFFFFFFL) or 0xFF000000L
+  }
+
+  fun hsvToArgbLong(hue: Float, saturation: Float, value: Float): Long {
+    val hsv = floatArrayOf(
+      hue.coerceIn(0f, 360f),
+      saturation.coerceIn(0.15f, 1f),
+      value.coerceIn(0.45f, 1f),
+    )
+    val cInt = android.graphics.Color.HSVToColor(hsv)
+    return (cInt.toLong() and 0xFFFFFFFFL) or 0xFF000000L
+  }
+
+  fun argbToHexCode(argb: Long): String {
+    val rgb = (argb and 0xFFFFFFL).toInt()
+    return String.format(Locale.US, "#%06X", rgb)
+  }
+
+  fun parseHexToArgbOrNull(rawHex: String): Long? {
+    val cleaned = rawHex.trim().removePrefix("#").uppercase(Locale.US)
+    if (cleaned.length != 6) return null
+    val parsed = cleaned.toLongOrNull(16) ?: return null
+    return parsed or 0xFF000000L
+  }
+}
+
+/**
  * A user-saved Single Item or Meal stored in the Quick Actions shelf.
  * Also used as the building block for selecting multiple Single Items or
- * dragging one Single Item onto another to create a Meal.
+ * holding for 2 seconds and overlapping one Single Item onto another to create a Meal.
  */
 @Immutable
 data class SavedQuickNutritionItem(
@@ -36,6 +146,8 @@ data class SavedQuickNutritionItem(
   val fatsGrams: Int,
   val componentNames: List<String> = emptyList(),
   val isSavedToQuickActions: Boolean = true,
+  val colorArgb: Long = QuickItemColorAlchemy.defaultColorForItem(name, isMeal),
+  val mixedFromColorArgbs: List<Long> = emptyList(),
   val createdAtEpochMs: Long = System.currentTimeMillis(),
 )
 
@@ -53,6 +165,8 @@ data class DashboardTimelineEntry(
   val carbsGrams: Int = 0,
   val fatsGrams: Int = 0,
   val hydrationMl: Int = 0,
+  val colorArgb: Long = 0L,
+  val mixedFromColorArgbs: List<Long> = emptyList(),
   val timestampEpochMs: Long = System.currentTimeMillis(),
   val formattedTimeAmPm: String = DashboardTimeFormatter.formatAmPm(timestampEpochMs),
 )
@@ -339,10 +453,14 @@ object DashboardLocalStore {
         put("carbsGrams", item.carbsGrams)
         put("fatsGrams", item.fatsGrams)
         put("isSavedToQuickActions", item.isSavedToQuickActions)
+        put("colorArgb", item.colorArgb)
         put("createdAtEpochMs", item.createdAtEpochMs)
         val comps = JSONArray()
         item.componentNames.forEach { comps.put(it) }
         put("componentNames", comps)
+        val mixedArr = JSONArray()
+        item.mixedFromColorArgbs.forEach { mixedArr.put(it) }
+        put("mixedFromColorArgbs", mixedArr)
       }
       arr.put(obj)
     }
@@ -363,17 +481,30 @@ object DashboardLocalStore {
             if (c.isNotBlank()) comps.add(c)
           }
         }
+        val mixedArr = obj.optJSONArray("mixedFromColorArgbs")
+        val mixedColors = mutableListOf<Long>()
+        if (mixedArr != null) {
+          for (j in 0 until mixedArr.length()) {
+            val cVal = mixedArr.optLong(j, 0L)
+            if (cVal != 0L) mixedColors.add(cVal)
+          }
+        }
+        val parsedName = obj.optString("name", "Item")
+        val parsedIsMeal = obj.optBoolean("isMeal", false)
+        val defaultColor = QuickItemColorAlchemy.defaultColorForItem(parsedName, parsedIsMeal)
         list.add(
           SavedQuickNutritionItem(
             id = obj.optString("id", UUID.randomUUID().toString()),
-            name = obj.optString("name", "Item"),
-            isMeal = obj.optBoolean("isMeal", false),
+            name = parsedName,
+            isMeal = parsedIsMeal,
             caloriesKcal = obj.optInt("caloriesKcal", 0),
             proteinGrams = obj.optInt("proteinGrams", 0),
             carbsGrams = obj.optInt("carbsGrams", 0),
             fatsGrams = obj.optInt("fatsGrams", 0),
             componentNames = comps,
             isSavedToQuickActions = obj.optBoolean("isSavedToQuickActions", true),
+            colorArgb = obj.optLong("colorArgb", defaultColor).let { if (it == 0L) defaultColor else it },
+            mixedFromColorArgbs = mixedColors,
             createdAtEpochMs = obj.optLong("createdAtEpochMs", System.currentTimeMillis()),
           ),
         )
@@ -395,6 +526,10 @@ object DashboardLocalStore {
         put("carbsGrams", e.carbsGrams)
         put("fatsGrams", e.fatsGrams)
         put("hydrationMl", e.hydrationMl)
+        put("colorArgb", e.colorArgb)
+        val mixedArr = JSONArray()
+        e.mixedFromColorArgbs.forEach { mixedArr.put(it) }
+        put("mixedFromColorArgbs", mixedArr)
         put("timestampEpochMs", e.timestampEpochMs)
         put("formattedTimeAmPm", e.formattedTimeAmPm)
       }
@@ -413,6 +548,14 @@ object DashboardLocalStore {
         val parsedType = runCatching { DashboardEntryType.valueOf(typeName) }
           .getOrDefault(DashboardEntryType.SINGLE_ITEM)
         val ts = obj.optLong("timestampEpochMs", System.currentTimeMillis())
+        val mixedArr = obj.optJSONArray("mixedFromColorArgbs")
+        val mixedColors = mutableListOf<Long>()
+        if (mixedArr != null) {
+          for (j in 0 until mixedArr.length()) {
+            val cVal = mixedArr.optLong(j, 0L)
+            if (cVal != 0L) mixedColors.add(cVal)
+          }
+        }
         list.add(
           DashboardTimelineEntry(
             id = obj.optString("id", UUID.randomUUID().toString()),
@@ -424,6 +567,8 @@ object DashboardLocalStore {
             carbsGrams = obj.optInt("carbsGrams", 0),
             fatsGrams = obj.optInt("fatsGrams", 0),
             hydrationMl = obj.optInt("hydrationMl", 0),
+            colorArgb = obj.optLong("colorArgb", 0L),
+            mixedFromColorArgbs = mixedColors,
             timestampEpochMs = ts,
             formattedTimeAmPm = obj.optString("formattedTimeAmPm", DashboardTimeFormatter.formatAmPm(ts)),
           ),

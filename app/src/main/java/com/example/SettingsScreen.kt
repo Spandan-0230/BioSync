@@ -79,6 +79,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.ui.theme.CaloriesStart
 import com.example.ui.theme.CarbsStart
+import com.example.ui.theme.ChronoBirthdayStart
+import com.example.ui.theme.ChronoDayStart
 import com.example.ui.theme.FatsStart
 import com.example.ui.theme.HydrationStart
 import com.example.ui.theme.InterFontFamily
@@ -842,7 +844,7 @@ private fun SettingsIdentityHeroCard(
       ) {
         Text(
           text = "DAY REMAINING",
-          color = HydrationStart,
+          color = ChronoDayStart,
           fontFamily = JetBrainsMonoFontFamily,
           fontWeight = FontWeight.Bold,
           fontSize = metrics.spScaled(8.8f, 7.8f, 10f),
@@ -872,7 +874,7 @@ private fun SettingsIdentityHeroCard(
       ) {
         Text(
           text = "NEXT BIRTHDAY",
-          color = StepsStart,
+          color = ChronoBirthdayStart,
           fontFamily = JetBrainsMonoFontFamily,
           fontWeight = FontWeight.Bold,
           fontSize = metrics.spScaled(8.8f, 7.8f, 10f),
@@ -1550,91 +1552,403 @@ private fun SettingsFactoryResetCard(
   metrics: SettingsResponsiveMetrics,
 ) {
   val cardShape = RoundedCornerShape(metrics.cardCornerRadius)
+  val roseTint = Color(0xFFFDA4AF)
+  val crimsonAccent = Color(0xFFF43F5E)
+  val deepGarnet = Color(0xFF881337)
+
   Column(
     modifier = Modifier
       .fillMaxWidth()
       .clip(cardShape)
-      .background(
-        brush = Brush.verticalGradient(
-          colors = listOf(Color(0xFF1A0F12), Color(0xFF0C0809)),
-        ),
-      )
-      .border(
-        width = 1.1.dp,
-        brush = Brush.verticalGradient(
-          colors = listOf(DangerCrimson.copy(alpha = 0.55f), Color(0xFF3F1D24), SettingsZinc900),
-        ),
-        shape = cardShape,
-      )
+      .drawWithCache {
+        val cornerPx = metrics.cardCornerRadius.toPx()
+        val bodyBrush = Brush.verticalGradient(
+          colorStops = arrayOf(
+            0.0f to Color(0xFF1F0D12),
+            0.42f to Color(0xFF11080B),
+            1.0f to Color(0xFF070406),
+          ),
+        )
+        val topRadialGlow = Brush.radialGradient(
+          colors = listOf(
+            DangerCrimson.copy(alpha = 0.20f),
+            crimsonAccent.copy(alpha = 0.06f),
+            Color.Transparent,
+          ),
+          center = Offset(size.width * 0.22f, 0f),
+          radius = size.width * 0.88f,
+        )
+        val borderBrush = Brush.verticalGradient(
+          colorStops = arrayOf(
+            0.0f to roseTint.copy(alpha = 0.65f),
+            0.3f to DangerCrimson.copy(alpha = 0.50f),
+            0.75f to Color(0xFF3F1621),
+            1.0f to Color(0xFF1F0C12),
+          ),
+        )
+        onDrawBehind {
+          drawRoundRect(
+            brush = bodyBrush,
+            cornerRadius = CornerRadius(cornerPx, cornerPx),
+          )
+          drawRoundRect(
+            brush = topRadialGlow,
+            cornerRadius = CornerRadius(cornerPx, cornerPx),
+          )
+          drawRoundRect(
+            brush = borderBrush,
+            cornerRadius = CornerRadius(cornerPx, cornerPx),
+            style = Stroke(width = 1.2.dp.toPx()),
+          )
+          // Top specular crimson-platinum rim highlight
+          drawLine(
+            brush = Brush.horizontalGradient(
+              colors = listOf(
+                Color.Transparent,
+                roseTint.copy(alpha = 0.82f),
+                PureWhite.copy(alpha = 0.55f),
+                DangerCrimson.copy(alpha = 0.65f),
+                Color.Transparent,
+              ),
+            ),
+            start = Offset(cornerPx * 0.85f, 0.9.dp.toPx()),
+            end = Offset(size.width - cornerPx * 0.85f, 0.9.dp.toPx()),
+            strokeWidth = 1.1.dp.toPx(),
+          )
+        }
+      }
       .padding(metrics.cardPadding)
       .testTag("settings_factory_reset_card"),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
+    // 1. Header Row: 3D Hazard Emblem + Dual-Line Title + Sculpted Dual-Tone DANGER ZONE Badge
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Row(
+        modifier = Modifier.weight(1f),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+      ) {
+        // 3D Crimson Warning Monolith Node
+        Box(
+          modifier = Modifier
+            .size(26.dp)
+            .clip(RoundedCornerShape(7.dp))
+            .background(
+              brush = Brush.linearGradient(
+                colors = listOf(roseTint, DangerCrimson, deepGarnet),
+              ),
+            )
+            .border(0.9.dp, roseTint.copy(alpha = 0.9f), RoundedCornerShape(7.dp)),
+          contentAlignment = Alignment.Center,
+        ) {
+          Canvas(modifier = Modifier.size(13.dp)) {
+            val w = size.width
+            val h = size.height
+            val triPath = Path().apply {
+              moveTo(w * 0.5f, h * 0.10f)
+              lineTo(w * 0.92f, h * 0.88f)
+              lineTo(w * 0.08f, h * 0.88f)
+              close()
+            }
+            drawPath(
+              path = triPath,
+              color = ObsidianBlack,
+              style = Stroke(
+                width = 1.5.dp.toPx(),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+              ),
+            )
+            drawLine(
+              color = ObsidianBlack,
+              start = Offset(w * 0.5f, h * 0.38f),
+              end = Offset(w * 0.5f, h * 0.62f),
+              strokeWidth = 1.5.dp.toPx(),
+              cap = StrokeCap.Round,
+            )
+            drawCircle(
+              color = ObsidianBlack,
+              radius = 1.0.dp.toPx(),
+              center = Offset(w * 0.5f, h * 0.75f),
+            )
+          }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(1.5.dp)) {
+          Text(
+            text = "SYSTEM DATABASE & FACTORY RESET",
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(10.4f, 9.0f, 11.8f),
+            letterSpacing = 0.8.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+          Text(
+            text = "IRREVERSIBLE LOCAL VAULT PURGE PROTOCOL",
+            color = roseTint.copy(alpha = 0.85f),
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = metrics.spScaled(7.5f, 6.6f, 8.6f),
+            letterSpacing = 0.6.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.width(6.dp))
+
+      // Sculpted Dual-Tone 3D "DANGER ZONE" Security Interlock Pill
+      Row(
+        modifier = Modifier
+          .clip(RoundedCornerShape(7.dp))
+          .background(
+            brush = Brush.horizontalGradient(
+              colors = listOf(Color(0xFF2D0A12), Color(0xFF4C0D19)),
+            ),
+          )
+          .border(
+            width = 0.95.dp,
+            brush = Brush.horizontalGradient(
+              colors = listOf(roseTint.copy(alpha = 0.85f), DangerCrimson.copy(alpha = 0.7f)),
+            ),
+            shape = RoundedCornerShape(7.dp),
+          )
+          .padding(start = 5.dp, end = 8.dp, top = 3.5.dp, bottom = 3.5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
       ) {
         Box(
           modifier = Modifier
-            .size(7.5.dp)
-            .clip(CircleShape)
-            .background(DangerCrimson),
-        )
-        Text(
-          text = "SYSTEM DATABASE & FACTORY RESET",
-          color = PureWhite,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.Bold,
-          fontSize = metrics.spScaled(10.8f, 9.4f, 12.2f),
-          letterSpacing = 1.0.sp,
-        )
-      }
-
-      Box(
-        modifier = Modifier
-          .clip(RoundedCornerShape(6.dp))
-          .background(DangerCrimson.copy(alpha = 0.16f))
-          .border(0.8.dp, DangerCrimson.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
-          .padding(horizontal = 8.dp, vertical = 3.dp),
-      ) {
+            .clip(RoundedCornerShape(4.dp))
+            .background(DangerCrimson)
+            .padding(horizontal = 4.5.dp, vertical = 1.5.dp),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            text = "LVL•0",
+            color = ObsidianBlack,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(6.8f, 6.0f, 7.8f),
+            letterSpacing = 0.3.sp,
+          )
+        }
         Text(
           text = "DANGER ZONE",
-          color = DangerCrimson,
+          color = roseTint,
           fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.Bold,
-          fontSize = metrics.spScaled(8.6f, 7.6f, 9.8f),
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = metrics.spScaled(8.0f, 7.0f, 9.0f),
           letterSpacing = 0.5.sp,
         )
       }
     }
 
-    Spacer(modifier = Modifier.height(8.dp))
+    // 2. Sculpted Written Dossier Chamber + 6-Domain Wipe Matrix
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(12.dp))
+        .background(
+          brush = Brush.verticalGradient(
+            colors = listOf(Color(0xFF0A0507), Color(0xFF050304)),
+          ),
+        )
+        .border(
+          width = 1.dp,
+          brush = Brush.verticalGradient(
+            colors = listOf(DangerCrimson.copy(alpha = 0.38f), Color(0xFF261016)),
+          ),
+          shape = RoundedCornerShape(12.dp),
+        )
+        .padding(horizontal = 12.dp, vertical = 11.dp),
+      verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      // Executive Summary Callout with Vertical Crimson Laser Bar
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Box(
+          modifier = Modifier
+            .width(3.dp)
+            .height((36f * metrics.scale).coerceIn(30f, 44f).dp)
+            .clip(CircleShape)
+            .background(
+              brush = Brush.verticalGradient(
+                colors = listOf(roseTint, DangerCrimson, deepGarnet),
+              ),
+            ),
+        )
+        Text(
+          text = "Permanently erases your on-device BioSync database across all six calibrated telemetry modules and re-initializes the application on the Welcome Home screen.",
+          color = PureWhite.copy(alpha = 0.92f),
+          fontFamily = InterFontFamily,
+          fontWeight = FontWeight.Medium,
+          fontSize = metrics.spScaled(11.3f, 10.0f, 12.6f),
+          lineHeight = metrics.spScaled(16.2f, 14.4f, 18.2f),
+        )
+      }
 
-    Text(
-      text = "Permanently deletes your local BioSync database — including profile identity, anthropometric calibration, metabolic blueprint, daily timeline logs, saved meals, and streak history — and restarts the application on the Welcome Home screen.",
-      color = SettingsZinc300,
-      fontFamily = InterFontFamily,
-      fontSize = metrics.spScaled(11.6f, 10.4f, 13f),
-      lineHeight = metrics.spScaled(16.8f, 14.8f, 19f),
-    )
+      // 6-Domain Purge Target Grid (2 rows x 3 columns)
+      val purgeTargets = remember {
+        listOf(
+          Triple("01", "IDENTITY", "Subject & Bio-ID"),
+          Triple("02", "SOMATIC", "Stature & Mass"),
+          Triple("03", "BLUEPRINT", "PAL & Split"),
+          Triple("04", "FORMULA", "Macro Targets"),
+          Triple("05", "TIMELINE", "Logs & Meals"),
+          Triple("06", "STREAKS", "History & Day 01"),
+        )
+      }
 
-    Spacer(modifier = Modifier.height(13.dp))
+      Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        purgeTargets.chunked(3).forEach { rowItems ->
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            rowItems.forEach { (code, title, subtitle) ->
+              Column(
+                modifier = Modifier
+                  .weight(1f)
+                  .clip(RoundedCornerShape(8.dp))
+                  .background(
+                    brush = Brush.verticalGradient(
+                      colors = listOf(Color(0xFF170B0E), Color(0xFF0D0608)),
+                    ),
+                  )
+                  .border(
+                    width = 0.75.dp,
+                    color = Color(0xFF38161E),
+                    shape = RoundedCornerShape(8.dp),
+                  )
+                  .padding(horizontal = 7.5.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                  Text(
+                    text = code,
+                    color = DangerCrimson,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = metrics.spScaled(7.5f, 6.6f, 8.5f),
+                  )
+                  Text(
+                    text = title,
+                    color = PureWhite,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = metrics.spScaled(7.8f, 6.8f, 8.8f),
+                    letterSpacing = 0.3.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                }
+                Text(
+                  text = subtitle,
+                  color = roseTint.copy(alpha = 0.72f),
+                  fontFamily = InterFontFamily,
+                  fontWeight = FontWeight.Medium,
+                  fontSize = metrics.spScaled(8.4f, 7.4f, 9.4f),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                )
+              }
+            }
+          }
+        }
+      }
 
+      HorizontalDivider(color = Color(0xFF281117), thickness = 0.8.dp)
+
+      // Bottom Dossier Telemetry Footer
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(5.5.dp),
+        ) {
+          Box(
+            modifier = Modifier
+              .size(5.5.dp)
+              .clip(CircleShape)
+              .background(roseTint),
+          )
+          Text(
+            text = "POST-WIPE DESTINATION",
+            color = SettingsZinc400,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = metrics.spScaled(7.8f, 6.8f, 8.8f),
+            letterSpacing = 0.5.sp,
+          )
+        }
+        Text(
+          text = "WELCOME HOME • STEP 00",
+          color = roseTint,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = metrics.spScaled(8.0f, 7.0f, 9.0f),
+          letterSpacing = 0.5.sp,
+        )
+      }
+    }
+
+    // 3. Sculpted 3D Crimson Actuator Button
     Box(
       modifier = Modifier
         .fillMaxWidth()
-        .height(48.dp)
-        .clip(RoundedCornerShape(11.dp))
-        .background(
-          brush = Brush.horizontalGradient(
-            colors = listOf(DangerCrimsonDeep, DangerCrimson),
-          ),
-        )
-        .border(1.dp, PureWhite.copy(alpha = 0.25f), RoundedCornerShape(11.dp))
+        .height(50.dp)
+        .clip(RoundedCornerShape(12.dp))
+        .drawWithCache {
+          val rPx = 12.dp.toPx()
+          val btnBrush = Brush.horizontalGradient(
+            colors = listOf(
+              Color(0xFFBE123C),
+              DangerCrimson,
+              Color(0xFFE11D48),
+            ),
+          )
+          onDrawBehind {
+            drawRoundRect(
+              brush = btnBrush,
+              cornerRadius = CornerRadius(rPx, rPx),
+            )
+            // Top specular highlight
+            drawLine(
+              brush = Brush.horizontalGradient(
+                colors = listOf(
+                  Color.Transparent,
+                  PureWhite.copy(alpha = 0.55f),
+                  roseTint.copy(alpha = 0.70f),
+                  Color.Transparent,
+                ),
+              ),
+              start = Offset(rPx, 1.dp.toPx()),
+              end = Offset(size.width - rPx, 1.dp.toPx()),
+              strokeWidth = 1.1.dp.toPx(),
+            )
+          }
+        }
+        .border(1.dp, roseTint.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
         .clickable(
           role = Role.Button,
           onClick = onRequestFactoryReset,
@@ -1642,14 +1956,35 @@ private fun SettingsFactoryResetCard(
         .testTag("settings_factory_reset_button"),
       contentAlignment = Alignment.Center,
     ) {
-      Text(
-        text = "FACTORY RESET & WIPE DATABASE",
-        color = PureWhite,
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.ExtraBold,
-        fontSize = metrics.spScaled(12.2f, 10.8f, 13.8f),
-        letterSpacing = 0.9.sp,
-      )
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(ObsidianBlack.copy(alpha = 0.35f))
+            .border(0.7.dp, PureWhite.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
+            .padding(horizontal = 5.5.dp, vertical = 2.dp),
+        ) {
+          Text(
+            text = "PURGE",
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(8.0f, 7.0f, 9.0f),
+            letterSpacing = 0.5.sp,
+          )
+        }
+        Text(
+          text = "FACTORY RESET & WIPE DATABASE",
+          color = PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = metrics.spScaled(11.8f, 10.4f, 13.4f),
+          letterSpacing = 0.8.sp,
+        )
+      }
     }
   }
 }
@@ -1661,6 +1996,7 @@ private fun FactoryResetConfirmationDialog(
   onConfirmReset: () -> Unit,
   onDismiss: () -> Unit,
 ) {
+  val roseTint = Color(0xFFFDA4AF)
   Dialog(
     onDismissRequest = onDismiss,
     properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -1678,13 +2014,13 @@ private fun FactoryResetConfirmationDialog(
           .clip(RoundedCornerShape(18.dp))
           .background(
             brush = Brush.verticalGradient(
-              colors = listOf(Color(0xFF1A1215), Color(0xFF0B090B)),
+              colors = listOf(Color(0xFF1E0D12), Color(0xFF0A0608)),
             ),
           )
           .border(
             width = 1.2.dp,
             brush = Brush.verticalGradient(
-              colors = listOf(DangerCrimson.copy(alpha = 0.75f), SettingsZinc800),
+              colors = listOf(roseTint.copy(alpha = 0.72f), DangerCrimson.copy(alpha = 0.55f), SettingsZinc800),
             ),
             shape = RoundedCornerShape(18.dp),
           )
@@ -1709,11 +2045,11 @@ private fun FactoryResetConfirmationDialog(
             )
             Text(
               text = "CONFIRM FACTORY RESET",
-              color = DangerCrimson,
+              color = roseTint,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.ExtraBold,
-              fontSize = 11.5.sp,
-              letterSpacing = 1.0.sp,
+              fontSize = 11.2.sp,
+              letterSpacing = 0.9.sp,
             )
           }
 
@@ -1740,20 +2076,38 @@ private fun FactoryResetConfirmationDialog(
           text = "Delete All Database Records?",
           color = PureWhite,
           fontFamily = InterFontFamily,
-          fontWeight = FontWeight.Bold,
+          fontWeight = FontWeight.ExtraBold,
           fontSize = 20.sp,
           letterSpacing = (-0.4).sp,
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        Text(
-          text = "This action will permanently erase all saved protocol data for ${subjectName.ifBlank { "current subject" }}, including Steps 01–04 calibration, custom targets, saved nutrition items, timeline logs, and streak progress. BioSync will restart on the Home Welcome screen.",
-          color = SettingsZinc300,
-          fontFamily = InterFontFamily,
-          fontSize = 13.sp,
-          lineHeight = 18.5.sp,
-        )
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(11.dp))
+            .background(Color(0xFF080406))
+            .border(1.dp, Color(0xFF38161E), RoundedCornerShape(11.dp))
+            .padding(12.dp),
+          verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          Text(
+            text = "SUBJECT TARGET • ${subjectName.ifBlank { "CURRENT SUBJECT" }.uppercase()}",
+            color = roseTint,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 9.2.sp,
+            letterSpacing = 0.6.sp,
+          )
+          Text(
+            text = "This action permanently erases all saved protocol data — including Steps 01–04 calibration, custom macro targets, saved nutrition items, timeline logs, and streak progress — and restarts BioSync on the Welcome Home screen.",
+            color = SettingsZinc300,
+            fontFamily = InterFontFamily,
+            fontSize = 12.6.sp,
+            lineHeight = 18.sp,
+          )
+        }
 
         Spacer(modifier = Modifier.height(18.dp))
 
@@ -1791,7 +2145,7 @@ private fun FactoryResetConfirmationDialog(
                   colors = listOf(DangerCrimsonDeep, DangerCrimson),
                 ),
               )
-              .border(1.dp, PureWhite.copy(alpha = 0.28f), RoundedCornerShape(10.dp))
+              .border(1.dp, roseTint.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
               .clickable(role = Role.Button, onClick = onConfirmReset)
               .testTag("factory_reset_confirm_btn"),
             contentAlignment = Alignment.Center,

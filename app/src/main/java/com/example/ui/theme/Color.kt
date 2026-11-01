@@ -48,3 +48,19 @@ val HydrationEnd = Color(0xFF0043A4)
 val StepsStart = Color(0xFF7BF1A8)
 val StepsMid = Color(0xFF10B981)
 val StepsEnd = Color(0xFF047857)
+
+// 7. Day Remaining (Circadian Reverse Telemetry): Luminous Lavender -> Electric Amethyst -> Deep Ultraviolet
+val ChronoDayStart = Color(0xFFD8B4FE)
+val ChronoDayMid = Color(0xFF8B5CF6)
+val ChronoDayEnd = Color(0xFF4C1D95)
+
+// 8. Next Birthday (Solar Return Reverse Telemetry): Warm Champagne Rose-Gold -> Burnished Copper -> Deep Bronze
+val ChronoBirthdayStart = Color(0xFFF5D0A9)
+val ChronoBirthdayMid = Color(0xFFD97736)
+val ChronoBirthdayEnd = Color(0xFF7C3A19)
+
+// 9. Combined Streak Readiness: Brushed Champagne Platinum -> Horological Gold -> Deep Brass
+val StreakReadinessStart = Color(0xFFF3E8D2)
+val StreakReadinessMid = Color(0xFFD4AF37)
+val StreakReadinessEnd = Color(0xFF8A6621)
+

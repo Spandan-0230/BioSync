@@ -18,7 +18,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,9 +51,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,7 +74,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
@@ -100,10 +107,13 @@ import com.example.ui.theme.StepsStart
 import java.text.NumberFormat
 import java.util.Locale
 import kotlin.math.PI
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // Core BioSync Monochrome Palette matching Steps 01–04
 private val Zinc200 = Color(0xFFE4E4E7)
@@ -123,10 +133,29 @@ private val SolidDangerRedBorder = Color(0xFFF87171)
 
 private val SmoothOutEasing = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
 
+private enum class QuickShelfCategoryFilter(val label: String) {
+  ALL("ALL"),
+  MEALS("MEALS"),
+  SINGLE_ITEMS("SINGLE ITEMS"),
+}
+
+private enum class QuickMacroSmartSort(val label: String) {
+  RECENT("RECENT"),
+  HIGH_PROTEIN("HIGH-P"),
+  HIGH_CAL("HIGH-CAL"),
+  LOW_CAL("LOW-CAL"),
+  A_TO_Z("A–Z"),
+}
+
 // ============================================================================
-// 1. FLOATING QUICK ACTIONS (+) BAR WITH SAVED ITEMS BESIDE IT + POPUP MODAL
+// 1. FLOATING QUICK ACTIONS ENGINE:
+//    - Dynamic Categorization (Meals vs Single Items)
+//    - Multi-Row Bento Vault + Instant Search & Smart Filter for 20+ items (no frustrating sideways scroll!)
+//    - Strict 2.0-Second Hold-to-Overlap & Fusion Slot Combining
+//    - Per-Item & Per-Meal Custom Color Studio + Optical Color Mixing for Combined Meals
 // ============================================================================
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DashboardQuickActionsHubCard(
   allCreatedSingleItems: List<SavedQuickNutritionItem>,
@@ -147,29 +176,85 @@ fun DashboardQuickActionsHubCard(
   numberFormat: NumberFormat,
   modifier: Modifier = Modifier,
 ) {
+  val coroutineScope = rememberCoroutineScope()
+  val warmTitanium = Color(0xFFE5DEC9)
+  val warmTitaniumMuted = Color(0xFFC8BFA8)
+
   var showQuickActionPopup by remember { mutableStateOf(false) }
   var popupInitialIsMealTab by remember { mutableStateOf(false) }
   var popupPreselectedPair by remember {
     mutableStateOf<Pair<SavedQuickNutritionItem, SavedQuickNutritionItem>?>(null)
   }
 
-  // Drag-and-drop state for combining two Single Items beside the "+" button
+  // Dynamic categorization state
+  val savedMeals = remember(savedQuickItems) { savedQuickItems.filter { it.isMeal } }
+  val savedSingles = remember(savedQuickItems) { savedQuickItems.filter { !it.isMeal } }
+
+  var activeCategory by remember { mutableStateOf(QuickShelfCategoryFilter.ALL) }
+  var isVaultGridMode by remember { mutableStateOf(true) }
+  var searchQuery by remember { mutableStateOf("") }
+  var showSearchAndSortBar by remember { mutableStateOf(false) }
+  var activeSmartSort by remember { mutableStateOf(QuickMacroSmartSort.RECENT) }
+
+  // Separate Manual Expand/Collapse for Meals & Single Items (Collapsed by default)
+  var isMealsExpanded by remember { mutableStateOf(false) }
+  var isSinglesExpanded by remember { mutableStateOf(false) }
+
+  // Reset category filter if a category becomes empty
+  LaunchedEffect(savedMeals.size, savedSingles.size) {
+    if (activeCategory == QuickShelfCategoryFilter.MEALS && savedMeals.isEmpty()) {
+      activeCategory = QuickShelfCategoryFilter.ALL
+    } else if (activeCategory == QuickShelfCategoryFilter.SINGLE_ITEMS && savedSingles.isEmpty()) {
+      activeCategory = QuickShelfCategoryFilter.ALL
+    }
+  }
+
+  // 2.0-Second Hold-to-Overlap & Fusion Slot state
+  var holdingItemId by remember { mutableStateOf<String?>(null) }
+  var holdProgress by remember { mutableFloatStateOf(0f) } // 0.0 -> 1.0 over 2000ms
   var draggingItemId by remember { mutableStateOf<String?>(null) }
   var dragOffsetX by remember { mutableFloatStateOf(0f) }
   var dragOffsetY by remember { mutableFloatStateOf(0f) }
   var hoveredTargetItemId by remember { mutableStateOf<String?>(null) }
+  var armedFusionSlotItem by remember { mutableStateOf<SavedQuickNutritionItem?>(null) }
   val singleItemBounds = remember { mutableStateMapOf<String, Rect>() }
 
-  // Pool of all created Single Items for Create Meal & Drag-to-Meal
-  val availableSingleItems = remember(allCreatedSingleItems, savedQuickItems) {
-    val map = LinkedHashMap<String, SavedQuickNutritionItem>()
-    for (item in savedQuickItems) {
-      if (!item.isMeal) map[item.id] = item
+  // Clear armed fusion item if deleted
+  LaunchedEffect(savedQuickItems) {
+    val currentArmed = armedFusionSlotItem
+    if (currentArmed != null && savedQuickItems.none { it.id == currentArmed.id }) {
+      armedFusionSlotItem = null
     }
-    for (item in allCreatedSingleItems) {
-      if (!item.isMeal && item.id !in map) map[item.id] = item
+  }
+
+  // Strictly sync available Single Items with currently saved Single Items in the Quick Actions Vault
+  // so any deleted or removed item from Quick Actions NEVER appears inside Create Meal.
+  val availableSingleItems = savedSingles
+
+  fun applyFilterAndSort(items: List<SavedQuickNutritionItem>): List<SavedQuickNutritionItem> {
+    val q = searchQuery.trim().lowercase(Locale.US)
+    val filtered = if (q.isEmpty()) {
+      items
+    } else {
+      items.filter {
+        it.name.lowercase(Locale.US).contains(q) ||
+          it.componentNames.any { c -> c.lowercase(Locale.US).contains(q) }
+      }
     }
-    map.values.toList()
+    return when (activeSmartSort) {
+      QuickMacroSmartSort.RECENT -> filtered
+      QuickMacroSmartSort.HIGH_PROTEIN -> filtered.sortedByDescending { it.proteinGrams }
+      QuickMacroSmartSort.HIGH_CAL -> filtered.sortedByDescending { it.caloriesKcal }
+      QuickMacroSmartSort.LOW_CAL -> filtered.sortedBy { it.caloriesKcal }
+      QuickMacroSmartSort.A_TO_Z -> filtered.sortedBy { it.name.lowercase(Locale.US) }
+    }
+  }
+
+  val filteredMeals = remember(savedMeals, searchQuery, activeSmartSort) {
+    applyFilterAndSort(savedMeals)
+  }
+  val filteredSingles = remember(savedSingles, searchQuery, activeSmartSort) {
+    applyFilterAndSort(savedSingles)
   }
 
   Column(
@@ -183,7 +268,7 @@ fun DashboardQuickActionsHubCard(
       .padding(16.dp)
       .testTag("dashboard_quick_actions_hub"),
   ) {
-    // 1. Clean Ecosystem Header Row (NO bulky colored block!)
+    // 1. Clean Ecosystem Header Row (Matches HYDRATION ENGINE & TODAY'S TIMELINE)
     Row(
       modifier = Modifier
         .fillMaxWidth()
@@ -191,12 +276,14 @@ fun DashboardQuickActionsHubCard(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+      ) {
         DashboardSyncedHeaderDot(
           startColor = PureWhite,
           endColor = Zinc300,
         )
-        Spacer(modifier = Modifier.width(9.dp))
         Text(
           text = "QUICK ACTIONS ENGINE",
           color = PureWhite,
@@ -207,18 +294,98 @@ fun DashboardQuickActionsHubCard(
         )
       }
 
-      Text(
-        text = if (savedQuickItems.count { !it.isMeal } >= 2) {
-          "DRAG ITEM → MEAL • ${savedQuickItems.size} SAVED"
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        if (savedQuickItems.isNotEmpty()) {
+          // Search / Sort Toggle Pill
+          val isSearchOpen = showSearchAndSortBar
+          val hasActiveFilterOrSort = searchQuery.isNotBlank() || activeSmartSort != QuickMacroSmartSort.RECENT
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(7.dp))
+              .background(
+                when {
+                  isSearchOpen -> PureWhite
+                  hasActiveFilterOrSort -> Color(0xFF1D1D28)
+                  else -> Color(0xFF121217)
+                },
+              )
+              .border(
+                width = 1.dp,
+                color = when {
+                  isSearchOpen -> PureWhite
+                  hasActiveFilterOrSort -> PureWhite.copy(alpha = 0.65f)
+                  else -> Zinc700
+                },
+                shape = RoundedCornerShape(7.dp),
+              )
+              .clickable(role = Role.Button) {
+                haptics.selection()
+                val nextOpen = !showSearchAndSortBar
+                showSearchAndSortBar = nextOpen
+                if (nextOpen) {
+                  // Auto-open relevant sections so user can immediately see searched & sorted items
+                  if (savedMeals.isNotEmpty() && activeCategory != QuickShelfCategoryFilter.SINGLE_ITEMS) {
+                    isMealsExpanded = true
+                  }
+                  if (savedSingles.isNotEmpty() && activeCategory != QuickShelfCategoryFilter.MEALS) {
+                    isSinglesExpanded = true
+                  }
+                }
+              }
+              .padding(horizontal = 8.5.dp, vertical = 4.dp)
+              .testTag("quick_actions_search_toggle"),
+          ) {
+            Text(
+              text = when {
+                isSearchOpen -> "FIND / SORT ▲"
+                searchQuery.isNotBlank() -> "FILTERED • ${filteredMeals.size + filteredSingles.size}"
+                activeSmartSort != QuickMacroSmartSort.RECENT -> "SORT: ${activeSmartSort.label}"
+                else -> "FIND / SORT ▼"
+              },
+              color = if (isSearchOpen) ObsidianBlack else PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 8.4.sp,
+              letterSpacing = 0.4.sp,
+            )
+          }
+
+          // Vault Grid vs Dock Switcher
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(7.dp))
+              .background(PureWhite)
+              .border(1.dp, PureWhite, RoundedCornerShape(7.dp))
+              .clickable(role = Role.Button) {
+                haptics.selection()
+                isVaultGridMode = !isVaultGridMode
+              }
+              .padding(horizontal = 8.5.dp, vertical = 4.dp)
+              .testTag("quick_actions_view_mode_toggle"),
+          ) {
+            Text(
+              text = if (isVaultGridMode) "GRID ⊞" else "DOCK ▤",
+              color = ObsidianBlack,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 8.4.sp,
+              letterSpacing = 0.4.sp,
+            )
+          }
         } else {
-          "${savedQuickItems.size} SAVED"
-        },
-        color = if (savedQuickItems.isNotEmpty()) ProteinStart else Zinc400,
-        fontFamily = JetBrainsMonoFontFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 9.8.sp,
-        letterSpacing = 0.5.sp,
-      )
+          Text(
+            text = "0 SAVED",
+            color = Zinc400,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 9.8.sp,
+            letterSpacing = 0.5.sp,
+          )
+        }
+      }
     }
 
     HorizontalDivider(
@@ -226,295 +393,1449 @@ fun DashboardQuickActionsHubCard(
       color = Zinc800.copy(alpha = 0.85f),
     )
 
-    Spacer(modifier = Modifier.height(13.dp))
+    Spacer(modifier = Modifier.height(12.dp))
 
-    // 2. Main Row: [ + ADD Button ] on the left, and [ User Saved Quick Actions ] right beside it!
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-      // Primary Floating "+" Quick Action Trigger Button (opens the Popup Modal)
+    // 2. Empty State Console vs Categorized Vault Console
+    if (savedQuickItems.isEmpty()) {
+      // =======================================================================
+      // EXECUTIVE 2-CHAMBER LAUNCH CONSOLE (When 0 Saved — Crisp, Balanced, Pro)
+      // =======================================================================
       Column(
         modifier = Modifier
-          .width(76.dp)
-          .height(68.dp)
-          .drawWithCache {
-            val cPx = 12.dp.toPx()
-            val glowPaint = Paint().apply {
-              isAntiAlias = true
-              asFrameworkPaint().apply {
-                color = android.graphics.Color.argb(65, 255, 255, 255)
-                maskFilter = BlurMaskFilter(safeDashboardBlur(12.dp.toPx()), BlurMaskFilter.Blur.NORMAL)
-              }
-            }
-            onDrawBehind {
-              drawIntoCanvas { canvas ->
-                canvas.drawRoundRect(
-                  2.dp.toPx(),
-                  4.dp.toPx(),
-                  size.width - 2.dp.toPx(),
-                  size.height + 4.dp.toPx(),
-                  cPx,
-                  cPx,
-                  glowPaint,
-                )
-              }
-            }
-          }
-          .clip(RoundedCornerShape(12.dp))
-          .background(
-            brush = Brush.verticalGradient(
-              colors = listOf(PureWhite, Zinc200),
-            ),
-          )
-          .border(1.dp, PureWhite, RoundedCornerShape(12.dp))
-          .clickable(role = Role.Button) {
-            haptics.confirm()
-            popupPreselectedPair = null
-            popupInitialIsMealTab = false
-            showQuickActionPopup = true
-          }
-          .testTag("quick_actions_plus_button"),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(13.dp))
+          .background(Color(0xFF0A0A0E))
+          .border(1.dp, Color(0xFF25252E), RoundedCornerShape(13.dp))
+          .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
       ) {
-        Text(
-          text = "+",
-          color = ObsidianBlack,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.ExtraBold,
-          fontSize = 24.sp,
-          lineHeight = 24.sp,
-        )
-        Text(
-          text = "ADD",
-          color = ObsidianBlack,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.ExtraBold,
-          fontSize = 9.5.sp,
-          letterSpacing = 0.8.sp,
-        )
-      }
-
-      // BESIDE IT: User's Saved Quick Actions (Meals & Single Items with Drag-and-Drop)
-      if (savedQuickItems.isEmpty()) {
+        // Top Specification Strip
         Row(
           modifier = Modifier
-            .weight(1f)
-            .height(68.dp)
-            .floating3DInnerTile(
-              cornerRadiusDp = 12.dp,
-              accentColor = Zinc600,
-            )
-            .clickable(role = Role.Button) {
-              haptics.selection()
-              popupPreselectedPair = null
-              popupInitialIsMealTab = false
-              showQuickActionPopup = true
-            }
-            .padding(horizontal = 13.dp),
-          verticalAlignment = Alignment.CenterVertically,
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF060608))
+            .border(1.dp, Color(0xFF1E1E26), RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 6.5.dp),
           horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
         ) {
-          Column(modifier = Modifier.weight(1f)) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .width(3.dp)
+                .height(11.dp)
+                .clip(RoundedCornerShape(1.5.dp))
+                .background(PureWhite),
+            )
+            Text(
+              text = "NUTRITION VAULT & MEAL ARCHITECT",
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 9.2.sp,
+              letterSpacing = 0.6.sp,
+            )
+          }
+
+          Text(
+            text = "READY",
+            color = warmTitanium,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 8.6.sp,
+            letterSpacing = 0.5.sp,
+          )
+        }
+
+        // Symmetrical 2-Chamber Tactile Launch Buttons: [+ SINGLE ITEM] & [+ CREATE MEAL]
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+          // Chamber 01: + SINGLE ITEM (Retains primary testTag for "+" button compatibility)
+          Column(
+            modifier = Modifier
+              .weight(1f)
+              .clip(RoundedCornerShape(11.dp))
+              .background(
+                brush = Brush.verticalGradient(
+                  colors = listOf(Color(0xFF15151C), Color(0xFF0C0C10)),
+                ),
+              )
+              .border(1.dp, Color(0xFF2E2E3A), RoundedCornerShape(11.dp))
+              .clickable(role = Role.Button) {
+                haptics.confirm()
+                popupPreselectedPair = null
+                popupInitialIsMealTab = false
+                showQuickActionPopup = true
+              }
+              .padding(11.dp)
+              .testTag("quick_actions_plus_button"),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+          ) {
             Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(5.dp),
             ) {
               Box(
                 modifier = Modifier
-                  .width(3.dp)
-                  .height(10.dp)
-                  .clip(RoundedCornerShape(1.5.dp))
-                  .background(PureWhite),
+                  .size(28.dp)
+                  .clip(RoundedCornerShape(7.dp))
+                  .background(PureWhite)
+                  .border(1.dp, PureWhite, RoundedCornerShape(7.dp)),
+                contentAlignment = Alignment.Center,
+              ) {
+                Text(
+                  text = "+",
+                  color = ObsidianBlack,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 16.sp,
+                )
+              }
+
+              Box(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(5.dp))
+                  .background(Color(0xFF070709))
+                  .border(1.dp, Color(0xFF272730), RoundedCornerShape(5.dp))
+                  .padding(horizontal = 6.dp, vertical = 2.dp),
+              ) {
+                Text(
+                  text = "01 • ITEM",
+                  color = PureWhite,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 7.8.sp,
+                  letterSpacing = 0.4.sp,
+                )
+              }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+              Text(
+                text = "Log Single Item",
+                color = PureWhite,
+                fontFamily = InterFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
               )
               Text(
-                text = "SAVED QUICK ACTIONS SHELF",
-                color = PureWhite,
-                fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = 10.sp,
-                letterSpacing = 0.7.sp,
+                text = "Pin individual food with custom color ID",
+                color = Zinc300,
+                fontFamily = InterFontFamily,
+                fontSize = 10.5.sp,
+                lineHeight = 14.sp,
               )
             }
-            Spacer(modifier = Modifier.height(4.dp))
+          }
+
+          // Chamber 02: + CREATE MEAL
+          Column(
+            modifier = Modifier
+              .weight(1f)
+              .clip(RoundedCornerShape(11.dp))
+              .background(
+                brush = Brush.verticalGradient(
+                  colors = listOf(Color(0xFF15151C), Color(0xFF0C0C10)),
+                ),
+              )
+              .border(1.dp, Color(0xFF2E2E3A), RoundedCornerShape(11.dp))
+              .clickable(role = Role.Button) {
+                haptics.confirm()
+                popupPreselectedPair = null
+                popupInitialIsMealTab = true
+                showQuickActionPopup = true
+              }
+              .padding(11.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(28.dp)
+                  .clip(RoundedCornerShape(7.dp))
+                  .background(warmTitanium)
+                  .border(1.dp, PureWhite, RoundedCornerShape(7.dp)),
+                contentAlignment = Alignment.Center,
+              ) {
+                Text(
+                  text = "+",
+                  color = ObsidianBlack,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 16.sp,
+                )
+              }
+
+              Box(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(5.dp))
+                  .background(Color(0xFF070709))
+                  .border(1.dp, Color(0xFF272730), RoundedCornerShape(5.dp))
+                  .padding(horizontal = 6.dp, vertical = 2.dp),
+              ) {
+                Text(
+                  text = "02 • MEAL",
+                  color = warmTitanium,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 7.8.sp,
+                  letterSpacing = 0.4.sp,
+                )
+              }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+              Text(
+                text = "Create Meal",
+                color = PureWhite,
+                fontFamily = InterFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+              )
+              Text(
+                text = "Combine single items & fuse colors",
+                color = Zinc300,
+                fontFamily = InterFontFamily,
+                fontSize = 10.5.sp,
+                lineHeight = 14.sp,
+              )
+            }
+          }
+        }
+
+        // Bottom 3-Pillar Architecture Specification Bar
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF060608))
+            .border(1.dp, Color(0xFF1D1D24), RoundedCornerShape(8.dp))
+            .padding(vertical = 7.dp, horizontal = 8.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            text = "CATEGORIZED VAULT",
+            color = Zinc200,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 8.0.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.weight(1f),
+          )
+          Box(
+            modifier = Modifier
+              .width(1.dp)
+              .height(10.dp)
+              .background(Zinc800),
+          )
+          Text(
+            text = "2.0S HOLD OVERLAP",
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 8.0.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.weight(1f),
+          )
+          Box(
+            modifier = Modifier
+              .width(1.dp)
+              .height(10.dp)
+              .background(Zinc800),
+          )
+          Text(
+            text = "COLOR MIX ALCHEMY",
+            color = warmTitanium,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 8.0.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.weight(1f),
+          )
+        }
+      }
+    } else {
+      // Dynamic Categorized Control Bar when user has saved items
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        QuickActionPlusActuatorButton(
+          compact = true,
+          onClick = {
+            haptics.confirm()
+            popupPreselectedPair = null
+            popupInitialIsMealTab = activeCategory == QuickShelfCategoryFilter.MEALS
+            showQuickActionPopup = true
+          },
+        )
+
+        // Dynamic Category Selector Tabs (ALL / MEALS / SINGLE ITEMS)
+        Row(
+          modifier = Modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(11.dp))
+            .background(Color(0xFF07070A))
+            .border(1.dp, Color(0xFF25252E), RoundedCornerShape(11.dp))
+            .padding(4.dp),
+          horizontalArrangement = Arrangement.spacedBy(4.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          val categoriesToShow = buildList {
+            add(QuickShelfCategoryFilter.ALL to "ALL (${savedQuickItems.size})")
+            if (savedMeals.isNotEmpty()) {
+              add(QuickShelfCategoryFilter.MEALS to "MEALS (${savedMeals.size})")
+            }
+            if (savedSingles.isNotEmpty()) {
+              add(QuickShelfCategoryFilter.SINGLE_ITEMS to "ITEMS (${savedSingles.size})")
+            }
+          }
+
+          categoriesToShow.forEach { (cat, label) ->
+            val selected = activeCategory == cat
+            Box(
+              modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(if (selected) PureWhite else Color.Transparent)
+                .clickable(role = Role.Tab) {
+                  haptics.selection()
+                  activeCategory = cat
+                  if (cat == QuickShelfCategoryFilter.MEALS) {
+                    isMealsExpanded = true
+                  } else if (cat == QuickShelfCategoryFilter.SINGLE_ITEMS) {
+                    isSinglesExpanded = true
+                  }
+                }
+                .padding(vertical = 8.dp, horizontal = 4.dp)
+                .testTag("quick_actions_cat_${cat.name.lowercase()}"),
+              contentAlignment = Alignment.Center,
+            ) {
+              Text(
+                text = label,
+                color = if (selected) ObsidianBlack else PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 8.8.sp,
+                letterSpacing = 0.4.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+              )
+            }
+          }
+        }
+      }
+
+      Spacer(modifier = Modifier.height(8.dp))
+
+      // =========================================================================
+      // SEPARATE MANUAL COLLAPSE / OPEN COMMAND BAR (Collapsed by Default)
+      // Allows opening or collapsing all Meals and all Single Items separately.
+      // =========================================================================
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(10.dp))
+          .background(Color(0xFF07070A))
+          .border(1.dp, Color(0xFF23232D), RoundedCornerShape(10.dp))
+          .padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        // 1. Separate Manual Open / Collapse Button for ALL MEALS
+        if (savedMeals.isNotEmpty()) {
+          Row(
+            modifier = Modifier
+              .weight(1f)
+              .clip(RoundedCornerShape(6.dp))
+              .background(if (isMealsExpanded) PureWhite else Color(0xFF13131A))
+              .border(
+                width = 1.dp,
+                color = if (isMealsExpanded) PureWhite else Color(0xFF2D2D3A),
+                shape = RoundedCornerShape(6.dp),
+              )
+              .clickable(role = Role.Button) {
+                haptics.selection()
+                isMealsExpanded = !isMealsExpanded
+              }
+              .padding(horizontal = 8.dp, vertical = 5.dp)
+              .testTag("quick_actions_toggle_meals_collapse"),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
             Text(
-              text = "Tap + to log a Single Item or Meal. Toggle Save to pin it right here.",
-              color = Zinc400,
-              fontFamily = InterFontFamily,
-              fontSize = 10.8.sp,
-              maxLines = 2,
+              text = if (isMealsExpanded) "MEALS (${savedMeals.size}): OPEN ▲" else "MEALS (${savedMeals.size}): COLLAPSED ▼",
+              color = if (isMealsExpanded) ObsidianBlack else PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 8.0.sp,
+              maxLines = 1,
               overflow = TextOverflow.Ellipsis,
             )
           }
         }
-      } else {
-        val horizontalScroll = rememberScrollState()
-        Row(
-          modifier = Modifier
-            .weight(1f)
-            .horizontalScroll(horizontalScroll)
-            .testTag("saved_quick_actions_shelf"),
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          savedQuickItems.forEach { item ->
-            val isDraggingThis = draggingItemId == item.id
-            val isHoveredTarget = hoveredTargetItemId == item.id &&
-              draggingItemId != null &&
-              draggingItemId != item.id
-            val itemAccent = if (item.isMeal) ProteinStart else CaloriesStart
 
-            Row(
-              modifier = Modifier
-                .zIndex(if (isDraggingThis) 10f else 1f)
-                .height(68.dp)
-                .offset {
-                  if (isDraggingThis) {
-                    IntOffset(dragOffsetX.roundToInt(), dragOffsetY.roundToInt())
-                  } else {
-                    IntOffset.Zero
-                  }
-                }
-                .onGloballyPositioned { coords ->
-                  if (!item.isMeal && !isDraggingThis) {
-                    singleItemBounds[item.id] = coords.boundsInRoot()
-                  }
-                }
-                .pointerInput(item.id, item.isMeal, savedQuickItems) {
-                  if (!item.isMeal) {
-                    detectDragGestures(
-                      onDragStart = {
-                        haptics.selection()
-                        draggingItemId = item.id
-                        dragOffsetX = 0f
-                        dragOffsetY = 0f
-                        hoveredTargetItemId = null
-                      },
-                      onDrag = { change, dragAmount ->
-                        change.consume()
-                        dragOffsetX += dragAmount.x
-                        dragOffsetY += dragAmount.y
-                        val startRect = singleItemBounds[item.id]
-                        if (startRect != null) {
-                          val currentCenter = Offset(
-                            x = startRect.center.x + dragOffsetX,
-                            y = startRect.center.y + dragOffsetY,
-                          )
-                          val hitEntry = singleItemBounds.entries.firstOrNull { (otherId, rect) ->
-                            otherId != item.id && rect.contains(currentCenter)
-                          }
-                          hoveredTargetItemId = hitEntry?.key
-                        }
-                      },
-                      onDragEnd = {
-                        val targetId = hoveredTargetItemId
-                        val sourceItem = savedQuickItems.firstOrNull { it.id == item.id && !it.isMeal }
-                        val targetItem = savedQuickItems.firstOrNull { it.id == targetId && !it.isMeal }
-                        draggingItemId = null
-                        dragOffsetX = 0f
-                        dragOffsetY = 0f
-                        hoveredTargetItemId = null
-                        if (sourceItem != null && targetItem != null) {
-                          haptics.confirm()
-                          popupPreselectedPair = sourceItem to targetItem
-                          popupInitialIsMealTab = true
-                          showQuickActionPopup = true
-                        }
-                      },
-                      onDragCancel = {
-                        draggingItemId = null
-                        dragOffsetX = 0f
-                        dragOffsetY = 0f
-                        hoveredTargetItemId = null
-                      },
-                    )
-                  }
-                }
-                .floating3DInnerTile(
-                  cornerRadiusDp = 12.dp,
-                  accentColor = if (isHoveredTarget || isDraggingThis) PureWhite else itemAccent,
-                  isHighlighted = isHoveredTarget || isDraggingThis,
-                )
-                .clickable(role = Role.Button) {
-                  haptics.confirm()
-                  onQuickTapSavedItem(item)
-                }
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-                .testTag("saved_quick_item_${item.id}"),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(10.dp),
+        // 2. Separate Manual Open / Collapse Button for ALL SINGLE ITEMS
+        if (savedSingles.isNotEmpty()) {
+          Row(
+            modifier = Modifier
+              .weight(1f)
+              .clip(RoundedCornerShape(6.dp))
+              .background(if (isSinglesExpanded) PureWhite else Color(0xFF13131A))
+              .border(
+                width = 1.dp,
+                color = if (isSinglesExpanded) PureWhite else Color(0xFF2D2D3A),
+                shape = RoundedCornerShape(6.dp),
+              )
+              .clickable(role = Role.Button) {
+                haptics.selection()
+                isSinglesExpanded = !isSinglesExpanded
+              }
+              .padding(horizontal = 8.dp, vertical = 5.dp)
+              .testTag("quick_actions_toggle_singles_collapse"),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Text(
+              text = if (isSinglesExpanded) "ITEMS (${savedSingles.size}): OPEN ▲" else "ITEMS (${savedSingles.size}): COLLAPSED ▼",
+              color = if (isSinglesExpanded) ObsidianBlack else PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 8.0.sp,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
+          }
+        }
+      }
+
+      // Instant Search & Macro Sort Bar (Directly toggled by FIND / SORT button)
+      AnimatedVisibility(
+        visible = showSearchAndSortBar,
+        enter = expandVertically(tween(durationMillis = 220, easing = SmoothOutEasing)) + fadeIn(tween(180)),
+        exit = shrinkVertically(tween(durationMillis = 200, easing = SmoothOutEasing)) + fadeOut(tween(150)),
+      ) {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(Color(0xFF08080C))
+            .border(1.dp, Color(0xFF282834), RoundedCornerShape(11.dp))
+            .padding(10.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          // Search Input Box
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(8.dp))
+              .background(ObsidianBlack)
+              .border(
+                width = 1.dp,
+                color = if (searchQuery.isNotEmpty()) PureWhite else Zinc700,
+                shape = RoundedCornerShape(8.dp),
+              )
+              .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Box(
+              modifier = Modifier.weight(1f),
+              contentAlignment = Alignment.CenterStart,
             ) {
-              Column(verticalArrangement = Arrangement.Center) {
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                  Box(
-                    modifier = Modifier
-                      .width(3.dp)
-                      .height(11.dp)
-                      .clip(RoundedCornerShape(1.5.dp))
-                      .background(itemAccent),
-                  )
-                  Text(
-                    text = item.name,
-                    color = PureWhite,
-                    fontFamily = InterFontFamily,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 12.5.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                  )
-                  Text(
-                    text = if (item.isMeal) "MEAL" else "ITEM",
-                    color = itemAccent,
-                    fontFamily = JetBrainsMonoFontFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 8.8.sp,
-                    letterSpacing = 0.5.sp,
-                  )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
+              if (searchQuery.isEmpty()) {
                 Text(
-                  text = "${item.caloriesKcal} kcal • ${item.proteinGrams}P ${item.carbsGrams}C ${item.fatsGrams}F",
-                  color = Zinc300,
-                  fontFamily = JetBrainsMonoFontFamily,
-                  fontSize = 10.sp,
+                  text = "Search ${savedQuickItems.size} saved items or meals by name...",
+                  color = Zinc400,
+                  fontFamily = InterFontFamily,
+                  fontSize = 11.5.sp,
                 )
               }
-
+              BasicTextField(
+                value = searchQuery,
+                onValueChange = { nextQuery ->
+                  searchQuery = nextQuery.take(32)
+                  // Automatically expand sections when typing so matching results are visible
+                  if (savedMeals.isNotEmpty() && activeCategory != QuickShelfCategoryFilter.SINGLE_ITEMS) {
+                    isMealsExpanded = true
+                  }
+                  if (savedSingles.isNotEmpty() && activeCategory != QuickShelfCategoryFilter.MEALS) {
+                    isSinglesExpanded = true
+                  }
+                },
+                singleLine = true,
+                textStyle = TextStyle(
+                  color = PureWhite,
+                  fontFamily = InterFontFamily,
+                  fontWeight = FontWeight.SemiBold,
+                  fontSize = 12.sp,
+                ),
+                cursorBrush = SolidColor(PureWhite),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("quick_actions_search_input"),
+              )
+            }
+            if (searchQuery.isNotEmpty()) {
               Box(
                 modifier = Modifier
-                  .size(25.dp)
-                  .clip(RoundedCornerShape(7.dp))
-                  .background(SolidDangerRed)
-                  .border(1.dp, SolidDangerRedBorder, RoundedCornerShape(7.dp))
-                  .clickable(role = Role.Button) {
+                  .clip(RoundedCornerShape(5.dp))
+                  .background(Color(0xFF1A1A24))
+                  .border(1.dp, Zinc700, RoundedCornerShape(5.dp))
+                  .clickable {
                     haptics.tick()
-                    onDeleteSavedQuickItem(item.id)
+                    searchQuery = ""
                   }
-                  .testTag("delete_saved_quick_item_${item.id}"),
-                contentAlignment = Alignment.Center,
+                  .padding(horizontal = 6.dp, vertical = 2.5.dp),
               ) {
                 Text(
-                  text = "×",
+                  text = "CLEAR ×",
                   color = PureWhite,
                   fontFamily = JetBrainsMonoFontFamily,
                   fontWeight = FontWeight.ExtraBold,
-                  fontSize = 14.sp,
-                  lineHeight = 14.sp,
+                  fontSize = 8.0.sp,
                 )
               }
             }
+          }
+
+          // Smart Sort Pills Row
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Text(
+              text = "SORT BY:",
+              color = Zinc300,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 8.2.sp,
+            )
+            QuickMacroSmartSort.entries.forEach { sortMode ->
+              val isSortActive = activeSmartSort == sortMode
+              Box(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(6.dp))
+                  .background(if (isSortActive) PureWhite else Color(0xFF14141B))
+                  .border(
+                    width = 1.dp,
+                    color = if (isSortActive) PureWhite else Zinc700,
+                    shape = RoundedCornerShape(6.dp),
+                  )
+                  .clickable(role = Role.Button) {
+                    haptics.selection()
+                    activeSmartSort = sortMode
+                    // Automatically open visible section(s) so user sees the sorted items immediately
+                    if (savedMeals.isNotEmpty() && activeCategory != QuickShelfCategoryFilter.SINGLE_ITEMS) {
+                      isMealsExpanded = true
+                    }
+                    if (savedSingles.isNotEmpty() && activeCategory != QuickShelfCategoryFilter.MEALS) {
+                      isSinglesExpanded = true
+                    }
+                  }
+                  .padding(horizontal = 8.dp, vertical = 4.dp)
+                  .testTag("quick_actions_sort_${sortMode.name.lowercase()}"),
+              ) {
+                Text(
+                  text = sortMode.label,
+                  color = if (isSortActive) ObsidianBlack else PureWhite,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 8.0.sp,
+                )
+              }
+            }
+          }
+        }
+      }
+
+      // Live 2.0-Second Hold Progress / Armed Fusion Dock Telemetry Banner
+      val currentHoldingItem = remember(holdingItemId, savedSingles) {
+        savedSingles.firstOrNull { it.id == holdingItemId }
+      }
+      val currentDraggingItem = remember(draggingItemId, savedSingles) {
+        savedSingles.firstOrNull { it.id == draggingItemId }
+      }
+      val currentHoveredItem = remember(hoveredTargetItemId, savedSingles) {
+        savedSingles.firstOrNull { it.id == hoveredTargetItemId && it.id != draggingItemId }
+      }
+
+      AnimatedVisibility(
+        visible = currentHoldingItem != null || currentDraggingItem != null || armedFusionSlotItem != null,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut(),
+      ) {
+        val activeSource = currentDraggingItem ?: currentHoldingItem ?: armedFusionSlotItem
+        if (activeSource != null) {
+          val sourceColor = QuickItemColorAlchemy.argbToColor(activeSource.colorArgb)
+          val previewMixedArgb = if (currentHoveredItem != null) {
+            QuickItemColorAlchemy.mixItemColors(listOf(activeSource.colorArgb, currentHoveredItem.colorArgb))
+          } else {
+            activeSource.colorArgb
+          }
+          val previewMixedColor = QuickItemColorAlchemy.argbToColor(previewMixedArgb)
+
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(top = 10.dp)
+              .clip(RoundedCornerShape(11.dp))
+              .background(Color(0xFF07070A))
+              .border(1.dp, PureWhite.copy(alpha = 0.65f), RoundedCornerShape(11.dp))
+              .padding(horizontal = 11.dp, vertical = 8.5.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                  Box(
+                    modifier = Modifier
+                      .size(10.dp)
+                      .clip(CircleShape)
+                      .background(sourceColor)
+                      .border(1.dp, PureWhite, CircleShape),
+                  )
+                  if (currentHoveredItem != null) {
+                    Text(
+                      text = "+",
+                      color = PureWhite,
+                      fontFamily = JetBrainsMonoFontFamily,
+                      fontWeight = FontWeight.ExtraBold,
+                      fontSize = 9.sp,
+                    )
+                    Box(
+                      modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(QuickItemColorAlchemy.argbToColor(currentHoveredItem.colorArgb))
+                        .border(1.dp, PureWhite, CircleShape),
+                    )
+                    Text(
+                      text = "➔",
+                      color = PureWhite,
+                      fontFamily = JetBrainsMonoFontFamily,
+                      fontWeight = FontWeight.ExtraBold,
+                      fontSize = 9.sp,
+                    )
+                    Box(
+                      modifier = Modifier
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(previewMixedColor)
+                        .border(1.dp, PureWhite, CircleShape),
+                    )
+                  }
+                }
+
+                Text(
+                  text = when {
+                    currentHoveredItem != null -> {
+                      "RELEASE TO FUSE: ${activeSource.name.uppercase()} + ${currentHoveredItem.name.uppercase()} (MIXED COLOR)"
+                    }
+                    currentDraggingItem != null -> {
+                      "2.0S LOCKED! OVERLAP ONTO ANY OTHER SINGLE ITEM TO FUSE"
+                    }
+                    currentHoldingItem != null -> {
+                      val secs = String.format(Locale.US, "%.1f", holdProgress * 2.0f)
+                      "HOLDING ${activeSource.name.uppercase()} • ${secs}S / 2.0S TO ARM OVERLAP..."
+                    }
+                    else -> {
+                      "FUSION SLOT ARMED: ${activeSource.name.uppercase()} • TAP ANY 2ND SINGLE ITEM TO COMBINE"
+                    }
+                  },
+                  color = PureWhite,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 8.4.sp,
+                  letterSpacing = 0.3.sp,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                )
+              }
+
+              if (armedFusionSlotItem != null && currentHoldingItem == null && currentDraggingItem == null) {
+                Text(
+                  text = "CANCEL ×",
+                  color = SolidDangerRedBorder,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 8.2.sp,
+                  modifier = Modifier
+                    .padding(start = 6.dp)
+                    .clickable {
+                      haptics.tick()
+                      armedFusionSlotItem = null
+                    },
+                )
+              }
+            }
+
+            // 2.0s Hold Progress Bar
+            if (currentHoldingItem != null || currentDraggingItem != null) {
+              val barFill = if (currentDraggingItem != null) 1f else holdProgress.coerceIn(0.04f, 1f)
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(4.dp)
+                  .clip(CircleShape)
+                  .background(Zinc900),
+              ) {
+                Box(
+                  modifier = Modifier
+                    .fillMaxWidth(barFill)
+                    .height(4.dp)
+                    .clip(CircleShape)
+                    .background(PureWhite),
+                )
+              }
+            }
+          }
+        }
+      }
+
+      Spacer(modifier = Modifier.height(10.dp))
+
+      // =========================================================================
+      // DYNAMICALLY CATEGORIZED BLOCKS (1. SAVED MEALS • 2. SINGLE ITEMS VAULT)
+      // Each block independently senses viewport visibility (auto open on seen /
+      // auto collapse on unseen) AND supports manual collapse / open up separately!
+      // =========================================================================
+      val showMealsSection = (activeCategory == QuickShelfCategoryFilter.ALL ||
+        activeCategory == QuickShelfCategoryFilter.MEALS) &&
+        filteredMeals.isNotEmpty()
+
+      val showSinglesSection = (activeCategory == QuickShelfCategoryFilter.ALL ||
+        activeCategory == QuickShelfCategoryFilter.SINGLE_ITEMS) &&
+        filteredSingles.isNotEmpty()
+
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .testTag("saved_quick_actions_shelf"),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        if (!showMealsSection && !showSinglesSection && searchQuery.isNotBlank()) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(11.dp))
+              .background(Color(0xFF0A0A0E))
+              .border(1.dp, Color(0xFF282834), RoundedCornerShape(11.dp))
+              .padding(horizontal = 12.dp, vertical = 11.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Text(
+              text = "NO MATCHES FOR \"${searchQuery.uppercase()}\"",
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 9.0.sp,
+              modifier = Modifier.weight(1f),
+            )
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(PureWhite)
+                .clickable(role = Role.Button) {
+                  haptics.selection()
+                  searchQuery = ""
+                }
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+              Text(
+                text = "RESET SEARCH",
+                color = ObsidianBlack,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 8.0.sp,
+              )
+            }
+          }
+        }
+
+        // ─── CATEGORY BLOCK A: SAVED MEAL PROTOCOLS (Dynamic + Manual Collapse) ─
+        if (showMealsSection) {
+          val totalMealsKcal = remember(filteredMeals) { filteredMeals.sumOf { it.caloriesKcal } }
+          val totalMealsProtein = remember(filteredMeals) { filteredMeals.sumOf { it.proteinGrams } }
+
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(13.dp))
+              .background(Color(0xFF08080B))
+              .border(1.dp, Color(0xFF25252E), RoundedCornerShape(13.dp))
+              .padding(11.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
+          ) {
+            // Section A Header Row (Clickable Manual Toggle)
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clickable(role = Role.Button) {
+                  haptics.selection()
+                  isMealsExpanded = !isMealsExpanded
+                },
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+              ) {
+                Box(
+                  modifier = Modifier
+                    .width(3.5.dp)
+                    .height(12.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(warmTitanium),
+                )
+                Text(
+                  text = "SAVED MEALS • COMBINED & CUSTOM",
+                  color = PureWhite,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 9.2.sp,
+                  letterSpacing = 0.6.sp,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                )
+              }
+
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+              ) {
+                Box(
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(Color(0xFF14141B))
+                    .border(1.dp, Color(0xFF2C2C38), RoundedCornerShape(5.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                  Text(
+                    text = "${filteredMeals.size} MEAL${if (filteredMeals.size == 1) "" else "S"}",
+                    color = PureWhite,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 8.0.sp,
+                  )
+                }
+
+                // Dedicated Manual Collapse / Open Button for Meals
+                Box(
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (isMealsExpanded) PureWhite else Color(0xFF171720))
+                    .border(
+                      width = 1.dp,
+                      color = if (isMealsExpanded) PureWhite else Color(0xFF343444),
+                      shape = RoundedCornerShape(6.dp),
+                    )
+                    .clickable(role = Role.Button) {
+                      haptics.selection()
+                      isMealsExpanded = !isMealsExpanded
+                    }
+                    .padding(horizontal = 7.5.dp, vertical = 3.dp)
+                    .testTag("meals_section_collapse_button"),
+                ) {
+                  Text(
+                    text = if (isMealsExpanded) "COLLAPSE ▲" else "OPEN ▼",
+                    color = if (isMealsExpanded) ObsidianBlack else PureWhite,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 7.8.sp,
+                  )
+                }
+              }
+            }
+
+            // Collapsed Summary Strip when Meals section is collapsed (either by unseen viewport or manual toggle)
+            AnimatedVisibility(
+              visible = !isMealsExpanded,
+              enter = expandVertically(tween(durationMillis = 220, easing = SmoothOutEasing)) + fadeIn(tween(180)),
+              exit = shrinkVertically(tween(durationMillis = 200, easing = SmoothOutEasing)) + fadeOut(tween(150)),
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(9.dp))
+                  .background(Color(0xFF0E0E14))
+                  .border(1.dp, Color(0xFF272733), RoundedCornerShape(9.dp))
+                  .clickable(role = Role.Button) {
+                    haptics.selection()
+                    isMealsExpanded = true
+                  }
+                  .padding(horizontal = 10.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Row(
+                  modifier = Modifier.weight(1f),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                  Row(horizontalArrangement = Arrangement.spacedBy((-2).dp)) {
+                    filteredMeals.take(4).forEach { m ->
+                      Box(
+                        modifier = Modifier
+                          .size(10.dp)
+                          .clip(CircleShape)
+                          .background(QuickItemColorAlchemy.argbToColor(m.colorArgb))
+                          .border(1.dp, PureWhite, CircleShape),
+                      )
+                    }
+                  }
+                  Text(
+                    text = "${filteredMeals.size} Meal${if (filteredMeals.size == 1) "" else "s"} Folded • ${numberFormat.format(totalMealsKcal)} kcal • ${totalMealsProtein}g P",
+                    color = PureWhite,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.0.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                }
+
+                Text(
+                  text = "OPEN MEALS ▼",
+                  color = warmTitanium,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 8.0.sp,
+                )
+              }
+            }
+
+            // Expanded Meals Content
+            AnimatedVisibility(
+              visible = isMealsExpanded,
+              enter = expandVertically(tween(durationMillis = 260, easing = SmoothOutEasing)) + fadeIn(tween(200)),
+              exit = shrinkVertically(tween(durationMillis = 240, easing = SmoothOutEasing)) + fadeOut(tween(180)),
+            ) {
+              if (isVaultGridMode) {
+                // Full-Width Executive Meal Cards (Zero dead 50% empty space on the right!)
+                Column(
+                  modifier = Modifier.fillMaxWidth(),
+                  verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                  filteredMeals.forEach { mealItem ->
+                    SavedQuickActionItemCard(
+                      item = mealItem,
+                      isHoldingThis = false,
+                      holdProgress = 0f,
+                      isDraggingThis = false,
+                      isHoveredTarget = false,
+                      isArmedInFusionSlot = false,
+                      numberFormat = numberFormat,
+                      onTap = {
+                        haptics.confirm()
+                        onQuickTapSavedItem(mealItem)
+                      },
+                      onDelete = {
+                        haptics.tick()
+                        onDeleteSavedQuickItem(mealItem.id)
+                      },
+                      modifier = Modifier.fillMaxWidth(),
+                    )
+                  }
+                }
+              } else {
+                // Compact Horizontal Dock Mode
+                Row(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                  filteredMeals.forEach { mealItem ->
+                    SavedQuickActionItemCard(
+                      item = mealItem,
+                      isHoldingThis = false,
+                      holdProgress = 0f,
+                      isDraggingThis = false,
+                      isHoveredTarget = false,
+                      isArmedInFusionSlot = false,
+                      numberFormat = numberFormat,
+                      onTap = {
+                        haptics.confirm()
+                        onQuickTapSavedItem(mealItem)
+                      },
+                      onDelete = {
+                        haptics.tick()
+                        onDeleteSavedQuickItem(mealItem.id)
+                      },
+                      modifier = Modifier.width(268.dp),
+                    )
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // ─── CATEGORY BLOCK B: SINGLE ITEMS VAULT (Dynamic + Auto/Manual Collapse + 2s Hold) ─
+        if (showSinglesSection) {
+          val totalSinglesKcal = remember(filteredSingles) { filteredSingles.sumOf { it.caloriesKcal } }
+          val totalSinglesProtein = remember(filteredSingles) { filteredSingles.sumOf { it.proteinGrams } }
+
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(13.dp))
+              .background(Color(0xFF08080B))
+              .border(1.dp, Color(0xFF25252E), RoundedCornerShape(13.dp))
+              .padding(11.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
+          ) {
+            // Section B Header Row (Clickable Manual Toggle)
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clickable(role = Role.Button) {
+                  haptics.selection()
+                  isSinglesExpanded = !isSinglesExpanded
+                },
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+              ) {
+                Box(
+                  modifier = Modifier
+                    .width(3.5.dp)
+                    .height(12.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(PureWhite),
+                )
+                Text(
+                  text = "SINGLE ITEMS VAULT",
+                  color = PureWhite,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 9.2.sp,
+                  letterSpacing = 0.6.sp,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                )
+              }
+
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+              ) {
+                Box(
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(Color(0xFF14141B))
+                    .border(1.dp, Color(0xFF2C2C38), RoundedCornerShape(5.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                  Text(
+                    text = if (filteredSingles.size >= 2) {
+                      "HOLD 2S FUSE • ${filteredSingles.size}"
+                    } else {
+                      "${filteredSingles.size} ITEM${if (filteredSingles.size == 1) "" else "S"}"
+                    },
+                    color = PureWhite,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 8.0.sp,
+                  )
+                }
+
+                // Dedicated Manual Collapse / Open Button for Single Items
+                Box(
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (isSinglesExpanded) PureWhite else Color(0xFF171720))
+                    .border(
+                      width = 1.dp,
+                      color = if (isSinglesExpanded) PureWhite else Color(0xFF343444),
+                      shape = RoundedCornerShape(6.dp),
+                    )
+                    .clickable(role = Role.Button) {
+                      haptics.selection()
+                      isSinglesExpanded = !isSinglesExpanded
+                    }
+                    .padding(horizontal = 7.5.dp, vertical = 3.dp)
+                    .testTag("singles_section_collapse_button"),
+                ) {
+                  Text(
+                    text = if (isSinglesExpanded) "COLLAPSE ▲" else "OPEN ▼",
+                    color = if (isSinglesExpanded) ObsidianBlack else PureWhite,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 7.8.sp,
+                  )
+                }
+              }
+            }
+
+            // Collapsed Summary Strip when Single Items section is collapsed
+            AnimatedVisibility(
+              visible = !isSinglesExpanded,
+              enter = expandVertically(tween(durationMillis = 220, easing = SmoothOutEasing)) + fadeIn(tween(180)),
+              exit = shrinkVertically(tween(durationMillis = 200, easing = SmoothOutEasing)) + fadeOut(tween(150)),
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(9.dp))
+                  .background(Color(0xFF0E0E14))
+                  .border(1.dp, Color(0xFF272733), RoundedCornerShape(9.dp))
+                  .clickable(role = Role.Button) {
+                    haptics.selection()
+                    isSinglesExpanded = true
+                  }
+                  .padding(horizontal = 10.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Row(
+                  modifier = Modifier.weight(1f),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                  Row(horizontalArrangement = Arrangement.spacedBy((-2).dp)) {
+                    filteredSingles.take(5).forEach { s ->
+                      Box(
+                        modifier = Modifier
+                          .size(10.dp)
+                          .clip(CircleShape)
+                          .background(QuickItemColorAlchemy.argbToColor(s.colorArgb))
+                          .border(1.dp, PureWhite, CircleShape),
+                      )
+                    }
+                  }
+                  Text(
+                    text = "${filteredSingles.size} Item${if (filteredSingles.size == 1) "" else "s"} Folded • ${numberFormat.format(totalSinglesKcal)} kcal • ${totalSinglesProtein}g P",
+                    color = PureWhite,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.0.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                }
+
+                Text(
+                  text = "OPEN ITEMS ▼",
+                  color = PureWhite,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 8.0.sp,
+                )
+              }
+            }
+
+            // Expanded Single Items Content
+            AnimatedVisibility(
+              visible = isSinglesExpanded,
+              enter = expandVertically(tween(durationMillis = 260, easing = SmoothOutEasing)) + fadeIn(tween(200)),
+              exit = shrinkVertically(tween(durationMillis = 240, easing = SmoothOutEasing)) + fadeOut(tween(180)),
+            ) {
+              if (isVaultGridMode) {
+                // Adaptive Multi-Row Bento Vault Grid:
+                // - Pairs items 2 per row when 2+ items exist
+                // - Any single or odd remaining item automatically spans 100% full width (no dead half-width void!)
+                Column(
+                  modifier = Modifier.fillMaxWidth(),
+                  verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                  filteredSingles.chunked(2).forEach { rowSingles ->
+                    Row(
+                      modifier = Modifier.fillMaxWidth(),
+                      horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                      rowSingles.forEach { singleItem ->
+                        val isHoldingThis = holdingItemId == singleItem.id
+                        val isDraggingThis = draggingItemId == singleItem.id
+                        val isHoveredTarget = hoveredTargetItemId == singleItem.id &&
+                          draggingItemId != null &&
+                          draggingItemId != singleItem.id
+                        val isArmedInFusionSlot = armedFusionSlotItem?.id == singleItem.id
+
+                        SavedQuickActionItemCard(
+                          item = singleItem,
+                          isHoldingThis = isHoldingThis,
+                          holdProgress = if (isHoldingThis) holdProgress else 0f,
+                          isDraggingThis = isDraggingThis,
+                          isHoveredTarget = isHoveredTarget,
+                          isArmedInFusionSlot = isArmedInFusionSlot,
+                          numberFormat = numberFormat,
+                          onTap = {
+                            val armed = armedFusionSlotItem
+                            if (armed != null && armed.id != singleItem.id) {
+                              haptics.confirm()
+                              armedFusionSlotItem = null
+                              popupPreselectedPair = armed to singleItem
+                              popupInitialIsMealTab = true
+                              showQuickActionPopup = true
+                            } else {
+                              haptics.confirm()
+                              onQuickTapSavedItem(singleItem)
+                            }
+                          },
+                          onDelete = {
+                            haptics.tick()
+                            onDeleteSavedQuickItem(singleItem.id)
+                          },
+                          modifier = Modifier
+                            .weight(1f)
+                            .zIndex(if (isDraggingThis) 25f else 1f)
+                            .offset {
+                              if (isDraggingThis) {
+                                IntOffset(dragOffsetX.roundToInt(), dragOffsetY.roundToInt())
+                              } else {
+                                IntOffset.Zero
+                              }
+                            }
+                            .onGloballyPositioned { coords ->
+                              if (!isDraggingThis) {
+                                singleItemBounds[singleItem.id] = coords.boundsInRoot()
+                              }
+                            }
+                            .twoSecondHoldToOverlapGesture(
+                              item = singleItem,
+                              savedSingles = savedSingles,
+                              singleItemBounds = singleItemBounds,
+                              coroutineScope = coroutineScope,
+                              haptics = haptics,
+                              onHoldProgress = { id, prog ->
+                                holdingItemId = id
+                                holdProgress = prog
+                              },
+                              onDragArmed = { id ->
+                                holdingItemId = null
+                                holdProgress = 1f
+                                draggingItemId = id
+                                dragOffsetX = 0f
+                                dragOffsetY = 0f
+                                hoveredTargetItemId = null
+                              },
+                              onDragMove = { dx, dy, hitTargetId ->
+                                dragOffsetX = dx
+                                dragOffsetY = dy
+                                hoveredTargetItemId = hitTargetId
+                              },
+                              onDragFinish = { sourceItem, targetItem ->
+                                holdingItemId = null
+                                holdProgress = 0f
+                                draggingItemId = null
+                                dragOffsetX = 0f
+                                dragOffsetY = 0f
+                                hoveredTargetItemId = null
+                                if (targetItem != null && targetItem.id != sourceItem.id) {
+                                  haptics.confirm()
+                                  armedFusionSlotItem = null
+                                  popupPreselectedPair = sourceItem to targetItem
+                                  popupInitialIsMealTab = true
+                                  showQuickActionPopup = true
+                                } else {
+                                  armedFusionSlotItem = if (armedFusionSlotItem?.id == sourceItem.id) {
+                                    null
+                                  } else {
+                                    sourceItem
+                                  }
+                                }
+                              },
+                              onShortTap = {
+                                val armed = armedFusionSlotItem
+                                if (armed != null && armed.id != singleItem.id) {
+                                  haptics.confirm()
+                                  armedFusionSlotItem = null
+                                  popupPreselectedPair = armed to singleItem
+                                  popupInitialIsMealTab = true
+                                  showQuickActionPopup = true
+                                } else {
+                                  haptics.confirm()
+                                  onQuickTapSavedItem(singleItem)
+                                }
+                              },
+                            ),
+                        )
+                      }
+                    }
+                  }
+                }
+              } else {
+                // Compact Horizontal Dock Mode (Also supports 2.0s Hold-to-Overlap)
+                Row(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                  filteredSingles.forEach { singleItem ->
+                    val isHoldingThis = holdingItemId == singleItem.id
+                    val isDraggingThis = draggingItemId == singleItem.id
+                    val isHoveredTarget = hoveredTargetItemId == singleItem.id &&
+                      draggingItemId != null &&
+                      draggingItemId != singleItem.id
+                    val isArmedInFusionSlot = armedFusionSlotItem?.id == singleItem.id
+
+                    SavedQuickActionItemCard(
+                      item = singleItem,
+                      isHoldingThis = isHoldingThis,
+                      holdProgress = if (isHoldingThis) holdProgress else 0f,
+                      isDraggingThis = isDraggingThis,
+                      isHoveredTarget = isHoveredTarget,
+                      isArmedInFusionSlot = isArmedInFusionSlot,
+                      numberFormat = numberFormat,
+                      onTap = {
+                        val armed = armedFusionSlotItem
+                        if (armed != null && armed.id != singleItem.id) {
+                          haptics.confirm()
+                          armedFusionSlotItem = null
+                          popupPreselectedPair = armed to singleItem
+                          popupInitialIsMealTab = true
+                          showQuickActionPopup = true
+                        } else {
+                          haptics.confirm()
+                          onQuickTapSavedItem(singleItem)
+                        }
+                      },
+                      onDelete = {
+                        haptics.tick()
+                        onDeleteSavedQuickItem(singleItem.id)
+                      },
+                      modifier = Modifier
+                        .width(248.dp)
+                        .zIndex(if (isDraggingThis) 25f else 1f)
+                        .offset {
+                          if (isDraggingThis) {
+                            IntOffset(dragOffsetX.roundToInt(), dragOffsetY.roundToInt())
+                          } else {
+                            IntOffset.Zero
+                          }
+                        }
+                        .onGloballyPositioned { coords ->
+                          if (!isDraggingThis) {
+                            singleItemBounds[singleItem.id] = coords.boundsInRoot()
+                          }
+                        }
+                        .twoSecondHoldToOverlapGesture(
+                          item = singleItem,
+                          savedSingles = savedSingles,
+                          singleItemBounds = singleItemBounds,
+                          coroutineScope = coroutineScope,
+                          haptics = haptics,
+                          onHoldProgress = { id, prog ->
+                            holdingItemId = id
+                            holdProgress = prog
+                          },
+                          onDragArmed = { id ->
+                            holdingItemId = null
+                            holdProgress = 1f
+                            draggingItemId = id
+                            dragOffsetX = 0f
+                            dragOffsetY = 0f
+                            hoveredTargetItemId = null
+                          },
+                          onDragMove = { dx, dy, hitTargetId ->
+                            dragOffsetX = dx
+                            dragOffsetY = dy
+                            hoveredTargetItemId = hitTargetId
+                          },
+                          onDragFinish = { sourceItem, targetItem ->
+                            holdingItemId = null
+                            holdProgress = 0f
+                            draggingItemId = null
+                            dragOffsetX = 0f
+                            dragOffsetY = 0f
+                            hoveredTargetItemId = null
+                            if (targetItem != null && targetItem.id != sourceItem.id) {
+                              haptics.confirm()
+                              armedFusionSlotItem = null
+                              popupPreselectedPair = sourceItem to targetItem
+                              popupInitialIsMealTab = true
+                              showQuickActionPopup = true
+                            } else {
+                              armedFusionSlotItem = if (armedFusionSlotItem?.id == sourceItem.id) {
+                                null
+                              } else {
+                                sourceItem
+                              }
+                            }
+                          },
+                          onShortTap = {
+                            val armed = armedFusionSlotItem
+                            if (armed != null && armed.id != singleItem.id) {
+                              haptics.confirm()
+                              armedFusionSlotItem = null
+                              popupPreselectedPair = armed to singleItem
+                              popupInitialIsMealTab = true
+                              showQuickActionPopup = true
+                            } else {
+                              haptics.confirm()
+                              onQuickTapSavedItem(singleItem)
+                            }
+                          },
+                        ),
+                    )
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if (!showMealsSection && !showSinglesSection) {
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(11.dp))
+              .background(Color(0xFF09090D))
+              .border(1.dp, Zinc800, RoundedCornerShape(11.dp))
+              .padding(vertical = 16.dp, horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+          ) {
+            Text(
+              text = "No saved items match \"$searchQuery\" in this category.",
+              color = Zinc300,
+              fontFamily = InterFontFamily,
+              fontSize = 11.5.sp,
+            )
           }
         }
       }
     }
   }
 
-  // POPUP MODAL WHEN USER CLICKS "+" OR DRAGS ONE SINGLE ITEM ONTO ANOTHER
+  // POPUP MODAL WHEN USER CLICKS "+" OR OVERLAPS / FUSES TWO SINGLE ITEMS AFTER 2S HOLD
   if (showQuickActionPopup) {
     QuickActionPopupDialog(
       availableSingleItems = availableSingleItems,
@@ -540,6 +1861,628 @@ fun DashboardQuickActionsHubCard(
   }
 }
 
+/**
+ * Precision 2.0-Second Hold-to-Overlap & Combine Gesture Modifier:
+ * - Short tap (< 2.0s without scrolling): triggers `onShortTap`
+ * - Scroll movement before 2.0s: cancels hold cleanly so scrolling is never blocked
+ * - Hold steady for 2.0s (2000ms): arms overlap-fusion mode so the user can drag the Single Item
+ *   directly onto any other Single Item to overlap & combine them!
+ */
+private fun Modifier.twoSecondHoldToOverlapGesture(
+  item: SavedQuickNutritionItem,
+  savedSingles: List<SavedQuickNutritionItem>,
+  singleItemBounds: Map<String, Rect>,
+  coroutineScope: kotlinx.coroutines.CoroutineScope,
+  haptics: BioSyncHapticController,
+  onHoldProgress: (String?, Float) -> Unit,
+  onDragArmed: (String) -> Unit,
+  onDragMove: (Float, Float, String?) -> Unit,
+  onDragFinish: (SavedQuickNutritionItem, SavedQuickNutritionItem?) -> Unit,
+  onShortTap: () -> Unit,
+): Modifier = this.pointerInput(item.id, savedSingles) {
+  val touchSlopPx = viewConfiguration.touchSlop
+  awaitEachGesture {
+    val down = awaitFirstDown(requireUnconsumed = false)
+    var isArmedAfterTwoSec = false
+    var isCancelledBeforeArm = false
+    var totalPreArmMoveX = 0f
+    var totalPreArmMoveY = 0f
+
+    val holdJob: Job = coroutineScope.launch {
+      val startMs = System.currentTimeMillis()
+      val holdDurationMs = 2000L
+      onHoldProgress(item.id, 0.02f)
+      var midTickSent = false
+      while (true) {
+        delay(40L)
+        if (isCancelledBeforeArm) break
+        val elapsed = System.currentTimeMillis() - startMs
+        val frac = (elapsed.toFloat() / holdDurationMs.toFloat()).coerceIn(0f, 1f)
+        onHoldProgress(item.id, frac)
+        if (!midTickSent && frac >= 0.5f) {
+          midTickSent = true
+          haptics.tick()
+        }
+        if (elapsed >= holdDurationMs) {
+          isArmedAfterTwoSec = true
+          haptics.confirm()
+          onDragArmed(item.id)
+          break
+        }
+      }
+    }
+
+    var dragDx = 0f
+    var dragDy = 0f
+    var currentHitTargetId: String? = null
+    var releasedUp = false
+
+    while (true) {
+      val event = awaitPointerEvent()
+      val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.firstOrNull()
+      if (change == null || change.changedToUpIgnoreConsumed() || !change.pressed) {
+        releasedUp = true
+        break
+      }
+      val delta = change.positionChange()
+      if (!isArmedAfterTwoSec) {
+        totalPreArmMoveX += delta.x
+        totalPreArmMoveY += delta.y
+        if (hypot(totalPreArmMoveX, totalPreArmMoveY) > touchSlopPx * 1.35f) {
+          isCancelledBeforeArm = true
+          holdJob.cancel()
+          onHoldProgress(null, 0f)
+          break
+        }
+      } else {
+        change.consume()
+        dragDx += delta.x
+        dragDy += delta.y
+        val startRect = singleItemBounds[item.id]
+        if (startRect != null) {
+          val currentCenter = Offset(
+            x = startRect.center.x + dragDx,
+            y = startRect.center.y + dragDy,
+          )
+          val hitEntry = singleItemBounds.entries.firstOrNull { (otherId, rect) ->
+            otherId != item.id && rect.inflate(10f).contains(currentCenter)
+          }
+          if (hitEntry?.key != currentHitTargetId && hitEntry?.key != null) {
+            haptics.selection()
+          }
+          currentHitTargetId = hitEntry?.key
+        }
+        onDragMove(dragDx, dragDy, currentHitTargetId)
+      }
+    }
+
+    holdJob.cancel()
+    if (isArmedAfterTwoSec) {
+      val targetItem = savedSingles.firstOrNull { it.id == currentHitTargetId }
+      onDragFinish(item, targetItem)
+    } else {
+      onHoldProgress(null, 0f)
+      if (releasedUp && !isCancelledBeforeArm) {
+        onShortTap()
+      }
+    }
+  }
+}
+
+@Composable
+private fun QuickActionPlusActuatorButton(
+  compact: Boolean = false,
+  onClick: () -> Unit,
+) {
+  Column(
+    modifier = Modifier
+      .width(if (compact) 72.dp else 78.dp)
+      .height(if (compact) 44.dp else 68.dp)
+      .clip(RoundedCornerShape(11.dp))
+      .background(PureWhite)
+      .border(1.dp, PureWhite, RoundedCornerShape(11.dp))
+      .clickable(role = Role.Button, onClick = onClick)
+      .testTag("quick_actions_plus_button"),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.Center,
+  ) {
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+      Text(
+        text = "+",
+        color = ObsidianBlack,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.ExtraBold,
+        fontSize = if (compact) 16.sp else 20.sp,
+      )
+      Text(
+        text = "ADD",
+        color = ObsidianBlack,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.ExtraBold,
+        fontSize = 9.5.sp,
+        letterSpacing = 0.5.sp,
+      )
+    }
+  }
+}
+
+/**
+ * Bespoke Solid-Obsidian Hardware Card for a Saved Single Item or Combined/Custom Meal:
+ * - ZERO reflected/transparent background color wash (pure opaque `#0C0C11` -> `#07070A` surface)
+ * - Sculpted Left Anodized Color Blade (solid bar for Single Items; multi-segment color prism for Combined Meals)
+ * - Crystal-clear 4-Pillar Pure-White Macro Telemetry Chamber (`KCAL | PRO | CARB | FAT`)
+ * - Solid Component Hardware Chips with individual color dots for combined meals
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SavedQuickActionItemCard(
+  item: SavedQuickNutritionItem,
+  isHoldingThis: Boolean,
+  holdProgress: Float,
+  isDraggingThis: Boolean,
+  isHoveredTarget: Boolean,
+  isArmedInFusionSlot: Boolean,
+  numberFormat: NumberFormat,
+  onTap: () -> Unit,
+  onDelete: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val primaryColor = remember(item.colorArgb) {
+    QuickItemColorAlchemy.argbToColor(item.colorArgb)
+  }
+  val mixedColors = remember(item.mixedFromColorArgbs) {
+    if (item.mixedFromColorArgbs.size >= 2) {
+      item.mixedFromColorArgbs.map { QuickItemColorAlchemy.argbToColor(it) }
+    } else {
+      emptyList()
+    }
+  }
+  val hasMixedAlchemy = mixedColors.size >= 2
+  val highlightActive = isDraggingThis || isHoveredTarget || isArmedInFusionSlot || isHoldingThis
+
+  Column(
+    modifier = modifier
+      .clip(RoundedCornerShape(12.dp))
+      .drawWithCache {
+        val cornerPx = 12.dp.toPx()
+        val bladeWidthPx = 5.5.dp.toPx()
+        // Pure opaque Carbon-Obsidian background — ZERO transparent colored wash!
+        val solidSurfaceBrush = Brush.verticalGradient(
+          colors = listOf(
+            Color(0xFF13131A),
+            Color(0xFF0A0A0E),
+          ),
+        )
+        val structuralBorderColor = when {
+          isHoveredTarget || isDraggingThis || isArmedInFusionSlot -> PureWhite
+          isHoldingThis -> PureWhite.copy(alpha = 0.85f)
+          else -> Color(0xFF2B2B36)
+        }
+        onDrawBehind {
+          // 1. Solid Opaque Obsidian Card Chassis
+          drawRoundRect(
+            brush = solidSurfaceBrush,
+            cornerRadius = CornerRadius(cornerPx, cornerPx),
+          )
+
+          // 2. Left Machined Anodized Color Blade (Segmented solid blocks if Combined Meal, solid if Single Item)
+          if (hasMixedAlchemy) {
+            val segCount = mixedColors.size
+            val segHeight = size.height / segCount.toFloat()
+            mixedColors.forEachIndexed { idx, segColor ->
+              drawRect(
+                color = segColor,
+                topLeft = Offset(0f, idx * segHeight),
+                size = Size(bladeWidthPx, segHeight + 1f),
+              )
+            }
+          } else {
+            drawRect(
+              color = primaryColor,
+              topLeft = Offset.Zero,
+              size = Size(bladeWidthPx, size.height),
+            )
+          }
+
+          // Crisp vertical divider line separating the Color Blade from the Obsidian Chassis
+          drawLine(
+            color = PureWhite.copy(alpha = 0.25f),
+            start = Offset(bladeWidthPx, 0f),
+            end = Offset(bladeWidthPx, size.height),
+            strokeWidth = 1.dp.toPx(),
+          )
+
+          // 3. Outer Crisp Structural Border
+          drawRoundRect(
+            color = structuralBorderColor,
+            cornerRadius = CornerRadius(cornerPx, cornerPx),
+            style = Stroke(width = if (highlightActive) 1.5.dp.toPx() else 1.dp.toPx()),
+          )
+        }
+      }
+      .clickable(role = Role.Button, onClick = onTap)
+      .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp)
+      .testTag("saved_quick_item_${item.id}"),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    // 1. Top Header Row: Solid Color Swatch/Cluster + Pure-White Title + Solid High-Contrast Badge + Delete
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Row(
+        modifier = Modifier.weight(1f),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        // Precision Solid Color Swatch (Overlapping Solid Color Nodes for Combined Meal)
+        if (hasMixedAlchemy) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy((-3).dp),
+          ) {
+            mixedColors.take(3).forEach { c ->
+              Box(
+                modifier = Modifier
+                  .size(11.dp)
+                  .clip(CircleShape)
+                  .background(c)
+                  .border(1.dp, PureWhite, CircleShape),
+              )
+            }
+            Box(
+              modifier = Modifier
+                .size(12.dp)
+                .clip(RoundedCornerShape(3.5.dp))
+                .background(primaryColor)
+                .border(1.dp, PureWhite, RoundedCornerShape(3.5.dp)),
+            )
+          }
+        } else {
+          Box(
+            modifier = Modifier
+              .size(11.dp)
+              .clip(RoundedCornerShape(3.dp))
+              .background(primaryColor)
+              .border(1.dp, PureWhite, RoundedCornerShape(3.dp)),
+          )
+        }
+
+        Text(
+          text = item.name,
+          color = PureWhite,
+          fontFamily = InterFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = 13.5.sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.weight(1f, fill = false),
+        )
+      }
+
+      Spacer(modifier = Modifier.width(6.dp))
+
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        // Solid High-Contrast Status Pill (PureWhite text on solid #16161F — 100% legible!)
+        Row(
+          modifier = Modifier
+            .clip(RoundedCornerShape(5.dp))
+            .background(Color(0xFF171720))
+            .border(1.dp, Color(0xFF323242), RoundedCornerShape(5.dp))
+            .padding(horizontal = 6.dp, vertical = 2.5.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+          Box(
+            modifier = Modifier
+              .size(5.5.dp)
+              .clip(CircleShape)
+              .background(primaryColor),
+          )
+          Text(
+            text = when {
+              isArmedInFusionSlot -> "FUSE READY"
+              hasMixedAlchemy -> "MIXED MEAL"
+              item.isMeal -> "MEAL"
+              else -> "ITEM"
+            },
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 7.6.sp,
+            letterSpacing = 0.3.sp,
+          )
+        }
+
+        // Tactile Crimson Delete Button
+        Box(
+          modifier = Modifier
+            .size(23.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(SolidDangerRed)
+            .border(1.dp, SolidDangerRedBorder, RoundedCornerShape(6.dp))
+            .clickable(role = Role.Button, onClick = onDelete)
+            .testTag("delete_saved_quick_item_${item.id}"),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            text = "×",
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 13.sp,
+            lineHeight = 13.sp,
+          )
+        }
+      }
+    }
+
+    // 2. High-Contrast 4-Pillar Macro Telemetry Chamber (Every Value in Bold PureWhite!)
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(8.dp))
+        .background(Color(0xFF060609))
+        .border(1.dp, Color(0xFF22222C), RoundedCornerShape(8.dp))
+        .padding(vertical = 6.5.dp, horizontal = 8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      // Pillar 1: CALORIES
+      Column(
+        modifier = Modifier.weight(1.25f),
+        horizontalAlignment = Alignment.Start,
+      ) {
+        Text(
+          text = "ENERGY",
+          color = Zinc400,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = 7.2.sp,
+          letterSpacing = 0.4.sp,
+        )
+        Row(
+          verticalAlignment = Alignment.Bottom,
+          horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+          Text(
+            text = numberFormat.format(item.caloriesKcal),
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 11.8.sp,
+            maxLines = 1,
+          )
+          Text(
+            text = "kcal",
+            color = Color(0xFFE5DEC9),
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 8.2.sp,
+            modifier = Modifier.padding(bottom = 0.5.dp),
+          )
+        }
+      }
+
+      Box(
+        modifier = Modifier
+          .width(1.dp)
+          .height(20.dp)
+          .background(Color(0xFF22222C)),
+      )
+
+      // Pillar 2: PROTEIN
+      Column(
+        modifier = Modifier.weight(0.92f),
+        horizontalAlignment = Alignment.CenterHorizontally,
+      ) {
+        Text(
+          text = "PRO",
+          color = ProteinStart,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = 7.2.sp,
+          letterSpacing = 0.4.sp,
+        )
+        Text(
+          text = "${item.proteinGrams}g",
+          color = PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = 11.2.sp,
+          maxLines = 1,
+        )
+      }
+
+      Box(
+        modifier = Modifier
+          .width(1.dp)
+          .height(20.dp)
+          .background(Color(0xFF22222C)),
+      )
+
+      // Pillar 3: CARBS
+      Column(
+        modifier = Modifier.weight(0.92f),
+        horizontalAlignment = Alignment.CenterHorizontally,
+      ) {
+        Text(
+          text = "CARB",
+          color = CarbsStart,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = 7.2.sp,
+          letterSpacing = 0.4.sp,
+        )
+        Text(
+          text = "${item.carbsGrams}g",
+          color = PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = 11.2.sp,
+          maxLines = 1,
+        )
+      }
+
+      Box(
+        modifier = Modifier
+          .width(1.dp)
+          .height(20.dp)
+          .background(Color(0xFF22222C)),
+      )
+
+      // Pillar 4: FATS
+      Column(
+        modifier = Modifier.weight(0.92f),
+        horizontalAlignment = Alignment.CenterHorizontally,
+      ) {
+        Text(
+          text = "FAT",
+          color = FatsStart,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = 7.2.sp,
+          letterSpacing = 0.4.sp,
+        )
+        Text(
+          text = "${item.fatsGrams}g",
+          color = PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = 11.2.sp,
+          maxLines = 1,
+        )
+      }
+    }
+
+    // 3. Component Breakdown Chips + Solid Color-Mix Alchemy Strip (For Combined Meals)
+    if (item.componentNames.isNotEmpty()) {
+      FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+      ) {
+        item.componentNames.forEachIndexed { idx, compName ->
+          val compColor = if (mixedColors.isNotEmpty()) {
+            mixedColors[idx % mixedColors.size]
+          } else {
+            primaryColor
+          }
+          Row(
+            modifier = Modifier
+              .clip(RoundedCornerShape(5.dp))
+              .background(Color(0xFF121218))
+              .border(1.dp, Color(0xFF2A2A36), RoundedCornerShape(5.dp))
+              .padding(horizontal = 6.5.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .size(6.5.dp)
+                .clip(CircleShape)
+                .background(compColor)
+                .border(0.7.dp, PureWhite, CircleShape),
+            )
+            Text(
+              text = compName,
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 8.6.sp,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
+          }
+        }
+
+        if (hasMixedAlchemy) {
+          Row(
+            modifier = Modifier
+              .clip(RoundedCornerShape(5.dp))
+              .background(Color(0xFF171720))
+              .border(1.dp, PureWhite.copy(alpha = 0.45f), RoundedCornerShape(5.dp))
+              .padding(horizontal = 6.5.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            Text(
+              text = "➔",
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 8.4.sp,
+            )
+            Box(
+              modifier = Modifier
+                .size(7.5.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(primaryColor)
+                .border(0.8.dp, PureWhite, RoundedCornerShape(2.dp)),
+            )
+            Text(
+              text = "BLENDED",
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 8.0.sp,
+            )
+          }
+        }
+      }
+    }
+
+    // 4. Live 2.0-Second Hold Progress Bar (Shown when user holds a Single Item to overlap)
+    if (isHoldingThis || isDraggingThis) {
+      val holdBarFill = if (isDraggingThis) 1f else holdProgress.coerceIn(0.06f, 1f)
+      Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            text = if (isDraggingThis) "OVERLAP READY" else "HOLD 2.0S TO OVERLAP",
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 7.6.sp,
+          )
+          Text(
+            text = "${(holdBarFill * 100).roundToInt()}%",
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 7.6.sp,
+          )
+        }
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(4.dp)
+            .clip(CircleShape)
+            .background(Color(0xFF050507)),
+        ) {
+          Box(
+            modifier = Modifier
+              .fillMaxWidth(holdBarFill)
+              .height(4.dp)
+              .clip(CircleShape)
+              .background(PureWhite),
+          )
+        }
+      }
+    }
+  }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun QuickActionPopupDialog(
@@ -556,6 +2499,7 @@ private fun QuickActionPopupDialog(
   onDismiss: () -> Unit,
   onSubmit: (SavedQuickNutritionItem, Boolean) -> Unit,
 ) {
+  val warmTitanium = Color(0xFFE5DEC9)
   var isCreateMealTab by remember(initialIsCreateMealTab) {
     mutableStateOf(initialIsCreateMealTab)
   }
@@ -611,8 +2555,13 @@ private fun QuickActionPopupDialog(
   var carbsDontKnow by remember { mutableStateOf(false) }
   var fatsDontKnow by remember { mutableStateOf(false) }
 
-  // Default OFF as requested
-  var saveToQuickActions by remember { mutableStateOf(false) }
+  // Default OFF unless opened via 2s Hold-to-Overlap Meal Fusion
+  var saveToQuickActions by remember(preselectedDragPair) {
+    mutableStateOf(preselectedDragPair != null)
+  }
+
+  // Search filter inside Create Meal when user has many Single Items
+  var singlePickerSearchQuery by remember { mutableStateOf("") }
 
   val selectedSingleItemCounts = remember(preselectedDragPair) {
     mutableStateMapOf<String, Int>().apply {
@@ -622,6 +2571,79 @@ private fun QuickActionPopupDialog(
       }
     }
   }
+
+  // Prune any selected single item that is no longer in availableSingleItems
+  LaunchedEffect(availableSingleItems) {
+    val validIds = availableSingleItems.map { it.id }.toSet()
+    val staleKeys = selectedSingleItemCounts.keys.filter { it !in validIds }
+    staleKeys.forEach { selectedSingleItemCounts.remove(it) }
+  }
+
+  // Color Selection & Color Mixing Alchemy State
+  val selectedComponentColors: List<Long> = remember(
+    isCreateMealTab,
+    selectedSingleItemCounts.toMap(),
+    availableSingleItems,
+  ) {
+    if (!isCreateMealTab) {
+      emptyList()
+    } else {
+      val list = mutableListOf<Long>()
+      for ((id, qty) in selectedSingleItemCounts) {
+        if (qty > 0) {
+          val found = availableSingleItems.firstOrNull { it.id == id }
+          if (found != null) {
+            list.add(found.colorArgb)
+          }
+        }
+      }
+      list
+    }
+  }
+
+  val autoBlendedMealColorArgb: Long = remember(selectedComponentColors) {
+    if (selectedComponentColors.size >= 2) {
+      QuickItemColorAlchemy.mixItemColors(selectedComponentColors)
+    } else if (selectedComponentColors.size == 1) {
+      selectedComponentColors.first()
+    } else {
+      0xFFA855F7L
+    }
+  }
+
+  var useMixedColorForMeal by remember(preselectedDragPair) {
+    mutableStateOf(true)
+  }
+  var selectedColorArgb by remember(preselectedDragPair) {
+    mutableLongStateOf(
+      if (preselectedDragPair != null) {
+        QuickItemColorAlchemy.mixItemColors(
+          listOf(preselectedDragPair.first.colorArgb, preselectedDragPair.second.colorArgb),
+        )
+      } else {
+        QuickItemColorAlchemy.presets.first().argb
+      },
+    )
+  }
+  var showCustomColorStudio by remember { mutableStateOf(false) }
+  var customHue by remember { mutableFloatStateOf(280f) }
+  var customSat by remember { mutableFloatStateOf(0.82f) }
+  var customVal by remember { mutableFloatStateOf(0.95f) }
+  var customHexInput by remember { mutableStateOf("") }
+
+  // Keep meal color synced with mixed component colors when `useMixedColorForMeal` is active
+  LaunchedEffect(autoBlendedMealColorArgb, useMixedColorForMeal, isCreateMealTab, selectedComponentColors.size) {
+    if (isCreateMealTab && useMixedColorForMeal && selectedComponentColors.isNotEmpty()) {
+      selectedColorArgb = autoBlendedMealColorArgb
+    }
+  }
+
+  val effectiveColorArgb = if (isCreateMealTab && useMixedColorForMeal && selectedComponentColors.size >= 2) {
+    autoBlendedMealColorArgb
+  } else {
+    selectedColorArgb
+  }
+  val effectiveAccentColor = QuickItemColorAlchemy.argbToColor(effectiveColorArgb)
 
   fun syncMealFieldsFromSelectedSingles() {
     if (selectedSingleItemCounts.isEmpty()) return
@@ -648,7 +2670,7 @@ private fun QuickActionPopupDialog(
     proteinDontKnow = false
     carbsDontKnow = false
     fatsDontKnow = false
-    if (itemNameText.isBlank() && chosenNames.isNotEmpty()) {
+    if (chosenNames.isNotEmpty()) {
       itemNameText = chosenNames.joinToString(" + ").take(36)
     }
   }
@@ -725,7 +2747,7 @@ private fun QuickActionPopupDialog(
             )
             Spacer(modifier = Modifier.width(9.dp))
             Text(
-              text = "QUICK ACTION COMPOSER",
+              text = if (preselectedDragPair != null) "2.0S FUSION MEAL COMPOSER" else "QUICK ACTION COMPOSER",
               color = PureWhite,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.SemiBold,
@@ -762,7 +2784,7 @@ private fun QuickActionPopupDialog(
 
         Spacer(modifier = Modifier.height(13.dp))
 
-        // Segmented Switcher: SINGLE ITEM vs CREATE MEAL (Solid PureWhite vs ObsidianBlack)
+        // Segmented Switcher: SINGLE ITEM vs CREATE MEAL
         Row(
           modifier = Modifier
             .fillMaxWidth()
@@ -828,14 +2850,14 @@ private fun QuickActionPopupDialog(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // In CREATE MEAL mode: Show all created Single Items for multi-select combination
+        // In CREATE MEAL mode: Active Saved Single-Items Multi-Selector (Zero deleted items!)
         if (isCreateMealTab) {
           Column(
             modifier = Modifier
               .fillMaxWidth()
               .floating3DInnerTile(
                 cornerRadiusDp = 12.dp,
-                accentColor = ProteinStart,
+                accentColor = PureWhite,
               )
               .padding(12.dp),
           ) {
@@ -846,32 +2868,32 @@ private fun QuickActionPopupDialog(
             ) {
               Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
               ) {
                 Box(
                   modifier = Modifier
                     .width(3.dp)
-                    .height(10.dp)
+                    .height(11.dp)
                     .clip(RoundedCornerShape(1.5.dp))
-                    .background(ProteinStart),
+                    .background(PureWhite),
                 )
                 Text(
-                  text = "SELECT CREATED SINGLE ITEMS (OPTIONAL)",
+                  text = "COMBINE SAVED SINGLE ITEMS (${availableSingleItems.size})",
                   color = PureWhite,
                   fontFamily = JetBrainsMonoFontFamily,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 9.8.sp,
-                  letterSpacing = 0.7.sp,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 9.6.sp,
+                  letterSpacing = 0.6.sp,
                 )
               }
 
               if (selectedSingleItemCounts.isNotEmpty()) {
                 Text(
-                  text = "CLEAR",
-                  color = ProteinStart,
+                  text = "CLEAR SELECTION",
+                  color = warmTitanium,
                   fontFamily = JetBrainsMonoFontFamily,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 9.5.sp,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 8.8.sp,
                   modifier = Modifier.clickable {
                     haptics.tick()
                     selectedSingleItemCounts.clear()
@@ -883,80 +2905,163 @@ private fun QuickActionPopupDialog(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
               text = if (availableSingleItems.isEmpty()) {
-                "No Single Items created yet — enter Meal values directly below."
+                "No saved Single Items in your Quick Actions Vault — enter Meal values below or save a Single Item first."
               } else {
-                "Select Single Items to sum their macros automatically, or leave unselected to enter Meal values directly."
+                "Select active Single Items from your Vault to combine their macros & blend their colors."
               },
-              color = Zinc400,
+              color = Zinc300,
               fontFamily = InterFontFamily,
               fontSize = 11.sp,
             )
 
             if (availableSingleItems.isNotEmpty()) {
-              Spacer(modifier = Modifier.height(8.dp))
-              FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
-                verticalArrangement = Arrangement.spacedBy(7.dp),
-              ) {
-                availableSingleItems.forEach { single ->
-                  val count = selectedSingleItemCounts[single.id] ?: 0
-                  val isSelected = count > 0
-                  Row(
-                    modifier = Modifier
-                      .clip(RoundedCornerShape(8.dp))
-                      .background(if (isSelected) PureWhite else Zinc950)
-                      .border(
-                        width = 1.dp,
-                        color = if (isSelected) PureWhite else Zinc700,
-                        shape = RoundedCornerShape(8.dp),
-                      )
-                      .clickable {
-                        haptics.selection()
-                        if (count == 0) {
-                          selectedSingleItemCounts[single.id] = 1
-                        } else {
-                          selectedSingleItemCounts.remove(single.id)
-                        }
-                        syncMealFieldsFromSelectedSingles()
-                      }
-                      .padding(horizontal = 9.dp, vertical = 6.dp)
-                      .testTag("meal_select_single_${single.id}"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                  ) {
+              if (availableSingleItems.size >= 5) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(ObsidianBlack)
+                    .border(1.dp, Zinc800, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                  contentAlignment = Alignment.CenterStart,
+                ) {
+                  if (singlePickerSearchQuery.isEmpty()) {
                     Text(
-                      text = single.name,
-                      color = if (isSelected) ObsidianBlack else PureWhite,
+                      text = "Search ${availableSingleItems.size} saved single items...",
+                      color = Zinc400,
                       fontFamily = InterFontFamily,
-                      fontWeight = FontWeight.SemiBold,
                       fontSize = 11.5.sp,
                     )
-                    Text(
-                      text = "${single.caloriesKcal} kcal",
-                      color = if (isSelected) ObsidianBlack else Zinc400,
-                      fontFamily = JetBrainsMonoFontFamily,
-                      fontSize = 9.5.sp,
-                    )
-                    if (isSelected) {
-                      Box(
+                  }
+                  BasicTextField(
+                    value = singlePickerSearchQuery,
+                    onValueChange = { singlePickerSearchQuery = it.take(30) },
+                    singleLine = true,
+                    textStyle = TextStyle(
+                      color = PureWhite,
+                      fontFamily = InterFontFamily,
+                      fontWeight = FontWeight.SemiBold,
+                      fontSize = 12.sp,
+                    ),
+                    cursorBrush = SolidColor(PureWhite),
+                    modifier = Modifier.fillMaxWidth(),
+                  )
+                }
+              }
+
+              val filteredPickerSingles = remember(availableSingleItems, singlePickerSearchQuery) {
+                val q = singlePickerSearchQuery.trim().lowercase(Locale.US)
+                if (q.isEmpty()) {
+                  availableSingleItems
+                } else {
+                  availableSingleItems.filter { it.name.lowercase(Locale.US).contains(q) }
+                }
+              }
+
+              Spacer(modifier = Modifier.height(9.dp))
+              Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+              ) {
+                filteredPickerSingles.chunked(2).forEach { rowItems ->
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                  ) {
+                    rowItems.forEach { single ->
+                      val count = selectedSingleItemCounts[single.id] ?: 0
+                      val isSelected = count > 0
+                      val singleColor = QuickItemColorAlchemy.argbToColor(single.colorArgb)
+
+                      // Solid Obsidian Selector Chip (Zero transparent background wash!)
+                      Row(
                         modifier = Modifier
-                          .clip(RoundedCornerShape(4.dp))
-                          .background(ObsidianBlack)
+                          .weight(1f)
+                          .clip(RoundedCornerShape(9.dp))
+                          .background(if (isSelected) Color(0xFF171721) else Color(0xFF09090D))
+                          .border(
+                            width = if (isSelected) 1.4.dp else 1.dp,
+                            color = if (isSelected) PureWhite else Color(0xFF282834),
+                            shape = RoundedCornerShape(9.dp),
+                          )
                           .clickable {
-                            haptics.step()
-                            selectedSingleItemCounts[single.id] = (count + 1).coerceAtMost(9)
+                            haptics.selection()
+                            if (count == 0) {
+                              selectedSingleItemCounts[single.id] = 1
+                            } else {
+                              selectedSingleItemCounts.remove(single.id)
+                            }
+                            useMixedColorForMeal = true
                             syncMealFieldsFromSelectedSingles()
                           }
-                          .padding(horizontal = 5.dp, vertical = 1.dp),
+                          .padding(horizontal = 9.dp, vertical = 8.dp)
+                          .testTag("meal_select_single_${single.id}"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
                       ) {
-                        Text(
-                          text = "×$count",
-                          color = PureWhite,
-                          fontFamily = JetBrainsMonoFontFamily,
-                          fontWeight = FontWeight.Bold,
-                          fontSize = 9.5.sp,
-                        )
+                        Row(
+                          modifier = Modifier.weight(1f),
+                          verticalAlignment = Alignment.CenterVertically,
+                          horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                          Box(
+                            modifier = Modifier
+                              .width(4.dp)
+                              .height(22.dp)
+                              .clip(RoundedCornerShape(2.dp))
+                              .background(singleColor),
+                          )
+                          Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                              text = single.name,
+                              color = PureWhite,
+                              fontFamily = InterFontFamily,
+                              fontWeight = FontWeight.ExtraBold,
+                              fontSize = 12.sp,
+                              maxLines = 1,
+                              overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                              text = "${numberFormat.format(single.caloriesKcal)} kcal • ${single.proteinGrams}P",
+                              color = Zinc200,
+                              fontFamily = JetBrainsMonoFontFamily,
+                              fontWeight = FontWeight.Bold,
+                              fontSize = 9.2.sp,
+                              maxLines = 1,
+                            )
+                          }
+                        }
+
+                        if (isSelected) {
+                          Box(
+                            modifier = Modifier
+                              .clip(RoundedCornerShape(5.dp))
+                              .background(PureWhite)
+                              .clickable {
+                                haptics.step()
+                                selectedSingleItemCounts[single.id] = (count + 1).coerceAtMost(9)
+                                syncMealFieldsFromSelectedSingles()
+                              }
+                              .padding(horizontal = 6.dp, vertical = 2.5.dp),
+                          ) {
+                            Text(
+                              text = "×$count",
+                              color = ObsidianBlack,
+                              fontFamily = JetBrainsMonoFontFamily,
+                              fontWeight = FontWeight.ExtraBold,
+                              fontSize = 9.5.sp,
+                            )
+                          }
+                        } else {
+                          Text(
+                            text = "+ ADD",
+                            color = Zinc300,
+                            fontFamily = JetBrainsMonoFontFamily,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 8.4.sp,
+                          )
+                        }
                       }
                     }
                   }
@@ -968,21 +3073,21 @@ private fun QuickActionPopupDialog(
           Spacer(modifier = Modifier.height(12.dp))
         }
 
-        // Inner Floating Card for Name + 2x2 Nutrient Boxes
+        // Inner Floating Card for Name + 2x2 Nutrient Boxes (Pure neutral rim — no colored wash!)
         Column(
           modifier = Modifier
             .fillMaxWidth()
             .floating3DInnerTile(
               cornerRadiusDp = 12.dp,
-              accentColor = Zinc600,
+              accentColor = PureWhite,
             )
             .padding(12.dp),
         ) {
           Text(
             text = if (isCreateMealTab) "MEAL NAME" else "ITEM NAME",
-            color = Zinc300,
+            color = PureWhite,
             fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Bold,
             fontSize = 10.sp,
             letterSpacing = 0.8.sp,
           )
@@ -993,14 +3098,14 @@ private fun QuickActionPopupDialog(
               .heightIn(min = 44.dp)
               .clip(RoundedCornerShape(9.dp))
               .background(ObsidianBlack)
-              .border(1.dp, Zinc800, RoundedCornerShape(9.dp))
+              .border(1.dp, Color(0xFF323240), RoundedCornerShape(9.dp))
               .padding(horizontal = 12.dp, vertical = 9.dp),
             contentAlignment = Alignment.CenterStart,
           ) {
             if (itemNameText.isEmpty()) {
               Text(
                 text = if (isCreateMealTab) "Enter meal name (e.g. Post-Workout Bowl)..." else "Enter item name (e.g. Greek Yogurt, Eggs)...",
-                color = Zinc500,
+                color = Zinc400,
                 fontFamily = InterFontFamily,
                 fontSize = 13.sp,
               )
@@ -1024,7 +3129,7 @@ private fun QuickActionPopupDialog(
 
           Spacer(modifier = Modifier.height(10.dp))
 
-          // 2x2 Bento Grid of Nutrient Input Boxes (Clean vertical accent bar + inline "? FAIR" toggle)
+          // 2x2 Bento Grid of Nutrient Input Boxes
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1120,13 +3225,380 @@ private fun QuickActionPopupDialog(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // "Save to Quick Actions" Toggle Row (Default OFF)
+        // =========================================================================
+        // SIGNATURE COLOR SELECTION + COLOR MIXING ALCHEMY + CUSTOM COLOR STUDIO
+        // =========================================================================
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .floating3DInnerTile(
+              cornerRadiusDp = 12.dp,
+              accentColor = PureWhite,
+            )
+            .padding(12.dp),
+          verticalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(14.dp)
+                  .clip(RoundedCornerShape(4.dp))
+                  .background(effectiveAccentColor)
+                  .border(1.dp, PureWhite, RoundedCornerShape(4.dp)),
+              )
+              Column {
+                Text(
+                  text = if (isCreateMealTab && selectedComponentColors.size >= 2) {
+                    "MEAL COLOR ALCHEMY & CUSTOM PALETTE"
+                  } else {
+                    "QUICK-BAR COLOR & CUSTOM STUDIO"
+                  },
+                  color = PureWhite,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 9.6.sp,
+                  letterSpacing = 0.6.sp,
+                )
+                Text(
+                  text = QuickItemColorAlchemy.argbToHexCode(effectiveColorArgb),
+                  color = Zinc200,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 8.4.sp,
+                )
+              }
+            }
+
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(7.dp))
+                .background(if (showCustomColorStudio) PureWhite else Color(0xFF15151D))
+                .border(
+                  width = 1.dp,
+                  color = if (showCustomColorStudio) PureWhite else Zinc700,
+                  shape = RoundedCornerShape(7.dp),
+                )
+                .clickable(role = Role.Button) {
+                  haptics.selection()
+                  showCustomColorStudio = !showCustomColorStudio
+                }
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .testTag("toggle_custom_color_studio"),
+            ) {
+              Text(
+                text = if (showCustomColorStudio) "CLOSE STUDIO" else "+ CUSTOM COLOR",
+                color = if (showCustomColorStudio) ObsidianBlack else PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 8.2.sp,
+              )
+            }
+          }
+
+          // Live Color Mixing Visualization when 2+ Single Items are combined into a Meal
+          if (isCreateMealTab && selectedComponentColors.size >= 2) {
+            val mixedResultColor = QuickItemColorAlchemy.argbToColor(autoBlendedMealColorArgb)
+            val sourceColors = selectedComponentColors.map { QuickItemColorAlchemy.argbToColor(it) }
+
+            Column(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(9.dp))
+                .background(ObsidianBlack)
+                .border(1.dp, Color(0xFF2D2D3A), RoundedCornerShape(9.dp))
+                .clickable {
+                  haptics.selection()
+                  useMixedColorForMeal = true
+                  selectedColorArgb = autoBlendedMealColorArgb
+                }
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+              verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                  sourceColors.take(4).forEachIndexed { idx, col ->
+                    if (idx > 0) {
+                      Text(
+                        text = "+",
+                        color = PureWhite,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.sp,
+                      )
+                    }
+                    Box(
+                      modifier = Modifier
+                        .size(12.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(col)
+                        .border(1.dp, PureWhite, RoundedCornerShape(3.dp)),
+                    )
+                  }
+                  Text(
+                    text = "➔",
+                    color = PureWhite,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 10.sp,
+                  )
+                  Box(
+                    modifier = Modifier
+                      .size(15.dp)
+                      .clip(RoundedCornerShape(4.dp))
+                      .background(mixedResultColor)
+                      .border(1.dp, PureWhite, RoundedCornerShape(4.dp)),
+                  )
+                  Text(
+                    text = "MIXED (${QuickItemColorAlchemy.argbToHexCode(autoBlendedMealColorArgb)})",
+                    color = PureWhite,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 8.6.sp,
+                  )
+                }
+
+                Box(
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(if (useMixedColorForMeal) PureWhite else Zinc900)
+                    .padding(horizontal = 6.5.dp, vertical = 2.5.dp),
+                ) {
+                  Text(
+                    text = if (useMixedColorForMeal) "ACTIVE MIX" else "USE MIX",
+                    color = if (useMixedColorForMeal) ObsidianBlack else PureWhite,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 7.6.sp,
+                  )
+                }
+              }
+
+              // Solid Segmented Color-Mix Bar
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(6.dp)
+                  .clip(CircleShape)
+                  .border(0.6.dp, PureWhite.copy(alpha = 0.4f), CircleShape),
+              ) {
+                sourceColors.forEach { segCol ->
+                  Box(
+                    modifier = Modifier
+                      .weight(1f)
+                      .fillMaxHeight()
+                      .background(segCol),
+                  )
+                }
+                Box(
+                  modifier = Modifier
+                    .weight(1.4f)
+                    .fillMaxHeight()
+                    .background(mixedResultColor),
+                )
+              }
+            }
+          }
+
+          // 12 Curated Signature Swatches (2 rows x 6 swatches)
+          Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            QuickItemColorAlchemy.presets.chunked(6).forEach { rowPresets ->
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+              ) {
+                rowPresets.forEach { preset ->
+                  val swatchColor = QuickItemColorAlchemy.argbToColor(preset.argb)
+                  val isSelectedSwatch = (!useMixedColorForMeal || selectedComponentColors.size < 2) &&
+                    effectiveColorArgb == preset.argb
+                  Box(
+                    modifier = Modifier
+                      .weight(1f)
+                      .height(28.dp)
+                      .clip(RoundedCornerShape(7.dp))
+                      .background(swatchColor)
+                      .border(
+                        width = if (isSelectedSwatch) 2.dp else 0.8.dp,
+                        color = if (isSelectedSwatch) PureWhite else ObsidianBlack.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(7.dp),
+                      )
+                      .clickable {
+                        haptics.selection()
+                        useMixedColorForMeal = false
+                        selectedColorArgb = preset.argb
+                        customHexInput = QuickItemColorAlchemy.argbToHexCode(preset.argb)
+                      },
+                    contentAlignment = Alignment.Center,
+                  ) {
+                    if (isSelectedSwatch) {
+                      Box(
+                        modifier = Modifier
+                          .size(8.dp)
+                          .clip(CircleShape)
+                          .background(ObsidianBlack)
+                          .border(1.dp, PureWhite, CircleShape),
+                      )
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Expandable Custom Color Studio (360° Hue Spectrum + Saturation/Brightness + Hex Input)
+          AnimatedVisibility(
+            visible = showCustomColorStudio,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+          ) {
+            Column(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(ObsidianBlack)
+                .border(1.dp, Zinc800, RoundedCornerShape(10.dp))
+                .padding(10.dp),
+              verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              Text(
+                text = "CUSTOM COLOR SPECTRUM • TAP OR DRAG HUE BAR",
+                color = Zinc300,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = 8.4.sp,
+                letterSpacing = 0.5.sp,
+              )
+
+              // 360° Rainbow Hue Spectrum Bar
+              val rainbowColors = remember {
+                listOf(
+                  Color(0xFFFF0040),
+                  Color(0xFFFF8000),
+                  Color(0xFFFFEA00),
+                  Color(0xFF10B981),
+                  Color(0xFF06B6D4),
+                  Color(0xFF6366F1),
+                  Color(0xFFA855F7),
+                  Color(0xFFEC4899),
+                  Color(0xFFFF0040),
+                )
+              }
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(24.dp)
+                  .clip(RoundedCornerShape(12.dp))
+                  .background(Brush.horizontalGradient(rainbowColors))
+                  .border(1.dp, PureWhite.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                  .pointerInput(Unit) {
+                    detectTapGestures { offset ->
+                      val frac = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                      customHue = frac * 360f
+                      useMixedColorForMeal = false
+                      selectedColorArgb = QuickItemColorAlchemy.hsvToArgbLong(customHue, customSat, customVal)
+                      customHexInput = QuickItemColorAlchemy.argbToHexCode(selectedColorArgb)
+                      haptics.tick()
+                    }
+                  }
+                  .pointerInput(Unit) {
+                    detectHorizontalDragGestures { change, _ ->
+                      change.consume()
+                      val frac = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                      customHue = frac * 360f
+                      useMixedColorForMeal = false
+                      selectedColorArgb = QuickItemColorAlchemy.hsvToArgbLong(customHue, customSat, customVal)
+                      customHexInput = QuickItemColorAlchemy.argbToHexCode(selectedColorArgb)
+                    }
+                  },
+              )
+
+              // Saturation & Brightness Quick Presets + Custom Hex Code Field
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(effectiveAccentColor)
+                    .border(1.2.dp, PureWhite, RoundedCornerShape(8.dp)),
+                )
+
+                Box(
+                  modifier = Modifier
+                    .weight(1f)
+                    .height(34.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF09090D))
+                    .border(1.dp, Zinc700, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp),
+                  contentAlignment = Alignment.CenterStart,
+                ) {
+                  if (customHexInput.isEmpty()) {
+                    Text(
+                      text = QuickItemColorAlchemy.argbToHexCode(effectiveColorArgb) + " (Type Hex e.g. #FF6B4A)",
+                      color = Zinc500,
+                      fontFamily = JetBrainsMonoFontFamily,
+                      fontSize = 10.2.sp,
+                    )
+                  }
+                  BasicTextField(
+                    value = customHexInput,
+                    onValueChange = { raw ->
+                      val filtered = raw.filter { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' || it == '#' }.take(7)
+                      customHexInput = filtered
+                      val parsed = QuickItemColorAlchemy.parseHexToArgbOrNull(filtered)
+                      if (parsed != null) {
+                        useMixedColorForMeal = false
+                        selectedColorArgb = parsed
+                      }
+                    },
+                    singleLine = true,
+                    textStyle = TextStyle(
+                      color = PureWhite,
+                      fontFamily = JetBrainsMonoFontFamily,
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 11.5.sp,
+                    ),
+                    cursorBrush = SolidColor(PureWhite),
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .testTag("custom_color_hex_input"),
+                  )
+                }
+              }
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // "Save to Quick Actions" Toggle Row
         Row(
           modifier = Modifier
             .fillMaxWidth()
             .floating3DInnerTile(
               cornerRadiusDp = 11.dp,
-              accentColor = if (saveToQuickActions) PureWhite else Zinc700,
+              accentColor = if (saveToQuickActions) effectiveAccentColor else Zinc700,
               isHighlighted = saveToQuickActions,
             )
             .clickable(role = Role.Switch) {
@@ -1140,7 +3612,7 @@ private fun QuickActionPopupDialog(
         ) {
           Column(modifier = Modifier.weight(1f)) {
             Text(
-              text = if (isCreateMealTab) "SAVE MEAL TO QUICK ACTIONS" else "SAVE ITEM TO QUICK ACTIONS",
+              text = if (isCreateMealTab) "SAVE MEAL TO QUICK ACTIONS VAULT" else "SAVE ITEM TO QUICK ACTIONS VAULT",
               color = PureWhite,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.Bold,
@@ -1148,7 +3620,7 @@ private fun QuickActionPopupDialog(
               letterSpacing = 0.6.sp,
             )
             Text(
-              text = "Default OFF • Turn ON to pin beside the + button",
+              text = "Pins to your categorized Meal / Single-Item vault with its signature color",
               color = Zinc400,
               fontFamily = InterFontFamily,
               fontSize = 11.sp,
@@ -1160,7 +3632,7 @@ private fun QuickActionPopupDialog(
               .width(44.dp)
               .height(24.dp)
               .clip(RoundedCornerShape(12.dp))
-              .background(if (saveToQuickActions) PureWhite else ObsidianBlack)
+              .background(if (saveToQuickActions) effectiveAccentColor else ObsidianBlack)
               .border(1.dp, if (saveToQuickActions) PureWhite else Zinc700, RoundedCornerShape(12.dp))
               .padding(3.dp),
             contentAlignment = if (saveToQuickActions) Alignment.CenterEnd else Alignment.CenterStart,
@@ -1176,7 +3648,7 @@ private fun QuickActionPopupDialog(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Primary PureWhite Action Button
+        // Primary Action Button
         val hasValidNutrients = resolvedDraft.caloriesKcal > 0 ||
           resolvedDraft.proteinGrams > 0 ||
           resolvedDraft.carbsGrams > 0 ||
@@ -1192,7 +3664,13 @@ private fun QuickActionPopupDialog(
             .fillMaxWidth()
             .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(11.dp))
-            .background(if (hasValidNutrients) PureWhite else Zinc900)
+            .background(
+              brush = if (hasValidNutrients) {
+                Brush.horizontalGradient(colors = listOf(PureWhite, warmTitanium))
+              } else {
+                Brush.horizontalGradient(colors = listOf(Zinc900, Zinc900))
+              },
+            )
             .border(1.dp, if (hasValidNutrients) PureWhite else Zinc700, RoundedCornerShape(11.dp))
             .clickable(enabled = hasValidNutrients, role = Role.Button) {
               if (hasValidNutrients) {
@@ -1216,6 +3694,12 @@ private fun QuickActionPopupDialog(
                   fatsGrams = resolvedDraft.fatsGrams,
                   componentNames = componentNamesList,
                   isSavedToQuickActions = saveToQuickActions,
+                  colorArgb = effectiveColorArgb,
+                  mixedFromColorArgbs = if (isCreateMealTab && selectedComponentColors.size >= 2) {
+                    selectedComponentColors
+                  } else {
+                    emptyList()
+                  },
                 )
                 onSubmit(newItem, saveToQuickActions)
               }
@@ -1229,14 +3713,26 @@ private fun QuickActionPopupDialog(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
           ) {
-            Text(
-              text = if (isCreateMealTab) "Log Meal" else "Log Single Item",
-              color = if (hasValidNutrients) ObsidianBlack else Zinc500,
-              fontFamily = InterFontFamily,
-              fontWeight = FontWeight.SemiBold,
-              fontSize = 13.5.sp,
-              letterSpacing = (-0.2).sp,
-            )
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(10.dp)
+                  .clip(CircleShape)
+                  .background(effectiveAccentColor)
+                  .border(0.8.dp, ObsidianBlack, CircleShape),
+              )
+              Text(
+                text = if (isCreateMealTab) "Log Meal" else "Log Single Item",
+                color = if (hasValidNutrients) ObsidianBlack else Zinc500,
+                fontFamily = InterFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.5.sp,
+                letterSpacing = (-0.2).sp,
+              )
+            }
 
             Text(
               text = "${numberFormat.format(effectiveCalories)} kcal • ${resolvedDraft.proteinGrams}P ${resolvedDraft.carbsGrams}C ${resolvedDraft.fatsGrams}F",
@@ -1964,6 +4460,21 @@ fun DashboardTodayTimelineSection(
       .padding(16.dp)
       .testTag("dashboard_todays_timeline_section"),
   ) {
+    // Default top latest logs limit (6 logs, right in the 5-7 sweet spot)
+    val defaultVisibleLogsLimit = 6
+    var showAllTimelineLogs by remember { mutableStateOf(false) }
+
+    // timelineEntries is already prepended newest-first as logs are added
+    val orderedEntries = timelineEntries
+    val hasMoreTimelineLogs = orderedEntries.size > defaultVisibleLogsLimit
+    val displayedTimelineEntries = remember(orderedEntries, showAllTimelineLogs) {
+      if (showAllTimelineLogs || orderedEntries.size <= defaultVisibleLogsLimit) {
+        orderedEntries
+      } else {
+        orderedEntries.take(defaultVisibleLogsLimit)
+      }
+    }
+
     // 1. Clean Ecosystem Header Row (NO bulky colored block!)
     Row(
       modifier = Modifier
@@ -1989,8 +4500,12 @@ fun DashboardTodayTimelineSection(
       }
 
       Text(
-        text = "${timelineEntries.size} LOGGED",
-        color = if (timelineEntries.isNotEmpty()) StepsStart else Zinc400,
+        text = if (hasMoreTimelineLogs && !showAllTimelineLogs) {
+          "LATEST $defaultVisibleLogsLimit / ${orderedEntries.size} LOGGED"
+        } else {
+          "${orderedEntries.size} LOGGED"
+        },
+        color = if (orderedEntries.isNotEmpty()) StepsStart else Zinc400,
         fontFamily = JetBrainsMonoFontFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 9.8.sp,
@@ -2094,7 +4609,7 @@ fun DashboardTodayTimelineSection(
       }
     }
 
-    if (timelineEntries.isEmpty()) {
+    if (orderedEntries.isEmpty()) {
       Column(
         modifier = Modifier
           .fillMaxWidth()
@@ -2127,16 +4642,23 @@ fun DashboardTodayTimelineSection(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        timelineEntries.forEach { entry ->
-          val entryAccent = when (entry.type) {
-            DashboardEntryType.HYDRATION -> HydrationStart
-            DashboardEntryType.MEAL -> StepsStart
-            DashboardEntryType.SINGLE_ITEM -> CaloriesStart
+        displayedTimelineEntries.forEach { entry ->
+          val entryAccent = when {
+            entry.colorArgb != 0L -> QuickItemColorAlchemy.argbToColor(entry.colorArgb)
+            entry.type == DashboardEntryType.HYDRATION -> HydrationStart
+            entry.type == DashboardEntryType.MEAL -> StepsStart
+            else -> CaloriesStart
           }
-          val compactTypeTag = when (entry.type) {
-            DashboardEntryType.HYDRATION -> "H₂O"
-            DashboardEntryType.MEAL -> "MEAL"
-            DashboardEntryType.SINGLE_ITEM -> "ITEM"
+          val entryMixedColors = if (entry.mixedFromColorArgbs.size >= 2) {
+            entry.mixedFromColorArgbs.map { QuickItemColorAlchemy.argbToColor(it) }
+          } else {
+            emptyList()
+          }
+          val compactTypeTag = when {
+            entry.type == DashboardEntryType.HYDRATION -> "H₂O"
+            entry.type == DashboardEntryType.MEAL && entryMixedColors.size >= 2 -> "MIXED MEAL"
+            entry.type == DashboardEntryType.MEAL -> "MEAL"
+            else -> "ITEM"
           }
 
           Row(
@@ -2144,7 +4666,7 @@ fun DashboardTodayTimelineSection(
               .fillMaxWidth()
               .floating3DInnerTile(
                 cornerRadiusDp = 11.dp,
-                accentColor = entryAccent,
+                accentColor = PureWhite,
               )
               .padding(horizontal = 12.dp, vertical = 10.dp)
               .testTag("timeline_entry_${entry.id}"),
@@ -2157,27 +4679,32 @@ fun DashboardTodayTimelineSection(
               verticalAlignment = Alignment.CenterVertically,
               horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-              // Sleek Vertical Timeline Node Indicator
+              // Solid Vertical Timeline Node Indicator (Multi-segment solid color bar for combined meals)
               Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
               ) {
                 Box(
                   modifier = Modifier
-                    .size(7.dp)
-                    .clip(CircleShape)
-                    .background(entryAccent),
+                    .size(8.dp)
+                    .clip(RoundedCornerShape(2.5.dp))
+                    .background(entryAccent)
+                    .border(0.8.dp, PureWhite, RoundedCornerShape(2.5.dp)),
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Box(
                   modifier = Modifier
-                    .width(2.dp)
+                    .width(3.dp)
                     .height(18.dp)
-                    .clip(RoundedCornerShape(1.dp))
+                    .clip(RoundedCornerShape(1.5.dp))
                     .background(
-                      Brush.verticalGradient(
-                        colors = listOf(entryAccent.copy(alpha = 0.85f), entryAccent.copy(alpha = 0.15f)),
-                      ),
+                      brush = if (entryMixedColors.size >= 2) {
+                        Brush.verticalGradient(colors = entryMixedColors + listOf(entryAccent))
+                      } else {
+                        Brush.verticalGradient(
+                          colors = listOf(entryAccent, entryAccent),
+                        )
+                      },
                     ),
                 )
               }
@@ -2191,21 +4718,37 @@ fun DashboardTodayTimelineSection(
                     text = entry.title,
                     color = PureWhite,
                     fontFamily = InterFontFamily,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     fontSize = 13.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                   )
 
-                  Text(
-                    text = "• $compactTypeTag",
-                    color = entryAccent,
-                    fontFamily = JetBrainsMonoFontFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 9.2.sp,
-                    letterSpacing = 0.5.sp,
-                  )
+                  Row(
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(4.5.dp))
+                      .background(Color(0xFF171720))
+                      .border(1.dp, Color(0xFF30303E), RoundedCornerShape(4.5.dp))
+                      .padding(horizontal = 5.5.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                  ) {
+                    Box(
+                      modifier = Modifier
+                        .size(5.dp)
+                        .clip(CircleShape)
+                        .background(entryAccent),
+                    )
+                    Text(
+                      text = compactTypeTag,
+                      color = PureWhite,
+                      fontFamily = JetBrainsMonoFontFamily,
+                      fontWeight = FontWeight.ExtraBold,
+                      fontSize = 7.8.sp,
+                      letterSpacing = 0.4.sp,
+                    )
+                  }
                 }
 
                 Spacer(modifier = Modifier.height(3.dp))
@@ -2218,8 +4761,9 @@ fun DashboardTodayTimelineSection(
                 }
                 Text(
                   text = subLine,
-                  color = Zinc300,
+                  color = Zinc200,
                   fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.SemiBold,
                   fontSize = 10.sp,
                   maxLines = 1,
                   overflow = TextOverflow.Ellipsis,
@@ -2283,6 +4827,65 @@ fun DashboardTodayTimelineSection(
                   drawPath(path = body, color = PureWhite, style = stroke)
                 }
               }
+            }
+          }
+        }
+
+        // View More / Show Less Bar when more than 6 logs exist
+        if (hasMoreTimelineLogs) {
+          val remainingCount = orderedEntries.size - defaultVisibleLogsLimit
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(top = 4.dp)
+              .clip(RoundedCornerShape(10.dp))
+              .background(Color(0xFF0B0B10))
+              .border(1.dp, Color(0xFF282834), RoundedCornerShape(10.dp))
+              .clickable(role = Role.Button) {
+                haptics.selection()
+                showAllTimelineLogs = !showAllTimelineLogs
+              }
+              .padding(horizontal = 12.dp, vertical = 9.5.dp)
+              .testTag("timeline_view_more_toggle"),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Text(
+              text = if (showAllTimelineLogs) {
+                "SHOWING ALL ${orderedEntries.size} LOGS TODAY"
+              } else {
+                "SHOWING LATEST $defaultVisibleLogsLimit OF ${orderedEntries.size} LOGS"
+              },
+              color = Zinc300,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 8.8.sp,
+              letterSpacing = 0.4.sp,
+            )
+
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(if (showAllTimelineLogs) Color(0xFF171720) else PureWhite)
+                .border(
+                  width = 1.dp,
+                  color = if (showAllTimelineLogs) Color(0xFF343444) else PureWhite,
+                  shape = RoundedCornerShape(6.dp),
+                )
+                .padding(horizontal = 9.dp, vertical = 4.dp),
+            ) {
+              Text(
+                text = if (showAllTimelineLogs) {
+                  "SHOW LESS ▲"
+                } else {
+                  "VIEW MORE (+$remainingCount) ▼"
+                },
+                color = if (showAllTimelineLogs) PureWhite else ObsidianBlack,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 8.2.sp,
+                letterSpacing = 0.3.sp,
+              )
             }
           }
         }

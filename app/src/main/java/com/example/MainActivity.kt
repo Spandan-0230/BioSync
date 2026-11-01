@@ -232,6 +232,8 @@ fun BioSyncApp(
   var protocolLockedIn by rememberSaveable { mutableStateOf(initialStored.protocolLockedIn) }
   var protocolLockedAtEpochMillis by rememberSaveable { mutableStateOf(initialStored.protocolLockedAtEpochMillis) }
   var dayOneAnchorStartEpochMillis by rememberSaveable { mutableStateOf(initialStored.dayOneAnchorStartEpochMillis) }
+  var dayOneInitialCountdownCompleted by rememberSaveable { mutableStateOf(initialStored.dayOneInitialCountdownCompleted) }
+  var dayOneStartNotificationSent by rememberSaveable { mutableStateOf(initialStored.dayOneStartNotificationSent) }
 
   val currentHeightUnit = remember(selectedHeightUnitName) {
     runCatching { HeightUnit.valueOf(selectedHeightUnitName) }.getOrDefault(HeightUnit.CM)
@@ -368,6 +370,8 @@ fun BioSyncApp(
     protocolLockedIn,
     protocolLockedAtEpochMillis,
     dayOneAnchorStartEpochMillis,
+    dayOneInitialCountdownCompleted,
+    dayOneStartNotificationSent,
   ) {
     BioSyncLocalStore.save(
       context = context,
@@ -408,6 +412,8 @@ fun BioSyncApp(
         protocolLockedIn = protocolLockedIn,
         protocolLockedAtEpochMillis = protocolLockedAtEpochMillis,
         dayOneAnchorStartEpochMillis = dayOneAnchorStartEpochMillis,
+        dayOneInitialCountdownCompleted = dayOneInitialCountdownCompleted,
+        dayOneStartNotificationSent = dayOneStartNotificationSent,
         decidedDailyStepsGoal = customStepsCount,
       ),
     )
@@ -578,8 +584,18 @@ fun BioSyncApp(
           selectedDayOne = currentDayOne,
           onSelectDayOne = { newDayOne ->
             selectedDayOneName = newDayOne.name
-            if (protocolLockedIn) {
-              dayOneAnchorStartEpochMillis = BioSyncLocalStore.computeNextDayOneAnchorEpochMillis(newDayOne)
+            if (protocolLockedIn && !dayOneInitialCountdownCompleted) {
+              val nowMs = System.currentTimeMillis()
+              if (BioSyncLocalStore.isSameWeekdayAsToday(newDayOne, nowMs)) {
+                dayOneAnchorStartEpochMillis = nowMs
+                dayOneInitialCountdownCompleted = true
+                dayOneStartNotificationSent = true
+                BioSyncDayOneNotificationHelper.cancelOneTimeDayOneAlarm(context)
+              } else {
+                val nextAnchorMs = BioSyncLocalStore.computeNextDayOneAnchorEpochMillis(newDayOne, nowMs)
+                dayOneAnchorStartEpochMillis = nextAnchorMs
+                BioSyncDayOneNotificationHelper.scheduleOneTimeDayOneAlarm(context, nextAnchorMs)
+              }
             }
           },
           selectedMealFrequency = currentMealFrequency,
@@ -650,6 +666,9 @@ fun BioSyncApp(
           experienceLevel = currentExperienceLevel,
           targetPace = currentTargetPace,
           dayOne = currentDayOne,
+          onSelectDayOne = { newDayOne ->
+            selectedDayOneName = newDayOne.name
+          },
           mealFrequency = currentMealFrequency,
           caffeineAlcoholYes = caffeineAlcoholYes,
           sodiumFrequency = currentSodiumFrequency,
@@ -678,12 +697,31 @@ fun BioSyncApp(
           initialFocusSection = quickEditFocusSection,
           onLockInProtocol = {
             val nowMs = System.currentTimeMillis()
+            val isVeryFirstLockIn = !protocolLockedIn && !dayOneInitialCountdownCompleted
             protocolLockedIn = true
-            protocolLockedAtEpochMillis = nowMs
-            dayOneAnchorStartEpochMillis = BioSyncLocalStore.computeNextDayOneAnchorEpochMillis(
-              dayOne = currentDayOne,
-              fromEpochMillis = nowMs,
-            )
+            if (isVeryFirstLockIn) {
+              protocolLockedAtEpochMillis = nowMs
+              if (BioSyncLocalStore.isSameWeekdayAsToday(currentDayOne, nowMs)) {
+                // Selected Day 1 Anchor matches today's weekday -> start automatically without any timer!
+                dayOneAnchorStartEpochMillis = nowMs
+                dayOneInitialCountdownCompleted = true
+                dayOneStartNotificationSent = true
+                BioSyncDayOneNotificationHelper.cancelOneTimeDayOneAlarm(context)
+              } else {
+                // Selected Day 1 Anchor is an upcoming weekday -> arm one-time countdown timer until 00:00:00 of that day!
+                val nextAnchorMs = BioSyncLocalStore.computeNextDayOneAnchorEpochMillis(
+                  dayOne = currentDayOne,
+                  fromEpochMillis = nowMs,
+                )
+                dayOneAnchorStartEpochMillis = nextAnchorMs
+                dayOneInitialCountdownCompleted = false
+                dayOneStartNotificationSent = false
+                BioSyncDayOneNotificationHelper.scheduleOneTimeDayOneAlarm(
+                  context = context,
+                  triggerAtEpochMillis = nextAnchorMs,
+                )
+              }
+            }
             if (returningToSettingsFromStep04) {
               isQuickEditMode = false
               quickEditFocusSection = null
@@ -743,6 +781,14 @@ fun BioSyncApp(
           mealFrequency = currentMealFrequency,
           activityLevel = currentActivityLevel,
           selectedWorkoutDays = currentWorkoutDays,
+          dayOne = currentDayOne,
+          protocolLockedAtEpochMillis = protocolLockedAtEpochMillis,
+          dayOneAnchorStartEpochMillis = dayOneAnchorStartEpochMillis,
+          dayOneInitialCountdownCompleted = dayOneInitialCountdownCompleted,
+          onDayOneCountdownFinished = {
+            dayOneInitialCountdownCompleted = true
+            dayOneStartNotificationSent = true
+          },
           onOpenProtocolSummary = {
             isQuickEditMode = false
             quickEditFocusSection = null
@@ -825,7 +871,8 @@ fun BioSyncApp(
             quickEditReturnStep = 6
             currentStep = 4
           },
-          onFactoryResetConfirmed = {
+            onFactoryResetConfirmed = {
+            BioSyncDayOneNotificationHelper.cancelOneTimeDayOneAlarm(context)
             BioSyncLocalStore.clearAll(context)
             DashboardLocalStore.clearAll(context)
             val defaults = BioSyncStoredState()
@@ -865,6 +912,8 @@ fun BioSyncApp(
             protocolLockedIn = false
             protocolLockedAtEpochMillis = 0L
             dayOneAnchorStartEpochMillis = 0L
+            dayOneInitialCountdownCompleted = false
+            dayOneStartNotificationSent = false
             isQuickEditMode = false
             quickEditFocusSection = null
             quickEditReturnStep = 4

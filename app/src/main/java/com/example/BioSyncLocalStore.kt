@@ -161,9 +161,11 @@ data class BioSyncStoredState(
   val customStepsCount: Int = 8500,
   val protocolLockedIn: Boolean = false,
 
-  // Dashboard Anchor & Live Schedule Persistence (for upcoming Dashboard countdown & live active/rest state)
+  // Dashboard Anchor & Live Schedule Persistence (one-time initial Day 1 countdown & live active/rest state)
   val protocolLockedAtEpochMillis: Long = 0L,
   val dayOneAnchorStartEpochMillis: Long = 0L,
+  val dayOneInitialCountdownCompleted: Boolean = false,
+  val dayOneStartNotificationSent: Boolean = false,
 
   // Internal Health Connect & Google Fit Live Sync Persistence (Steps & Distance only)
   val decidedDailyStepsGoal: Int = 8500,
@@ -220,6 +222,8 @@ object BioSyncLocalStore {
   private const val KEY_PROTOCOL_LOCKED = "protocol_locked"
   private const val KEY_PROTOCOL_LOCKED_AT_EPOCH_MS = "protocol_locked_at_epoch_ms"
   private const val KEY_DAY_ONE_ANCHOR_START_EPOCH_MS = "day_one_anchor_start_epoch_ms"
+  private const val KEY_DAY_ONE_INITIAL_COUNTDOWN_COMPLETED = "day_one_initial_countdown_completed"
+  private const val KEY_DAY_ONE_START_NOTIFICATION_SENT = "day_one_start_notification_sent"
 
   private const val KEY_DECIDED_DAILY_STEPS_GOAL = "decided_daily_steps_goal"
   private const val KEY_TODAY_SYNCED_STEPS = "today_synced_steps_v5_strict_fit"
@@ -237,9 +241,34 @@ object BioSyncLocalStore {
     context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
   /**
-   * Computes the epoch timestamp (local midnight 00:00:00.000) of the next occurrence of [dayOne].
-   * Used so the Dashboard can display a countdown timer until Day 1 Anchor arrives,
-   * and then go live according to the user's selected Active/Rest days.
+   * Returns true if [dayOne] matches the current local calendar day of the week at [nowEpochMillis].
+   * For example, if the user selected Thursday and today is Thursday, this returns true so the
+   * Dashboard starts automatically without any countdown timer.
+   */
+  fun isSameWeekdayAsToday(
+    dayOne: DayOfWeekOption,
+    nowEpochMillis: Long = System.currentTimeMillis(),
+  ): Boolean {
+    val cal = java.util.Calendar.getInstance().apply {
+      timeInMillis = nowEpochMillis
+    }
+    val targetCalendarDay = when (dayOne) {
+      DayOfWeekOption.MONDAY -> java.util.Calendar.MONDAY
+      DayOfWeekOption.TUESDAY -> java.util.Calendar.TUESDAY
+      DayOfWeekOption.WEDNESDAY -> java.util.Calendar.WEDNESDAY
+      DayOfWeekOption.THURSDAY -> java.util.Calendar.THURSDAY
+      DayOfWeekOption.FRIDAY -> java.util.Calendar.FRIDAY
+      DayOfWeekOption.SATURDAY -> java.util.Calendar.SATURDAY
+      DayOfWeekOption.SUNDAY -> java.util.Calendar.SUNDAY
+    }
+    return cal.get(java.util.Calendar.DAY_OF_WEEK) == targetCalendarDay
+  }
+
+  /**
+   * Computes the epoch timestamp for the one-time initial Day 1 Anchor launch:
+   * - If [dayOne] is the SAME weekday as today (e.g., user selected Thursday and today is Thursday),
+   *   returns [fromEpochMillis] immediately so the Dashboard starts automatically with zero timer.
+   * - Otherwise, returns local midnight (00:00:00.000) of the next upcoming [dayOne].
    */
   fun computeNextDayOneAnchorEpochMillis(
     dayOne: DayOfWeekOption,
@@ -258,11 +287,10 @@ object BioSyncLocalStore {
       DayOfWeekOption.SUNDAY -> java.util.Calendar.SUNDAY
     }
     val currentCalendarDay = cal.get(java.util.Calendar.DAY_OF_WEEK)
-    var daysUntilAnchor = (targetCalendarDay - currentCalendarDay + 7) % 7
+    val daysUntilAnchor = (targetCalendarDay - currentCalendarDay + 7) % 7
     if (daysUntilAnchor == 0) {
-      // If locked in after midnight on the same weekday, count down to the next Day 1 anchor cycle
-      // unless it's within the very start of the day; advancing to next midnight keeps countdown deterministic.
-      daysUntilAnchor = 7
+      // Selected Day 1 Anchor is today — start immediately without any timer!
+      return fromEpochMillis
     }
     cal.add(java.util.Calendar.DAY_OF_YEAR, daysUntilAnchor)
     cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
@@ -273,15 +301,29 @@ object BioSyncLocalStore {
   }
 
   /**
-   * Returns true if the Day 1 Anchor countdown has completed and the Dashboard should be live.
+   * Returns true if the one-time Day 1 Anchor countdown has completed (or started immediately)
+   * and the full Dashboard should be live.
    */
   fun isDashboardLive(
     state: BioSyncStoredState,
     nowEpochMillis: Long = System.currentTimeMillis(),
   ): Boolean {
-    return state.protocolLockedIn &&
-      state.dayOneAnchorStartEpochMillis > 0L &&
+    if (!state.protocolLockedIn) return false
+    if (state.dayOneInitialCountdownCompleted) return true
+    return state.dayOneAnchorStartEpochMillis > 0L &&
       nowEpochMillis >= state.dayOneAnchorStartEpochMillis
+  }
+
+  fun hasSentDayOneStartNotification(context: Context): Boolean {
+    return prefs(context).getBoolean(KEY_DAY_ONE_START_NOTIFICATION_SENT, false)
+  }
+
+  fun markDayOneCountdownCompletedAndNotified(context: Context) {
+    prefs(context).edit().apply {
+      putBoolean(KEY_DAY_ONE_INITIAL_COUNTDOWN_COMPLETED, true)
+      putBoolean(KEY_DAY_ONE_START_NOTIFICATION_SENT, true)
+      apply()
+    }
   }
 
   /**
@@ -333,6 +375,9 @@ object BioSyncLocalStore {
     } else {
       storedAnchorMs
     }
+    val storedCompleted = p.getBoolean(KEY_DAY_ONE_INITIAL_COUNTDOWN_COMPLETED, false)
+    val effectiveCompleted = storedCompleted || (lockedIn && effectiveAnchorMs > 0L && System.currentTimeMillis() >= effectiveAnchorMs)
+    val storedNotified = p.getBoolean(KEY_DAY_ONE_START_NOTIFICATION_SENT, false)
     return BioSyncStoredState(
       subjectName = p.getString(KEY_SUBJECT_NAME, defaults.subjectName) ?: defaults.subjectName,
       selectedSex = p.getString(KEY_SELECTED_SEX, defaults.selectedSex) ?: defaults.selectedSex,
@@ -370,6 +415,8 @@ object BioSyncLocalStore {
       protocolLockedIn = lockedIn,
       protocolLockedAtEpochMillis = lockedAtMs,
       dayOneAnchorStartEpochMillis = effectiveAnchorMs,
+      dayOneInitialCountdownCompleted = effectiveCompleted,
+      dayOneStartNotificationSent = storedNotified,
       decidedDailyStepsGoal = p.getInt(KEY_DECIDED_DAILY_STEPS_GOAL, defaults.decidedDailyStepsGoal),
       todaySyncedSteps = p.getInt(KEY_TODAY_SYNCED_STEPS, defaults.todaySyncedSteps),
       todayDistanceMeters = p.getFloat(KEY_TODAY_DISTANCE_METERS, defaults.todayDistanceMeters),
@@ -429,6 +476,8 @@ object BioSyncLocalStore {
       putBoolean(KEY_PROTOCOL_LOCKED, state.protocolLockedIn)
       putLong(KEY_PROTOCOL_LOCKED_AT_EPOCH_MS, state.protocolLockedAtEpochMillis)
       putLong(KEY_DAY_ONE_ANCHOR_START_EPOCH_MS, state.dayOneAnchorStartEpochMillis)
+      putBoolean(KEY_DAY_ONE_INITIAL_COUNTDOWN_COMPLETED, state.dayOneInitialCountdownCompleted)
+      putBoolean(KEY_DAY_ONE_START_NOTIFICATION_SENT, state.dayOneStartNotificationSent)
       putInt(KEY_DECIDED_DAILY_STEPS_GOAL, state.decidedDailyStepsGoal)
       apply()
     }
