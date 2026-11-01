@@ -317,13 +317,18 @@ private fun computeBlueprintMetrics(
   maxHeight: Dp,
   fontScale: Float,
 ): BlueprintResponsiveMetrics {
-  val w = maxWidth.value
-  val h = maxHeight.value
+  val w = maxWidth.value.coerceAtLeast(280f)
+  val h = maxHeight.value.coerceAtLeast(480f)
   val isExpanded = w >= 600f
-  val widthFactor = (w / 392f).coerceIn(0.84f, 1.18f)
+  val widthFactor = (w / 392f).coerceIn(0.82f, 1.18f)
   val heightFactor = (h / 830f).coerceIn(0.76f, 1.12f)
   val scale = min(widthFactor, heightFactor * 1.05f).coerceIn(0.80f, 1.14f)
-  val fontCompensation = if (fontScale > 1.12f) (1.12f / fontScale).coerceIn(0.76f, 1f) else 1f
+  val safeFontScale = fontScale.coerceIn(0.5f, 3.0f)
+  val fontCompensation = when {
+    safeFontScale > 1.0f -> (1.0f + (safeFontScale - 1.0f) * 0.25f) / safeFontScale
+    safeFontScale < 1.0f -> (1.0f - (1.0f - safeFontScale) * 0.30f) / safeFontScale
+    else -> 1f
+  }
   val sp: (Float, Float, Float) -> TextUnit = { base, minV, maxV ->
     ((base * scale).coerceIn(minV, maxV) * fontCompensation).sp
   }
@@ -332,8 +337,8 @@ private fun computeBlueprintMetrics(
     scale = scale,
     fontCompensation = fontCompensation,
     isExpanded = isExpanded,
-    contentMaxWidth = if (isExpanded) 560.dp else 480.dp,
-    horizontalPadding = (20f * widthFactor).coerceIn(16f, 28f).dp,
+    contentMaxWidth = if (isExpanded) (w * 0.80f).coerceIn(480f, 580f).dp else w.dp,
+    horizontalPadding = (20f * widthFactor).coerceIn(14f, 28f).dp,
     topContentPadding = (8f * heightFactor).coerceIn(5f, 14f).dp,
     bottomContentPadding = (16f * heightFactor).coerceIn(12f, 24f).dp,
     headerHeight = (46f * scale).coerceIn(42f, 54f).dp,
@@ -383,6 +388,7 @@ fun BlueprintScreen(
   onNavigateBack: () -> Unit,
   onCompleteBlueprint: () -> Unit = {},
   isQuickEditMode: Boolean = false,
+  isReturnToSettings: Boolean = false,
   initialFocusSection: String? = null,
   onQuickEditReturnToSummary: () -> Unit = {},
   modifier: Modifier = Modifier,
@@ -848,6 +854,7 @@ fun BlueprintScreen(
         BlueprintContinueSection(
           onContinueClick = onContinueClick,
           isQuickEditMode = isQuickEditMode,
+          isReturnToSettings = isReturnToSettings,
           borderFlashProvider = borderFlashProvider,
           metrics = metrics,
         )
@@ -3692,6 +3699,7 @@ private fun SummaryMetricTile(
 private fun BlueprintContinueSection(
   onContinueClick: () -> Unit,
   isQuickEditMode: Boolean,
+  isReturnToSettings: Boolean = false,
   borderFlashProvider: () -> Float,
   metrics: BlueprintResponsiveMetrics,
 ) {
@@ -3837,7 +3845,11 @@ private fun BlueprintContinueSection(
       ) {
         Text(
           text = stringResource(
-            if (isQuickEditMode) R.string.calib_cta_return_summary else R.string.blueprint_cta_complete,
+            when {
+              isQuickEditMode && isReturnToSettings -> R.string.calib_cta_return_settings
+              isQuickEditMode -> R.string.calib_cta_return_summary
+              else -> R.string.blueprint_cta_complete
+            },
           ),
           color = ObsidianBlack,
           fontFamily = InterFontFamily,

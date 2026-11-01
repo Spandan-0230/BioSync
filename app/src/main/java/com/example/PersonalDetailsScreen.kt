@@ -695,6 +695,7 @@ fun PersonalDetailsScreen(
   onNavigateBack: () -> Unit,
   onNavigateToBlueprint: () -> Unit = {},
   isQuickEditMode: Boolean = false,
+  isReturnToSettings: Boolean = false,
   initialFocusSection: String? = null,
   onQuickEditReturnToSummary: () -> Unit = {},
   modifier: Modifier = Modifier,
@@ -989,6 +990,7 @@ fun PersonalDetailsScreen(
         PersonalContinueSection(
           onContinueClick = onContinueClick,
           isQuickEditMode = isQuickEditMode,
+          isReturnToSettings = isReturnToSettings,
           borderFlashProvider = borderFlashProvider,
           metrics = metrics,
         )
@@ -3599,6 +3601,7 @@ private fun AnimatedBmiSpectrumGauge(
 private fun PersonalContinueSection(
   onContinueClick: () -> Unit,
   isQuickEditMode: Boolean,
+  isReturnToSettings: Boolean = false,
   borderFlashProvider: () -> Float,
   metrics: PersonalResponsiveMetrics,
 ) {
@@ -3744,7 +3747,11 @@ private fun PersonalContinueSection(
       ) {
         Text(
           text = stringResource(
-            if (isQuickEditMode) R.string.calib_cta_return_summary else R.string.calib_cta_continue,
+            when {
+              isQuickEditMode && isReturnToSettings -> R.string.calib_cta_return_settings
+              isQuickEditMode -> R.string.calib_cta_return_summary
+              else -> R.string.calib_cta_continue
+            },
           ),
           color = ObsidianBlack,
           fontFamily = InterFontFamily,

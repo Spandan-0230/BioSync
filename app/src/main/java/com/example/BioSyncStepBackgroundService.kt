@@ -188,6 +188,14 @@ class BioSyncStepBackgroundService : Service() {
         }
       }
     }
+
+    fun stop(context: Context) {
+      val appContext = context.applicationContext
+      runCatching {
+        val serviceIntent = Intent(appContext, BioSyncStepBackgroundService::class.java)
+        appContext.stopService(serviceIntent)
+      }
+    }
   }
 }
 

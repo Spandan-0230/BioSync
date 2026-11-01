@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -487,6 +488,7 @@ fun FormulaInspectionDialog(
   ) {
     Column(
       modifier = Modifier
+        .widthIn(max = 480.dp)
         .fillMaxWidth(0.92f)
         .clip(RoundedCornerShape(18.dp))
         .background(
@@ -732,6 +734,7 @@ fun HealthImpactDisclaimerDialog(
   ) {
     Column(
       modifier = Modifier
+        .widthIn(max = 480.dp)
         .fillMaxWidth(0.93f)
         .heightIn(max = 620.dp)
         .clip(RoundedCornerShape(18.dp))
@@ -1085,6 +1088,7 @@ fun HealthConnectPermissionPromptDialog(
   ) {
     Column(
       modifier = Modifier
+        .widthIn(max = 480.dp)
         .fillMaxWidth(0.92f)
         .clip(RoundedCornerShape(18.dp))
         .background(
@@ -1106,6 +1110,7 @@ fun HealthConnectPermissionPromptDialog(
           shape = RoundedCornerShape(18.dp),
         )
         .padding(20.dp)
+        .verticalScroll(rememberScrollState())
         .testTag("health_connect_permission_dialog"),
     ) {
       // Top Eyebrow Bar (Pure Black & White Monochrome)

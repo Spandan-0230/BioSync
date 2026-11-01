@@ -47,6 +47,7 @@
     <string name="calib_next_anniversary">NEXT BIRTHDAY</string>
     <string name="calib_cta_continue">Continue</string>
     <string name="calib_cta_return_summary">Save &amp; Return to Summary</string>
+    <string name="calib_cta_return_settings">Save &amp; Return to Settings</string>
     <string name="calib_footer_encrypted">Encrypted on device • Private &amp; secure</string>
     <string name="cd_back_button">Return to Welcome screen</string>
 

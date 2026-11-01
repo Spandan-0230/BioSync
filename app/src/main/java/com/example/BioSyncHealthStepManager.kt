@@ -152,18 +152,23 @@ object BioSyncHealthStepManager {
 
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private val syncMutex = Mutex()
-  private val ledgerLock = Any()
+  private val stateLock = Any()
   private val mainHandler = Handler(Looper.getMainLooper())
 
   private val _syncState = MutableStateFlow(BioSyncStepSyncState())
   val syncState: StateFlow<BioSyncStepSyncState> = _syncState.asStateFlow()
 
-  @Volatile private var currentLedger = StepLedger()
   @Volatile private var cachedUserHeightCm: Float = 172f
   @Volatile private var activeAppContext: Context? = null
   @Volatile private var isSensorRegistered = false
   @Volatile private var lastSyncAttemptElapsedMs: Long = 0L
   @Volatile private var lastSeenRawCounter: Float = -1f
+
+  @Volatile private var syncedHealthConnectSteps: Int = 0
+  @Volatile private var syncedHealthConnectDistanceMeters: Float = 0f
+  @Volatile private var sensorBaselineAtSync: Float = -1f
+  @Volatile private var localStepsSinceSync: Int = 0
+  @Volatile private var currentDayKeyStr: String = ""
 
   @get:SuppressLint("NewApi")
   val baseHealthPermissions: Set<String> by lazy {
@@ -201,16 +206,6 @@ object BioSyncHealthStepManager {
   private fun currentDayKey(): String {
     return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
   }
-
-  fun getBootCount(context: Context): Int {
-    return try {
-      Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT, -1)
-    } catch (_: Exception) {
-      -1
-    }
-  }
-
-  fun getBootTimeMs(): Long = System.currentTimeMillis() - SystemClock.elapsedRealtime()
 
   fun hasActivityRecognitionPermission(context: Context): Boolean {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -330,27 +325,9 @@ object BioSyncHealthStepManager {
   }
 
   /**
-   * Thread-safe ledger update and live state publishing.
+   * Hardware step sensor event listener.
+   * Tracks incremental live steps between Google Fit / Health Connect sync updates.
    */
-  private fun updateLedger(ctx: Context, transform: (StepLedger) -> StepLedger): StepLedger =
-    synchronized(ledgerLock) {
-      val updated = transform(currentLedger)
-      currentLedger = updated
-      BioSyncLocalStore.saveLedger(ctx, updated)
-
-      val totalSteps = StepLedgerMath.total(updated)
-      val strideMeters = (cachedUserHeightCm * 0.415f) / 100f
-      val distMeters = totalSteps * strideMeters
-
-      _syncState.value = _syncState.value.copy(
-        liveTodaySteps = totalSteps,
-        healthConnectSteps = totalSteps,
-        liveDistanceMeters = distMeters,
-        lastSyncedEpochMillis = System.currentTimeMillis(),
-      )
-      updated
-    }
-
   private val stepSensorListener = object : SensorEventListener {
     override fun onSensorChanged(event: SensorEvent?) {
       if (event?.sensor?.type != Sensor.TYPE_STEP_COUNTER) return
@@ -358,15 +335,51 @@ object BioSyncHealthStepManager {
       if (raw <= 0f) return
       lastSeenRawCounter = raw
       val appContext = activeAppContext ?: return
-      val nowMs = System.currentTimeMillis()
       val today = currentDayKey()
-      val zoneId = ZoneId.systemDefault()
-      val startOfDayMs = LocalDate.now(zoneId).atStartOfDay(zoneId).toInstant().toEpochMilli()
-      val boot = getBootCount(appContext)
-      val bootTimeMs = getBootTimeMs()
 
-      updateLedger(appContext) { l ->
-        StepLedgerMath.onRaw(l, raw, nowMs, today, startOfDayMs, boot, bootTimeMs)
+      synchronized(stateLock) {
+        if (currentDayKeyStr != today) {
+          currentDayKeyStr = today
+          syncedHealthConnectSteps = 0
+          syncedHealthConnectDistanceMeters = 0f
+          sensorBaselineAtSync = raw
+          localStepsSinceSync = 0
+        } else if (sensorBaselineAtSync <= 0f) {
+          sensorBaselineAtSync = raw
+          localStepsSinceSync = 0
+        } else if (raw >= sensorBaselineAtSync) {
+          localStepsSinceSync = (raw - sensorBaselineAtSync).toInt().coerceAtLeast(0)
+        } else {
+          // Device rebooted mid-day, reset baseline
+          sensorBaselineAtSync = raw
+          localStepsSinceSync = 0
+        }
+
+        val displayedSteps = maxOf(syncedHealthConnectSteps + localStepsSinceSync, syncedHealthConnectSteps)
+        val strideMeters = (cachedUserHeightCm * 0.415f) / 100f
+        val displayedDistMeters = if (syncedHealthConnectDistanceMeters > 0f) {
+          syncedHealthConnectDistanceMeters + (localStepsSinceSync * strideMeters)
+        } else {
+          displayedSteps * strideMeters
+        }
+
+        BioSyncLocalStore.saveStepTelemetrySnapshot(
+          context = appContext,
+          todaySyncedSteps = displayedSteps,
+          todayDistanceMeters = displayedDistMeters,
+          stepSensorDayKey = today,
+          stepSensorBaselineCounter = sensorBaselineAtSync,
+          stepSensorLastRawCounter = raw,
+        )
+
+        _syncState.value = _syncState.value.copy(
+          liveTodaySteps = displayedSteps,
+          healthConnectSteps = syncedHealthConnectSteps,
+          hardwareSensorSteps = localStepsSinceSync,
+          liveDistanceMeters = displayedDistMeters,
+          lastStepDetectedEpochMillis = System.currentTimeMillis(),
+          isActivelyWalking = true,
+        )
       }
     }
 
@@ -404,8 +417,7 @@ object BioSyncHealthStepManager {
   }
 
   /**
-   * One-shot hardware sensor probe to instantly latch the kernel step count
-   * even when stationary.
+   * One-shot hardware sensor probe to latch the kernel step count immediately.
    */
   fun probeHardwareStepCounterNow(context: Context) {
     val appContext = context.applicationContext
@@ -443,42 +455,35 @@ object BioSyncHealthStepManager {
     cachedUserHeightCm = stored.heightCm
 
     val today = currentDayKey()
-    val loadedLedger = BioSyncLocalStore.loadLedger(appContext)
-    val zoneId = ZoneId.systemDefault()
-    val startOfDayMs = LocalDate.now(zoneId).atStartOfDay(zoneId).toInstant().toEpochMilli()
-    val boot = getBootCount(appContext)
-    val bootTimeMs = getBootTimeMs()
-
-    val rolledLedger = if (loadedLedger.dayKey != today && loadedLedger.dayKey.isNotEmpty()) {
-      StepLedgerMath.onRaw(
-        l = loadedLedger,
-        raw = if (loadedLedger.lastRaw > 0f) loadedLedger.lastRaw else 0f,
-        nowMs = System.currentTimeMillis(),
-        today = today,
-        startOfTodayMs = startOfDayMs,
-        boot = boot,
-        bootTimeMs = bootTimeMs,
-      )
-    } else {
-      loadedLedger
-    }
-
-    synchronized(ledgerLock) {
-      currentLedger = rolledLedger
-      if (rolledLedger != loadedLedger) {
-        BioSyncLocalStore.saveLedger(appContext, rolledLedger)
+    synchronized(stateLock) {
+      currentDayKeyStr = today
+      if (stored.stepSensorDayKey == today && stored.todaySyncedSteps > 0) {
+        syncedHealthConnectSteps = stored.todaySyncedSteps
+        syncedHealthConnectDistanceMeters = stored.todayDistanceMeters
+        sensorBaselineAtSync = stored.stepSensorBaselineCounter
+        lastSeenRawCounter = stored.stepSensorLastRawCounter
+        localStepsSinceSync = 0
+      } else if (stored.stepSensorDayKey != today) {
+        syncedHealthConnectSteps = 0
+        syncedHealthConnectDistanceMeters = 0f
+        sensorBaselineAtSync = -1f
+        localStepsSinceSync = 0
       }
     }
 
-    val totalSteps = StepLedgerMath.total(rolledLedger)
+    val displayedSteps = maxOf(syncedHealthConnectSteps + localStepsSinceSync, syncedHealthConnectSteps)
     val strideMeters = (cachedUserHeightCm * 0.415f) / 100f
-    val distMeters = totalSteps * strideMeters
+    val displayedDistMeters = if (syncedHealthConnectDistanceMeters > 0f) {
+      syncedHealthConnectDistanceMeters
+    } else {
+      displayedSteps * strideMeters
+    }
 
     _syncState.value = _syncState.value.copy(
       decidedDailyStepsGoal = currentDecidedGoal.coerceAtLeast(1000),
-      liveTodaySteps = totalSteps,
-      healthConnectSteps = totalSteps,
-      liveDistanceMeters = distMeters,
+      liveTodaySteps = displayedSteps,
+      healthConnectSteps = syncedHealthConnectSteps,
+      liveDistanceMeters = displayedDistMeters,
       hasHealthConnectReadPermission = stored.healthConnectPermissionsGranted,
       hasActivityRecognitionPermission = hasActivityRecognitionPermission(appContext),
       isIgnoringBatteryOptimizations = isIgnoringBatteryOptimizations(appContext),
@@ -498,8 +503,9 @@ object BioSyncHealthStepManager {
   }
 
   /**
-   * Synchronizes with Health Connect. Reads Google Fit's synced steps,
-   * passes them into StepLedgerMath.onFitTotal, and updates distance.
+   * Synchronizes with Health Connect.
+   * Reads deduplicated steps and distance aggregated from Google Fit / Wearables,
+   * updates the authoritative baseline, and synchronizes live UI.
    */
   suspend fun syncWithHealthConnect(
     context: Context,
@@ -514,7 +520,7 @@ object BioSyncHealthStepManager {
     }
     lastSyncAttemptElapsedMs = nowElapsed
 
-    // Always probe hardware sensor on sync so fresh steps are latched
+    // Probe hardware sensor so fresh kernel steps are latched
     probeHardwareStepCounterNow(appContext)
 
     syncMutex.withLock {
@@ -576,106 +582,94 @@ object BioSyncHealthStepManager {
       val startOfDay = today.atStartOfDay(zoneId).toInstant()
       val nowInstant = Instant.now()
       val timeRange = TimeRangeFilter.between(startOfDay, nowInstant)
-      val fitOrigin = DataOrigin(GOOGLE_FIT_PACKAGE)
 
-      var fitSteps: Int? = null
-      val originsFound = mutableSetOf<String>()
-
-      // 1. Query Steps: First check Google Fit package specifically
+      // Query Steps: Aggregate deduplicated steps across all sources (Google Fit, smartwatch, phone)
+      var hcSteps = 0
       try {
-        val fitStepAgg = client.aggregate(
+        val totalStepAgg = client.aggregate(
           AggregateRequest(
             metrics = setOf(StepsRecord.COUNT_TOTAL),
             timeRangeFilter = timeRange,
-            dataOriginFilter = setOf(fitOrigin),
           ),
         )
-        val count = fitStepAgg[StepsRecord.COUNT_TOTAL]?.toInt()
-        if (count != null && count > 0) {
-          fitSteps = count
-          originsFound.add(GOOGLE_FIT_PACKAGE)
+        val totalCount = totalStepAgg[StepsRecord.COUNT_TOTAL]?.toInt()
+        if (totalCount != null && totalCount > 0) {
+          hcSteps = totalCount
         }
       } catch (e: Exception) {
-        Log.d(TAG, "Fit package aggregate check", e)
+        Log.w(TAG, "Health Connect steps aggregate failed", e)
       }
 
-      // Fallback: General Health Connect steps
-      if (fitSteps == null || fitSteps == 0) {
-        try {
-          val totalStepAgg = client.aggregate(
-            AggregateRequest(
-              metrics = setOf(StepsRecord.COUNT_TOTAL),
-              timeRangeFilter = timeRange,
-            ),
-          )
-          val totalCount = totalStepAgg[StepsRecord.COUNT_TOTAL]?.toInt()
-          if (totalCount != null && totalCount > 0) {
-            fitSteps = totalCount
-          }
-        } catch (e: Exception) {
-          Log.d(TAG, "General aggregate check", e)
-        }
-      }
-
-      // Reconcile Fit steps with ledger
-      if (fitSteps != null && fitSteps > 0) {
-        updateLedger(appContext) { l ->
-          StepLedgerMath.onFitTotal(l, fitSteps)
-        }
-      }
-
-      // Query Distance if available
+      // Query Distance if granted
       var resolvedDistanceMeters: Float? = null
       if (readDistGranted) {
         try {
-          val fitDistAgg = client.aggregate(
+          val totalDistAgg = client.aggregate(
             AggregateRequest(
               metrics = setOf(DistanceRecord.DISTANCE_TOTAL),
               timeRangeFilter = timeRange,
-              dataOriginFilter = setOf(fitOrigin),
             ),
           )
-          val distLen = fitDistAgg[DistanceRecord.DISTANCE_TOTAL]
+          val distLen = totalDistAgg[DistanceRecord.DISTANCE_TOTAL]
           if (distLen != null && distLen.inMeters > 0) {
             resolvedDistanceMeters = distLen.inMeters.toFloat()
           }
         } catch (_: Exception) {}
-
-        if (resolvedDistanceMeters == null) {
-          try {
-            val totalDistAgg = client.aggregate(
-              AggregateRequest(
-                metrics = setOf(DistanceRecord.DISTANCE_TOTAL),
-                timeRangeFilter = timeRange,
-              ),
-            )
-            val distLen = totalDistAgg[DistanceRecord.DISTANCE_TOTAL]
-            if (distLen != null && distLen.inMeters > 0) {
-              resolvedDistanceMeters = distLen.inMeters.toFloat()
-            }
-          } catch (_: Exception) {}
-        }
       }
 
-      val totalSteps = StepLedgerMath.total(currentLedger)
-      val strideMeters = (cachedUserHeightCm * 0.415f) / 100f
-      val finalDistanceMeters = resolvedDistanceMeters ?: (totalSteps * strideMeters)
+      val todayStr = currentDayKey()
+      synchronized(stateLock) {
+        currentDayKeyStr = todayStr
 
-      _syncState.value = _syncState.value.copy(
-        liveTodaySteps = totalSteps,
-        healthConnectSteps = totalSteps,
-        liveDistanceMeters = finalDistanceMeters,
-        lastSyncedEpochMillis = System.currentTimeMillis(),
-        isHealthConnectAvailable = true,
-        isHealthConnectUpdateRequired = false,
-        hasHealthConnectReadPermission = true,
-        hasHealthConnectWritePermission = false,
-        hasHealthConnectBackgroundReadPermission = bgReadGranted,
-        hasActivityRecognitionPermission = hasActivity,
-        isIgnoringBatteryOptimizations = isBatteryIgnored,
-        hasHardwareStepSensor = hasHardware,
-        connectedDataOrigins = originsFound,
-      )
+        // Update the authoritative Google Fit count
+        if (hcSteps > 0) {
+          syncedHealthConnectSteps = hcSteps
+        }
+        if (resolvedDistanceMeters != null && resolvedDistanceMeters > 0f) {
+          syncedHealthConnectDistanceMeters = resolvedDistanceMeters
+        }
+
+        // Re-anchor the live sensor baseline so walking subsequent to this query adds smoothly
+        if (lastSeenRawCounter > 0f) {
+          sensorBaselineAtSync = lastSeenRawCounter
+          localStepsSinceSync = 0
+        }
+
+        val displayedSteps = maxOf(syncedHealthConnectSteps + localStepsSinceSync, syncedHealthConnectSteps)
+        val strideMeters = (cachedUserHeightCm * 0.415f) / 100f
+        val displayedDistMeters = if (syncedHealthConnectDistanceMeters > 0f) {
+          syncedHealthConnectDistanceMeters + (localStepsSinceSync * strideMeters)
+        } else {
+          displayedSteps * strideMeters
+        }
+
+        BioSyncLocalStore.saveStepTelemetrySnapshot(
+          context = appContext,
+          todaySyncedSteps = displayedSteps,
+          todayDistanceMeters = displayedDistMeters,
+          stepSensorDayKey = todayStr,
+          stepSensorBaselineCounter = sensorBaselineAtSync,
+          stepSensorLastRawCounter = lastSeenRawCounter,
+          lastStepSyncEpochMillis = System.currentTimeMillis(),
+          healthConnectPermissionsGranted = true,
+        )
+
+        _syncState.value = _syncState.value.copy(
+          liveTodaySteps = displayedSteps,
+          healthConnectSteps = syncedHealthConnectSteps,
+          hardwareSensorSteps = localStepsSinceSync,
+          liveDistanceMeters = displayedDistMeters,
+          lastSyncedEpochMillis = System.currentTimeMillis(),
+          isHealthConnectAvailable = true,
+          isHealthConnectUpdateRequired = false,
+          hasHealthConnectReadPermission = true,
+          hasHealthConnectWritePermission = false,
+          hasHealthConnectBackgroundReadPermission = bgReadGranted,
+          hasActivityRecognitionPermission = hasActivity,
+          isIgnoringBatteryOptimizations = isBatteryIgnored,
+          hasHardwareStepSensor = hasHardware,
+        )
+      }
 
       return@withLock _syncState.value.isAllPermissionsAllowed
     }

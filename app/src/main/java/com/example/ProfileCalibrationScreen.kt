@@ -569,6 +569,7 @@ fun ProfileCalibrationScreen(
   initialYear: Int = 1994,
   onYearPersist: (Int) -> Unit = {},
   isQuickEditMode: Boolean = false,
+  isReturnToSettings: Boolean = false,
   initialFocusSection: String? = null,
   onQuickEditReturnToSummary: (subjectName: String, selectedSex: String, calculatedAgeYears: Int) -> Unit = { _, _, _ -> },
   modifier: Modifier = Modifier,
@@ -862,6 +863,7 @@ fun ProfileCalibrationScreen(
         CalibrationContinueSection(
           onContinueClick = onContinueClick,
           isQuickEditMode = isQuickEditMode,
+          isReturnToSettings = isReturnToSettings,
           borderFlashProvider = borderFlashProvider,
           metrics = metrics,
         )
@@ -1164,17 +1166,7 @@ private fun FullNameField(
   }
 
   val subjectInitials = remember(value) {
-    val parts = value
-      .filter { it.isLetter() || it == ' ' }
-      .trim()
-      .split("\\s+".toRegex())
-      .filter { it.isNotEmpty() }
-    when {
-      parts.size >= 2 -> "${parts.first().first().uppercaseChar()}${parts.last().first().uppercaseChar()}"
-      parts.size == 1 && parts[0].length >= 2 -> parts[0].take(2).uppercase()
-      parts.size == 1 -> "${parts[0].first().uppercaseChar()}•"
-      else -> "ID"
-    }
+    BioSyncLocalStore.computeSubjectIdBadge(value)
   }
 
   val iconBadgeShape = RoundedCornerShape(10.dp)
@@ -1184,7 +1176,6 @@ private fun FullNameField(
     modifier = modifier.fillMaxWidth(),
     verticalArrangement = Arrangement.spacedBy(metrics.labelToBoxGap),
   ) {
-    val nameTag = stringResource(R.string.calib_field_name_tag)
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
@@ -1197,14 +1188,34 @@ private fun FullNameField(
         fontWeight = FontWeight.Medium,
         fontSize = metrics.spScaled(12.4f, 11.2f, 14.8f),
       )
-      if (nameTag.isNotEmpty()) {
+      // Automatic ID Badge presented at the top right corner of the Full Name section
+      Row(
+        modifier = Modifier
+          .clip(RoundedCornerShape(6.dp))
+          .background(Color(0xFF141419))
+          .border(
+            width = 1.dp,
+            color = if (isNameVerified) PureWhite.copy(alpha = 0.28f) else Zinc800,
+            shape = RoundedCornerShape(6.dp),
+          )
+          .padding(horizontal = 8.dp, vertical = 3.dp)
+          .testTag("profile_fullname_top_right_id_badge"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+      ) {
+        Box(
+          modifier = Modifier
+            .size(4.5.dp)
+            .clip(CircleShape)
+            .background(if (isNameVerified) PureWhite else Zinc600),
+        )
         Text(
-          text = nameTag,
-          color = Zinc500,
+          text = if (isNameVerified) "ID • $subjectInitials" else "ID • UNV",
+          color = if (isNameVerified) PureWhite else Zinc500,
           fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.Normal,
-          fontSize = metrics.spScaled(10f, 8.8f, 11.5f),
-          letterSpacing = 0.8.sp,
+          fontWeight = FontWeight.SemiBold,
+          fontSize = metrics.spScaled(9.4f, 8.2f, 10.8f),
+          letterSpacing = 0.7.sp,
         )
       }
     }
@@ -3034,6 +3045,7 @@ private fun CalculatedAgeProgressBar(
 private fun CalibrationContinueSection(
   onContinueClick: () -> Unit,
   isQuickEditMode: Boolean,
+  isReturnToSettings: Boolean = false,
   borderFlashProvider: () -> Float,
   metrics: CalibrationResponsiveMetrics,
 ) {
@@ -3179,7 +3191,11 @@ private fun CalibrationContinueSection(
       ) {
         Text(
           text = stringResource(
-            if (isQuickEditMode) R.string.calib_cta_return_summary else R.string.calib_cta_continue,
+            when {
+              isQuickEditMode && isReturnToSettings -> R.string.calib_cta_return_settings
+              isQuickEditMode -> R.string.calib_cta_return_summary
+              else -> R.string.calib_cta_continue
+            },
           ),
           color = ObsidianBlack,
           fontFamily = InterFontFamily,

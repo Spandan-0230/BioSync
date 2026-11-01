@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan to streamline the BioSync background service notification bar to display strictly Total Steps, Distance, and Live Speed synced with Google Fit.",
-  "updatedAt":  "2026-10-31T13:16:50.180018719Z",
+  "summary":  "Implementation plan to adopt the exact read-only Health Connect + live hardware sensor hybrid architecture from the attached guide, fixing step count inaccuracies and guaranteeing 1:1 Google Fit synchronization.",
+  "updatedAt":  "2026-10-31T18:32:48.873643776Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

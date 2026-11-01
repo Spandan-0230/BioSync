@@ -320,6 +320,13 @@ object DashboardLocalStore {
     }
   }
 
+  /**
+   * Factory Reset: Wipes all persisted dashboard logs, saved quick items, created items, and streaks.
+   */
+  fun clearAll(context: Context) {
+    prefs(context).edit().clear().commit()
+  }
+
   private fun serializeQuickItemsJson(items: List<SavedQuickNutritionItem>): String {
     val arr = JSONArray()
     for (item in items) {

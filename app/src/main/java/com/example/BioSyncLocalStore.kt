@@ -510,6 +510,31 @@ object BioSyncLocalStore {
     )
   }
 
+  /**
+   * Generates the automatic 2-character Subject ID Badge from the Full Name:
+   * Uses the first letter of the 1st word and the first letter of the 2nd word.
+   */
+  fun computeSubjectIdBadge(subjectName: String): String {
+    val parts = subjectName
+      .filter { it.isLetter() || it == ' ' }
+      .trim()
+      .split("\\s+".toRegex())
+      .filter { it.isNotEmpty() }
+    return when {
+      parts.size >= 2 -> "${parts[0].first().uppercaseChar()}${parts[1].first().uppercaseChar()}"
+      parts.size == 1 && parts[0].length >= 2 -> parts[0].take(2).uppercase()
+      parts.size == 1 -> "${parts[0].first().uppercaseChar()}•"
+      else -> "ID"
+    }
+  }
+
+  /**
+   * Factory Reset: Wipes all persisted protocol, profile, anthropometric, blueprint,
+   * and step ledger data from on-device storage.
+   */
+  fun clearAll(context: Context) {
+    prefs(context).edit().clear().commit()
+  }
 
   private inline fun <reified T : Enum<T>> enumOrDefault(raw: String?, default: T): T {
     if (raw.isNullOrBlank()) return default

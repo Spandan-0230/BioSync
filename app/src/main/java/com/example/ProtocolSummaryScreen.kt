@@ -174,10 +174,15 @@ private fun computeSummaryMetrics(
   val w = maxWidth.value.coerceAtLeast(280f)
   val h = maxHeight.value.coerceAtLeast(480f)
   val isExpanded = w >= 600f
-  val widthFactor = (w / 392f).coerceIn(0.84f, 1.18f)
+  val widthFactor = (w / 392f).coerceIn(0.82f, 1.18f)
   val heightFactor = (h / 830f).coerceIn(0.76f, 1.12f)
   val scale = min(widthFactor, heightFactor * 1.05f).coerceIn(0.80f, 1.14f)
-  val fontCompensation = if (fontScale > 1.12f) (1.12f / fontScale).coerceIn(0.76f, 1f) else 1f
+  val safeFontScale = fontScale.coerceIn(0.5f, 3.0f)
+  val fontCompensation = when {
+    safeFontScale > 1.0f -> (1.0f + (safeFontScale - 1.0f) * 0.25f) / safeFontScale
+    safeFontScale < 1.0f -> (1.0f - (1.0f - safeFontScale) * 0.30f) / safeFontScale
+    else -> 1f
+  }
   val sp: (Float, Float, Float) -> TextUnit = { base, minV, maxV ->
     ((base * scale).coerceIn(minV, maxV) * fontCompensation).sp
   }
@@ -185,8 +190,8 @@ private fun computeSummaryMetrics(
   return SummaryResponsiveMetrics(
     scale = scale,
     fontCompensation = fontCompensation,
-    contentMaxWidth = if (isExpanded) 580.dp else 480.dp,
-    horizontalPadding = (20f * widthFactor).coerceIn(16f, 28f).dp,
+    contentMaxWidth = if (isExpanded) (w * 0.80f).coerceIn(480f, 580f).dp else w.dp,
+    horizontalPadding = (20f * widthFactor).coerceIn(14f, 28f).dp,
     topContentPadding = (8f * heightFactor).coerceIn(5f, 14f).dp,
     bottomContentPadding = (18f * heightFactor).coerceIn(12f, 26f).dp,
     headerHeight = (46f * scale).coerceIn(42f, 54f).dp,
@@ -251,6 +256,8 @@ fun ProtocolSummaryScreen(
   onQuickEditStep01: (focusSection: String?) -> Unit,
   onQuickEditStep02: (focusSection: String?) -> Unit,
   onQuickEditStep03: (focusSection: String?) -> Unit,
+  isReturnToSettings: Boolean = false,
+  initialFocusSection: String? = null,
   modifier: Modifier = Modifier,
 ) {
   BackHandler(onBack = onNavigateBack)
@@ -269,7 +276,7 @@ fun ProtocolSummaryScreen(
   var acknowledgedAlertIds by remember { mutableStateOf(emptySet<String>()) }
 
   LaunchedEffect(Unit) {
-    if (isCustomTargetsMode) {
+    if (isCustomTargetsMode && !isReturnToSettings && !protocolLockedIn) {
       onToggleCustomTargetsMode(false)
     }
     headerStepPhase.snapTo(0f)
@@ -370,7 +377,7 @@ fun ProtocolSummaryScreen(
   }
 
   val attemptLockInWithHealthConnectGate: () -> Unit = {
-    if (stepSyncController.state.isAllPermissionsAllowed) {
+    if (isReturnToSettings || stepSyncController.state.isAllPermissionsAllowed) {
       showHealthConnectDialog = false
       showAllowAllRequiredWarning = false
       haptics.confirm()
@@ -486,6 +493,12 @@ fun ProtocolSummaryScreen(
         computeSummaryMetrics(maxWidth, maxHeight, fontScale)
       }
       val scrollState = rememberScrollState()
+
+      LaunchedEffect(initialFocusSection) {
+        if (initialFocusSection == "step04_bodyfat") {
+          scrollState.animateScrollTo(460)
+        }
+      }
 
       Column(
         modifier = Modifier
@@ -693,6 +706,7 @@ fun ProtocolSummaryScreen(
         // 6. Primary Lock In Protocol Button & Encrypted Footer
         SummaryLockInFooterSection(
           protocolLockedIn = protocolLockedIn,
+          isReturnToSettings = isReturnToSettings,
           hasActiveHealthAlerts = healthAlerts.isNotEmpty(),
           alertCount = healthAlerts.size,
           onLockInClick = {
@@ -3515,6 +3529,7 @@ private fun DossierMatrixTile(
 @Composable
 private fun SummaryLockInFooterSection(
   protocolLockedIn: Boolean,
+  isReturnToSettings: Boolean = false,
   hasActiveHealthAlerts: Boolean,
   alertCount: Int,
   onLockInClick: () -> Unit,
@@ -3675,6 +3690,7 @@ private fun SummaryLockInFooterSection(
         Text(
           text = when {
             hasActiveHealthAlerts -> "Review $alertCount Alert${if (alertCount > 1) "s" else ""} & Lock In Protocol"
+            isReturnToSettings -> stringResource(R.string.calib_cta_return_settings)
             protocolLockedIn -> stringResource(R.string.summary_cta_protocol_locked)
             else -> stringResource(R.string.summary_cta_lock_protocol)
           },

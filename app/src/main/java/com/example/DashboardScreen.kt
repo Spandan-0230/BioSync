@@ -2,6 +2,7 @@ package com.example
 
 import android.graphics.BlurMaskFilter
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -11,6 +12,10 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -18,6 +23,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,6 +46,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -63,11 +70,13 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.CaloriesEnd
@@ -99,6 +108,7 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlinx.coroutines.delay
@@ -124,6 +134,65 @@ private val RecessedTrackBorder = Color(0xFF27272E)
 private val SmoothOutEasing = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
 
 internal fun safeDashboardBlur(px: Float): Float = px.coerceAtLeast(1f)
+
+@Immutable
+internal data class DashboardResponsiveMetrics(
+  val scale: Float,
+  val fontCompensation: Float,
+  val contentMaxWidth: Dp,
+  val horizontalPadding: Dp,
+  val topOffsetPadding: Dp,
+  val bottomOffsetPadding: Dp,
+  val sectionGap: Dp,
+  val cardCornerRadius: Dp,
+  val cardPadding: Dp,
+  val innerTilePadding: Dp,
+  val bentoGap: Dp,
+) {
+  fun spScaled(base: Float, minVal: Float, maxVal: Float): TextUnit =
+    ((base * scale).coerceIn(minVal, maxVal) * fontCompensation).sp
+}
+
+private fun computeDashboardMetrics(
+  maxWidth: Dp,
+  maxHeight: Dp,
+  fontScale: Float,
+): DashboardResponsiveMetrics {
+  val w = maxWidth.value.coerceAtLeast(280f)
+  val h = maxHeight.value.coerceAtLeast(480f)
+  val isExpanded = w >= 600f
+  val widthFactor = (w / 392f).coerceIn(0.80f, 1.22f)
+  val heightFactor = (h / 830f).coerceIn(0.76f, 1.18f)
+  val scale = min(widthFactor, heightFactor * 1.05f).coerceIn(0.78f, 1.18f)
+
+  val safeFontScale = fontScale.coerceIn(0.5f, 3.0f)
+  val targetFontGrowth = if (safeFontScale >= 1f) {
+    1f + (safeFontScale - 1f).coerceAtMost(1.2f) * 0.14f
+  } else {
+    1f - (1f - safeFontScale).coerceAtMost(0.5f) * 0.20f
+  }
+  val fontCompensation = targetFontGrowth / safeFontScale
+
+  val contentMaxWidth = if (isExpanded) {
+    (w * 0.80f).coerceIn(500f, 600f).dp
+  } else {
+    w.dp
+  }
+
+  return DashboardResponsiveMetrics(
+    scale = scale,
+    fontCompensation = fontCompensation,
+    contentMaxWidth = contentMaxWidth,
+    horizontalPadding = (18f * widthFactor).coerceIn(14f, 28f).dp,
+    topOffsetPadding = (12f * heightFactor).coerceIn(8f, 18f).dp,
+    bottomOffsetPadding = (32f * heightFactor).coerceIn(22f, 44f).dp,
+    sectionGap = (15f * heightFactor).coerceIn(11f, 20f).dp,
+    cardCornerRadius = (18f * scale).coerceIn(14f, 20f).dp,
+    cardPadding = (15f * scale).coerceIn(12f, 19f).dp,
+    innerTilePadding = (11f * scale).coerceIn(8.5f, 14f).dp,
+    bentoGap = (8f * widthFactor).coerceIn(6f, 11f).dp,
+  )
+}
 
 /**
  * 3D Floating Command Deck Modifier with toned-down background reflection:
@@ -349,6 +418,10 @@ internal fun Modifier.floating3DInnerTile(
 @Composable
 fun BioSyncDashboardScreen(
   subjectName: String,
+  ageYears: Int = 31,
+  birthDay: Int = 24,
+  birthMonthZeroBased: Int = 9,
+  birthYear: Int = 1994,
   targetCaloriesKcal: Int,
   targetProteinGrams: Int,
   targetCarbsGrams: Int,
@@ -360,6 +433,7 @@ fun BioSyncDashboardScreen(
   activityLevel: ActivityLevelOption,
   selectedWorkoutDays: Set<DayOfWeekOption>,
   onOpenProtocolSummary: () -> Unit,
+  onOpenSettingsPage: () -> Unit = onOpenProtocolSummary,
   modifier: Modifier = Modifier,
 ) {
   val context = LocalContext.current
@@ -371,6 +445,8 @@ fun BioSyncDashboardScreen(
   var pendingDeletedItem by remember {
     mutableStateOf<PendingDeletedTimelineItem?>(null)
   }
+  var liveNowEpochMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+  var showTopRightSettingsMenu by remember { mutableStateOf(false) }
 
   fun persistDashboardData(updated: DashboardStoredData) {
     dashboardData = updated
@@ -484,6 +560,7 @@ fun BioSyncDashboardScreen(
     while (true) {
       delay(1_000L)
       val tickMs = System.currentTimeMillis()
+      liveNowEpochMs = tickMs
       val newDayKey = DashboardTimeFormatter.currentDayKey(tickMs)
       if (newDayKey != dashboardData.dayKey) {
         dashboardData = DashboardLocalStore.load(context)
@@ -501,9 +578,9 @@ fun BioSyncDashboardScreen(
   var cardFlashProgress by remember { mutableStateOf(0f) }
 
   LaunchedEffect(borderFlashTriggerCount) {
-    for (cardIdx in 0..5) {
+    for (cardIdx in 0..6) {
       activeFlashCardIndex = cardIdx
-      val durationMs = 260L
+      val durationMs = 240L
       val frameMs = 16L
       val steps = (durationMs / frameMs).toInt().coerceAtLeast(1)
       for (s in 0..steps) {
@@ -524,9 +601,9 @@ fun BioSyncDashboardScreen(
     }
   }
 
-  BackHandler {
+  BackHandler(enabled = showTopRightSettingsMenu) {
     haptics.selection()
-    onOpenProtocolSummary()
+    showTopRightSettingsMenu = false
   }
 
   val infiniteTransition = rememberInfiniteTransition(label = "dashboard_ambient")
@@ -543,12 +620,18 @@ fun BioSyncDashboardScreen(
   val statusBarTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
   val navBarBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
-  Box(
+  BoxWithConstraints(
     modifier = modifier
       .fillMaxSize()
       .background(ObsidianBlack)
       .testTag("dashboard_screen_root"),
+    contentAlignment = Alignment.TopCenter,
   ) {
+    val fontScale = LocalDensity.current.fontScale
+    val metrics = remember(maxWidth, maxHeight, fontScale) {
+      computeDashboardMetrics(maxWidth, maxHeight, fontScale)
+    }
+
     // Low-reflection Obsidian Backdrop Canvas
     DashboardAmbientBackdropCanvas(
       ambientPhase = ambientPulse,
@@ -560,35 +643,58 @@ fun BioSyncDashboardScreen(
         .fillMaxSize()
         .verticalScroll(scrollState)
         .padding(
-          top = statusBarTopPadding + 14.dp,
-          bottom = navBarBottomPadding + 36.dp,
-          start = 20.dp,
-          end = 20.dp,
+          top = statusBarTopPadding + metrics.topOffsetPadding,
+          bottom = navBarBottomPadding + metrics.bottomOffsetPadding,
+          start = metrics.horizontalPadding,
+          end = metrics.horizontalPadding,
         ),
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
       Column(
         modifier = Modifier
-          .widthIn(max = 540.dp)
+          .widthIn(max = metrics.contentMaxWidth)
           .fillMaxWidth(),
       ) {
-        // 1. TOP COMMAND HEADER
+        // 1. TOP COMMAND HEADER (Full Name at Top, Age just below it, Automatic ID Badge at Top-Right with Settings option)
         DashboardTopNavigationHeader(
           subjectName = subjectName,
+          ageYears = ageYears,
+          birthDay = birthDay,
+          birthMonthZeroBased = birthMonthZeroBased,
+          birthYear = birthYear,
           isActiveWorkoutDay = isActiveWorkoutDay,
-          isCustomTargetsMode = false,
           streakThresholdPercent = streakThresholdPercent,
+          isSettingsMenuExpanded = showTopRightSettingsMenu,
+          onToggleSettingsMenu = {
+            haptics.selection()
+            showTopRightSettingsMenu = !showTopRightSettingsMenu
+          },
+          onOpenSettingsPage = {
+            haptics.confirm()
+            showTopRightSettingsMenu = false
+            onOpenSettingsPage()
+          },
           onTriggerShimmer = {
             haptics.tick()
             borderFlashTriggerCount += 1
           },
-          onOpenProtocolSettings = {
-            haptics.selection()
-            onOpenProtocolSummary()
-          },
+          metrics = metrics,
         )
 
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(metrics.sectionGap))
+
+        // 1B. CHRONOMETRIC REVERSE COUNTDOWN DECK (Day Remaining to End + Next Birthday Reverse Countdown)
+        DashboardChronometricReverseCountdownCard(
+          nowEpochMs = liveNowEpochMs,
+          ageYears = ageYears,
+          birthDay = birthDay,
+          birthMonthZeroBased = birthMonthZeroBased,
+          birthYear = birthYear,
+          borderFlashProgress = if (activeFlashCardIndex == 6) cardFlashProgress else 0f,
+          metrics = metrics,
+        )
+
+        Spacer(modifier = Modifier.height(metrics.sectionGap))
 
         // 2. FLOATING COMBINED DAILY STREAK CARD (Attractive 3x2 Pillar Bento Grid)
         DashboardCombinedStreakHeroCard(
@@ -613,9 +719,10 @@ fun BioSyncDashboardScreen(
           fatsQualifies = fatsQualifies,
           waterQualifies = waterQualifies,
           borderFlashProgress = if (activeFlashCardIndex == 0) cardFlashProgress else 0f,
+          metrics = metrics,
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(metrics.sectionGap))
 
         // 3. PRIORITY #1: FLOATING DAILY STEPS COMMAND CARD (Dual-Telemetry Layout without clunky boxes)
         DashboardPrimaryStepsHeroCard(
@@ -631,9 +738,10 @@ fun BioSyncDashboardScreen(
             stepSyncController.forceRefreshNow()
           },
           numberFormat = numberFormat,
+          metrics = metrics,
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(metrics.sectionGap))
 
         // 4. FLOATING METABOLIC ENERGY (CALORIES) & 3-COLUMN MACROS CARD (Clean Calorie Balance Readout)
         DashboardCaloriesAndMacrosCard(
@@ -652,9 +760,10 @@ fun BioSyncDashboardScreen(
           fatsQualifies = fatsQualifies,
           borderFlashProgress = if (activeFlashCardIndex == 2) cardFlashProgress else 0f,
           numberFormat = numberFormat,
+          metrics = metrics,
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(metrics.sectionGap))
 
         // 5. FLOATING DEDICATED HYDRATION (H2O) COMMAND CARD (Clean Glasses Readout)
         DashboardHydrationCommandCard(
@@ -679,7 +788,7 @@ fun BioSyncDashboardScreen(
           numberFormat = numberFormat,
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(metrics.sectionGap))
 
         // 6. FLOATING QUICK ACTIONS (+) BAR WITH SAVED ITEMS BESIDE IT (Solid Red × Button)
         DashboardQuickActionsHubCard(
@@ -761,7 +870,7 @@ fun BioSyncDashboardScreen(
           numberFormat = numberFormat,
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(metrics.sectionGap))
 
         // 7. FLOATING TODAY'S TIMELINE SECTION (Chronological Rail + Solid Red Delete Button)
         DashboardTodayTimelineSection(
@@ -869,17 +978,28 @@ private fun DashboardAmbientBackdropCanvas(
 }
 
 // ============================================================================
-// TOP NAVIGATION HEADER
+// TOP NAVIGATION HEADER (Name + Age below it + Top-Right Automatic ID Badge + Settings Option)
 // ============================================================================
+
+private val DashboardMonthShortNames = listOf(
+  "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+  "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+)
 
 @Composable
 private fun DashboardTopNavigationHeader(
   subjectName: String,
+  ageYears: Int,
+  birthDay: Int,
+  birthMonthZeroBased: Int,
+  birthYear: Int,
   isActiveWorkoutDay: Boolean,
-  isCustomTargetsMode: Boolean,
   streakThresholdPercent: Int,
+  isSettingsMenuExpanded: Boolean,
+  onToggleSettingsMenu: () -> Unit,
+  onOpenSettingsPage: () -> Unit,
   onTriggerShimmer: () -> Unit,
-  onOpenProtocolSettings: () -> Unit,
+  metrics: DashboardResponsiveMetrics,
 ) {
   val todayFormatted = remember {
     val cal = Calendar.getInstance()
@@ -889,125 +1009,891 @@ private fun DashboardTopNavigationHeader(
     "$dayName, $monthName $dayNum"
   }
 
+  val subjectIdBadge = remember(subjectName) {
+    BioSyncLocalStore.computeSubjectIdBadge(subjectName)
+  }
+
+  val exactAgeTelemetry = remember(birthDay, birthMonthZeroBased, birthYear, ageYears) {
+    val now = Calendar.getInstance()
+    val curYear = now.get(Calendar.YEAR)
+    val curMonth = now.get(Calendar.MONTH)
+    val curDay = now.get(Calendar.DAY_OF_MONTH)
+    val safeMonth = birthMonthZeroBased.coerceIn(0, 11)
+    var y = curYear - birthYear
+    var m = curMonth - safeMonth
+    var d = curDay - birthDay
+    if (d < 0) {
+      m -= 1
+      val prevMonthCal = Calendar.getInstance().apply {
+        set(Calendar.YEAR, curYear)
+        set(Calendar.MONTH, curMonth)
+        set(Calendar.DAY_OF_MONTH, 1)
+        add(Calendar.DAY_OF_MONTH, -1)
+      }
+      d += prevMonthCal.get(Calendar.DAY_OF_MONTH)
+    }
+    if (m < 0) {
+      y -= 1
+      m += 12
+    }
+    val resolvedYears = if (y > 0) y else ageYears.coerceAtLeast(1)
+    val safeM = m.coerceAtLeast(0)
+    val safeD = d.coerceAtLeast(0)
+    val monthStr = DashboardMonthShortNames.getOrElse(safeMonth) { "OCT" }
+    val dayStr = birthDay.coerceIn(1, 31).toString().padStart(2, '0')
+    val cycleProgress = ((safeM * 30.4375f + safeD) / 365.25f).coerceIn(0.04f, 0.99f)
+    val daysElapsedInYear = (safeM * 30.4375f + safeD).roundToInt().coerceIn(0, 365)
+    listOf(
+      resolvedYears.toString(),
+      "${safeM.toString().padStart(2, '0')}M : ${safeD.toString().padStart(2, '0')}D",
+      "$monthStr $dayStr, $birthYear",
+      cycleProgress.toString(),
+      daysElapsedInYear.toString(),
+    )
+  }
+
+  val resolvedAgeYears = exactAgeTelemetry[0].toIntOrNull() ?: ageYears
+  val exactMonthsDaysLabel = exactAgeTelemetry[1]
+  val dobFormattedLabel = exactAgeTelemetry[2]
+  val ageCycleProgress = exactAgeTelemetry[3].toFloatOrNull() ?: 0.25f
+
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clickable(
-        interactionSource = remember { MutableInteractionSource() },
-        indication = null,
-        onClick = onTriggerShimmer,
-      ),
+      .testTag("dashboard_top_header"),
   ) {
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
     ) {
+      // Left: Eyebrow + Subject Full Name at the Top
+      Column(
+        modifier = Modifier
+          .weight(1f)
+          .clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = onTriggerShimmer,
+          ),
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+          Box(
+            modifier = Modifier
+              .size(6.5.dp)
+              .clip(CircleShape)
+              .background(if (isActiveWorkoutDay) StepsStart else HydrationStart),
+          )
+          Text(
+            text = "$todayFormatted • ${if (isActiveWorkoutDay) "ACTIVE TRAINING DAY" else "REST & RECOVERY DAY"}",
+            color = if (isActiveWorkoutDay) StepsStart else HydrationStart,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = metrics.spScaled(9.6f, 8.2f, 11.2f),
+            letterSpacing = 0.8.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+
+        Spacer(modifier = Modifier.height(5.dp))
+
+        // Subject Full Name at the Top of the screen (Daily Protocol text removed)
+        Text(
+          text = subjectName.ifBlank { "Elena Rostova" },
+          color = PureWhite,
+          fontFamily = InterFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = metrics.spScaled(26f, 21f, 30f),
+          letterSpacing = (-0.75).sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.testTag("dashboard_subject_name_text"),
+        )
+      }
+
+      Spacer(modifier = Modifier.width(12.dp))
+
+      // Top-Right Corner: Automatic Subject ID Badge (First letter of 1st word + First letter of 2nd word)
+      // Clicking this badge reveals the Settings option
+      Box(
+        modifier = Modifier
+          .clip(RoundedCornerShape(12.dp))
+          .background(
+            brush = Brush.verticalGradient(
+              colors = if (isSettingsMenuExpanded) {
+                listOf(PureWhite, Color(0xFFE4E4E7))
+              } else {
+                listOf(Color(0xFF1E1E26), Color(0xFF101015))
+              },
+            ),
+          )
+          .border(
+            width = 1.2.dp,
+            brush = Brush.verticalGradient(
+              colors = if (isSettingsMenuExpanded) {
+                listOf(PureWhite, PureWhite)
+              } else {
+                listOf(PureWhite.copy(alpha = 0.38f), Zinc700.copy(alpha = 0.75f), Zinc850)
+              },
+            ),
+            shape = RoundedCornerShape(12.dp),
+          )
+          .clickable(
+            role = Role.Button,
+            onClick = onToggleSettingsMenu,
+          )
+          .padding(horizontal = 12.dp, vertical = 9.dp)
+          .testTag("dashboard_top_right_id_badge"),
+        contentAlignment = Alignment.Center,
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+          Box(
+            modifier = Modifier
+              .size(6.dp)
+              .clip(CircleShape)
+              .background(if (isSettingsMenuExpanded) ObsidianBlack else StepsStart),
+          )
+          Text(
+            text = subjectIdBadge,
+            color = if (isSettingsMenuExpanded) ObsidianBlack else PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(14f, 12.5f, 15.5f),
+            letterSpacing = 0.8.sp,
+          )
+          Canvas(modifier = Modifier.size(10.dp)) {
+            val w = size.width
+            val h = size.height
+            val chevron = Path().apply {
+              if (isSettingsMenuExpanded) {
+                moveTo(w * 0.15f, h * 0.68f)
+                lineTo(w * 0.50f, h * 0.30f)
+                lineTo(w * 0.85f, h * 0.68f)
+              } else {
+                moveTo(w * 0.15f, h * 0.32f)
+                lineTo(w * 0.50f, h * 0.70f)
+                lineTo(w * 0.85f, h * 0.32f)
+              }
+            }
+            drawPath(
+              path = chevron,
+              color = if (isSettingsMenuExpanded) ObsidianBlack else Zinc300,
+              style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+            )
+          }
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height((8f * metrics.scale).coerceIn(6f, 11f).dp))
+
+    // Sculpted 3D Biometric Age & Chronological Telemetry Bar directly below the Name
+    val ageCapsuleShape = RoundedCornerShape((12f * metrics.scale).coerceIn(10f, 14f).dp)
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clip(ageCapsuleShape)
+        .background(
+          brush = Brush.verticalGradient(
+            colors = listOf(
+              Color(0xFF1A1B22),
+              Color(0xFF0E0F14),
+            ),
+          ),
+        )
+        .border(
+          width = 1.dp,
+          brush = Brush.verticalGradient(
+            colors = listOf(
+              PureWhite.copy(alpha = 0.32f),
+              Zinc700.copy(alpha = 0.55f),
+              Zinc850,
+            ),
+          ),
+          shape = ageCapsuleShape,
+        )
+        .clickable(
+          interactionSource = remember { MutableInteractionSource() },
+          indication = null,
+          onClick = onTriggerShimmer,
+        )
+        .padding(
+          horizontal = (10f * metrics.scale).coerceIn(8f, 13f).dp,
+          vertical = (7.5f * metrics.scale).coerceIn(6f, 10f).dp,
+        )
+        .testTag("dashboard_subject_age_row"),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      // Left Primary Emblem: Brushed Platinum/Metallic Age Pill with Dual-Ring Precision Node
       Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy((8f * metrics.scale).coerceIn(6f, 10f).dp),
       ) {
         Box(
           modifier = Modifier
-            .size(38.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(Zinc900)
-            .border(1.dp, Zinc800, RoundedCornerShape(10.dp))
-            .clickable(
-              role = Role.Button,
-              onClick = onOpenProtocolSettings,
+            .clip(RoundedCornerShape((8f * metrics.scale).coerceIn(6.5f, 10f).dp))
+            .background(
+              brush = Brush.horizontalGradient(
+                colors = listOf(
+                  PureWhite,
+                  Color(0xFFE4E4E7),
+                ),
+              ),
             )
-            .testTag("dashboard_recalibrate_button"),
+            .border(
+              width = 0.8.dp,
+              color = PureWhite,
+              shape = RoundedCornerShape((8f * metrics.scale).coerceIn(6.5f, 10f).dp),
+            )
+            .padding(
+              horizontal = (9f * metrics.scale).coerceIn(7f, 11.5f).dp,
+              vertical = (4.5f * metrics.scale).coerceIn(3.5f, 6f).dp,
+            ),
           contentAlignment = Alignment.Center,
         ) {
-          Canvas(modifier = Modifier.size(16.dp)) {
-            val w = size.width
-            val h = size.height
-            val stroke = 1.6.dp.toPx()
-            drawLine(
-              color = PureWhite,
-              start = Offset(w * 0.12f, h * 0.28f),
-              end = Offset(w * 0.88f, h * 0.28f),
-              strokeWidth = stroke,
-              cap = StrokeCap.Round,
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.5.dp),
+          ) {
+            Canvas(modifier = Modifier.size((11f * metrics.scale).coerceIn(9.5f, 12.5f).dp)) {
+              val strokePx = 1.6.dp.toPx()
+              drawCircle(
+                color = ObsidianBlack.copy(alpha = 0.18f),
+                style = Stroke(width = strokePx),
+              )
+              drawArc(
+                color = ObsidianBlack,
+                startAngle = -90f,
+                sweepAngle = 360f * ageCycleProgress,
+                useCenter = false,
+                style = Stroke(width = strokePx, cap = StrokeCap.Round),
+              )
+              drawCircle(
+                color = ObsidianBlack,
+                radius = size.minDimension * 0.19f,
+              )
+            }
+            Text(
+              text = "$resolvedAgeYears",
+              color = ObsidianBlack,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = metrics.spScaled(13.2f, 11.2f, 15f),
+              letterSpacing = (-0.3).sp,
             )
-            drawCircle(
-              color = StepsStart,
-              radius = 2.4.dp.toPx(),
-              center = Offset(w * 0.34f, h * 0.28f),
-            )
-            drawLine(
-              color = PureWhite,
-              start = Offset(w * 0.12f, h * 0.72f),
-              end = Offset(w * 0.88f, h * 0.72f),
-              strokeWidth = stroke,
-              cap = StrokeCap.Round,
-            )
-            drawCircle(
-              color = HydrationStart,
-              radius = 2.4.dp.toPx(),
-              center = Offset(w * 0.68f, h * 0.72f),
+            Text(
+              text = "YEARS OLD",
+              color = Color(0xFF27272A),
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = metrics.spScaled(9.4f, 8f, 10.8f),
+              letterSpacing = 0.7.sp,
             )
           }
         }
 
-        Column {
+        // Exact Sub-Year Chronological Precision Readout (+ MM : DD)
+        Column(
+          verticalArrangement = Arrangement.Center,
+        ) {
           Text(
-            text = "ACTIVE PROTOCOL • LIVE",
+            text = "CHRONO PRECISION",
             color = Zinc500,
             fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Medium,
-            fontSize = 10.sp,
-            letterSpacing = 1.5.sp,
-          )
-          Spacer(modifier = Modifier.height(2.dp))
-          Text(
-            text = "Daily Protocol",
-            color = PureWhite,
-            fontFamily = InterFontFamily,
             fontWeight = FontWeight.Bold,
-            fontSize = 24.sp,
-            letterSpacing = (-0.8).sp,
+            fontSize = metrics.spScaled(7.4f, 6.5f, 8.5f),
+            letterSpacing = 0.7.sp,
+            maxLines = 1,
+          )
+          Text(
+            text = "+$exactMonthsDaysLabel",
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = metrics.spScaled(10.6f, 9f, 12f),
+            letterSpacing = 0.4.sp,
+            maxLines = 1,
           )
         }
       }
 
-      Column(horizontalAlignment = Alignment.End) {
-        Text(
-          text = todayFormatted,
-          color = PureWhite,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.Bold,
-          fontSize = 11.sp,
-          letterSpacing = 0.6.sp,
+      // Vertical Specular Hairline Divider + Right DOB Origin Stamp
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy((8f * metrics.scale).coerceIn(6f, 10f).dp),
+      ) {
+        Box(
+          modifier = Modifier
+            .width(1.dp)
+            .height((22f * metrics.scale).coerceIn(18f, 26f).dp)
+            .background(
+              brush = Brush.verticalGradient(
+                colors = listOf(
+                  Color.Transparent,
+                  Zinc700,
+                  Color.Transparent,
+                ),
+              ),
+            ),
         )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-          text = if (isCustomTargetsMode) {
-            "CUSTOM OVERRIDE"
-          } else if (isActiveWorkoutDay) {
-            "ACTIVE TRAINING DAY"
-          } else {
-            "REST & RECOVERY DAY"
-          },
-          color = if (isActiveWorkoutDay) StepsStart else HydrationStart,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.SemiBold,
-          fontSize = 9.5.sp,
-          letterSpacing = 0.5.sp,
-        )
+
+        Column(
+          horizontalAlignment = Alignment.End,
+          verticalArrangement = Arrangement.Center,
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .size(4.5.dp)
+                .clip(CircleShape)
+                .background(StepsStart),
+            )
+            Text(
+              text = "BIOMETRIC DOB",
+              color = Zinc400,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = metrics.spScaled(7.4f, 6.5f, 8.5f),
+              letterSpacing = 0.7.sp,
+              maxLines = 1,
+            )
+          }
+          Text(
+            text = dobFormattedLabel,
+            color = Zinc200,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = metrics.spScaled(10.2f, 8.8f, 11.6f),
+            letterSpacing = 0.3.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
       }
     }
 
-    Spacer(modifier = Modifier.height(4.dp))
+    // Floating Top-Right Settings Option Popover Card (Shown when clicking the Top-Right ID Badge)
+    AnimatedVisibility(
+      visible = isSettingsMenuExpanded,
+      enter = expandVertically(animationSpec = tween(220, easing = SmoothOutEasing)) + fadeIn(tween(180)),
+      exit = shrinkVertically(animationSpec = tween(180, easing = SmoothOutEasing)) + fadeOut(tween(140)),
+    ) {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(top = 10.dp)
+          .floating3DProtocolCard(
+            cornerRadiusDp = 15.dp,
+            topRimTint = PureWhite,
+          )
+          .padding(13.dp)
+          .testTag("dashboard_id_settings_dropdown"),
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(PureWhite)
+                .padding(horizontal = 9.dp, vertical = 4.dp),
+              contentAlignment = Alignment.Center,
+            ) {
+              Text(
+                text = "ID • $subjectIdBadge",
+                color = ObsidianBlack,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 10.2.sp,
+                letterSpacing = 0.6.sp,
+              )
+            }
+            Column {
+              Text(
+                text = subjectName.ifBlank { "Elena Rostova" },
+                color = PureWhite,
+                fontFamily = InterFontFamily,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.5.sp,
+              )
+              Text(
+                text = "$resolvedAgeYears Yrs (+$exactMonthsDaysLabel) • Biometric Dossier Locked",
+                color = Zinc400,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontSize = 9.6.sp,
+              )
+            }
+          }
 
-    Text(
-      text = "${subjectName.ifBlank { "Athlete" }} • Daily streak unlocks at ≥$streakThresholdPercent% across all 6 pillars.",
-      color = Zinc400,
-      fontFamily = InterFontFamily,
-      fontWeight = FontWeight.Normal,
-      fontSize = 12.2.sp,
-    )
+          Text(
+            text = "ACTIVE ID",
+            color = StepsStart,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 9.2.sp,
+            letterSpacing = 0.7.sp,
+          )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+        HorizontalDivider(color = Zinc800, thickness = 0.8.dp)
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Primary Settings Option Button
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(11.dp))
+            .background(
+              brush = Brush.horizontalGradient(
+                colors = listOf(PureWhite, Color(0xFFEAECEF)),
+              ),
+            )
+            .clickable(
+              role = Role.Button,
+              onClick = onOpenSettingsPage,
+            )
+            .padding(horizontal = 14.dp, vertical = 11.dp)
+            .testTag("dashboard_open_settings_option_button"),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .size(28.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(ObsidianBlack),
+              contentAlignment = Alignment.Center,
+            ) {
+              Canvas(modifier = Modifier.size(14.dp)) {
+                val w = size.width
+                val h = size.height
+                val stroke = 1.5.dp.toPx()
+                drawLine(
+                  color = PureWhite,
+                  start = Offset(w * 0.12f, h * 0.28f),
+                  end = Offset(w * 0.88f, h * 0.28f),
+                  strokeWidth = stroke,
+                  cap = StrokeCap.Round,
+                )
+                drawCircle(
+                  color = StepsStart,
+                  radius = 2.2.dp.toPx(),
+                  center = Offset(w * 0.34f, h * 0.28f),
+                )
+                drawLine(
+                  color = PureWhite,
+                  start = Offset(w * 0.12f, h * 0.72f),
+                  end = Offset(w * 0.88f, h * 0.72f),
+                  strokeWidth = stroke,
+                  cap = StrokeCap.Round,
+                )
+                drawCircle(
+                  color = HydrationStart,
+                  radius = 2.2.dp.toPx(),
+                  center = Offset(w * 0.68f, h * 0.72f),
+                )
+              }
+            }
+            Column {
+              Text(
+                text = "Settings",
+                color = ObsidianBlack,
+                fontFamily = InterFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.8.sp,
+                letterSpacing = (-0.2).sp,
+              )
+              Text(
+                text = "Edit all profile, body & blueprint info • Factory reset",
+                color = Color(0xFF3F3F46),
+                fontFamily = InterFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 10.6.sp,
+              )
+            }
+          }
+
+          Text(
+            text = "OPEN ↗",
+            color = ObsidianBlack,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 10.5.sp,
+            letterSpacing = 0.6.sp,
+          )
+        }
+      }
+    }
+  }
+}
+
+// ============================================================================
+// CHRONOMETRIC REVERSE COUNTDOWN DECK (Day Remaining to End + Next Birthday Reverse Countdown)
+// ============================================================================
+
+@Composable
+private fun DashboardChronometricReverseCountdownCard(
+  nowEpochMs: Long,
+  ageYears: Int,
+  birthDay: Int,
+  birthMonthZeroBased: Int,
+  birthYear: Int,
+  borderFlashProgress: Float = 0f,
+  metrics: DashboardResponsiveMetrics,
+) {
+  // 1. Calculate End-of-Day Reverse Countdown (Time Remaining Today until 24:00 Midnight)
+  val endOfDayCal = Calendar.getInstance().apply {
+    timeInMillis = nowEpochMs
+    set(Calendar.HOUR_OF_DAY, 23)
+    set(Calendar.MINUTE, 59)
+    set(Calendar.SECOND, 59)
+    set(Calendar.MILLISECOND, 999)
+  }
+  val startOfDayCal = Calendar.getInstance().apply {
+    timeInMillis = nowEpochMs
+    set(Calendar.HOUR_OF_DAY, 0)
+    set(Calendar.MINUTE, 0)
+    set(Calendar.SECOND, 0)
+    set(Calendar.MILLISECOND, 0)
+  }
+  val totalDayMs = (endOfDayCal.timeInMillis - startOfDayCal.timeInMillis + 1L).coerceAtLeast(86_400_000L)
+  val remainingDayMs = (endOfDayCal.timeInMillis - nowEpochMs + 1L).coerceIn(0L, totalDayMs)
+  val dayRemainingFraction = (remainingDayMs.toFloat() / totalDayMs.toFloat()).coerceIn(0f, 1f)
+  val dayRemainingPct = (dayRemainingFraction * 100f).roundToInt().coerceIn(0, 100)
+
+  val remDayTotalSecs = (remainingDayMs / 1000L).toInt().coerceAtLeast(0)
+  val dayHoursLeft = remDayTotalSecs / 3600
+  val dayMinsLeft = (remDayTotalSecs % 3600) / 60
+  val daySecsLeft = remDayTotalSecs % 60
+  val dayCountdownFormatted = String.format(
+    Locale.US,
+    "%02dh %02dm %02ds",
+    dayHoursLeft,
+    dayMinsLeft,
+    daySecsLeft,
+  )
+
+  // 2. Calculate Next Birthday Reverse Countdown
+  val safeBirthMonth = birthMonthZeroBased.coerceIn(0, 11)
+  val nowCal = Calendar.getInstance().apply { timeInMillis = nowEpochMs }
+  val curYear = nowCal.get(Calendar.YEAR)
+
+  val nextBirthdayCal = Calendar.getInstance().apply {
+    timeInMillis = nowEpochMs
+    set(Calendar.YEAR, curYear)
+    set(Calendar.MONTH, safeBirthMonth)
+    val maxD = getActualMaximum(Calendar.DAY_OF_MONTH)
+    set(Calendar.DAY_OF_MONTH, birthDay.coerceIn(1, maxD))
+    set(Calendar.HOUR_OF_DAY, 0)
+    set(Calendar.MINUTE, 0)
+    set(Calendar.SECOND, 0)
+    set(Calendar.MILLISECOND, 0)
+  }
+
+  val isBirthdayToday = nowCal.get(Calendar.MONTH) == safeBirthMonth &&
+    nowCal.get(Calendar.DAY_OF_MONTH) == birthDay.coerceIn(1, 31)
+
+  if (!isBirthdayToday && nextBirthdayCal.timeInMillis <= nowEpochMs) {
+    nextBirthdayCal.add(Calendar.YEAR, 1)
+  }
+
+  val prevBirthdayCal = (nextBirthdayCal.clone() as Calendar).apply {
+    add(Calendar.YEAR, -1)
+  }
+  val totalYearCycleMs = (nextBirthdayCal.timeInMillis - prevBirthdayCal.timeInMillis).coerceAtLeast(1L)
+  val bdayDiffMs = if (isBirthdayToday) 0L else (nextBirthdayCal.timeInMillis - nowEpochMs).coerceAtLeast(0L)
+  val bdayTotalSecs = (bdayDiffMs / 1000L).coerceAtLeast(0L)
+  val bdayDaysLeft = (bdayTotalSecs / 86_400L).toInt()
+  val bdayHoursLeft = ((bdayTotalSecs % 86_400L) / 3600L).toInt()
+  val bdayMinsLeft = ((bdayTotalSecs % 3600L) / 60L).toInt()
+  val bdaySecsLeft = (bdayTotalSecs % 60L).toInt()
+
+  // Reverse progress: shows remaining proportion of year or cycle progression
+  val bdayCycleProgress = if (isBirthdayToday) {
+    1f
+  } else {
+    (1f - (bdayDiffMs.toFloat() / totalYearCycleMs.toFloat())).coerceIn(0.06f, 0.98f)
+  }
+  val nextBirthdayMonthName = DashboardMonthShortNames.getOrElse(safeBirthMonth) { "OCT" }
+  val nextBirthdayDateLabel = "$nextBirthdayMonthName ${birthDay.coerceIn(1, 31).toString().padStart(2, '0')}"
+  val upcomingAge = (nextBirthdayCal.get(Calendar.YEAR) - birthYear).coerceAtLeast(ageYears + 1)
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .floating3DProtocolCard(
+        cornerRadiusDp = metrics.cardCornerRadius,
+        topRimTint = PureWhite,
+        borderFlashProgress = borderFlashProgress,
+      )
+      .padding(metrics.cardPadding)
+      .testTag("dashboard_chronometric_countdown_card"),
+  ) {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(bottom = 10.dp),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        DashboardSyncedHeaderDot(
+          startColor = PureWhite,
+          endColor = HydrationStart,
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+          text = "CHRONOMETRIC REVERSE TELEMETRY",
+          color = PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.SemiBold,
+          fontSize = metrics.spScaled(10.6f, 9f, 12.2f),
+          letterSpacing = 1.0.sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
+
+      Text(
+        text = "LIVE SYNC • 1S",
+        color = Zinc400,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = metrics.spScaled(9.2f, 8f, 10.6f),
+        letterSpacing = 0.6.sp,
+      )
+    }
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(metrics.bentoGap),
+    ) {
+      // Chamber 1: Day Remaining to End Reverse Countdown
+      Column(
+        modifier = Modifier
+          .weight(1f)
+          .floating3DInnerTile(
+            cornerRadiusDp = 12.dp,
+            accentColor = HydrationStart,
+          )
+          .padding(metrics.innerTilePadding)
+          .testTag("dashboard_day_remaining_tile"),
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .width(3.dp)
+                .height(11.dp)
+                .clip(RoundedCornerShape(1.5.dp))
+                .background(HydrationStart),
+            )
+            Text(
+              text = "DAY REMAINING",
+              color = Zinc300,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.SemiBold,
+              fontSize = metrics.spScaled(9.2f, 7.8f, 10.6f),
+              letterSpacing = 0.5.sp,
+              maxLines = 1,
+            )
+          }
+
+          Text(
+            text = "$dayRemainingPct% LEFT",
+            color = HydrationStart,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = metrics.spScaled(8.8f, 7.5f, 10f),
+            maxLines = 1,
+          )
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+          text = dayCountdownFormatted,
+          color = PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = metrics.spScaled(15.5f, 12.8f, 17.5f),
+          letterSpacing = (-0.3).sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.testTag("dashboard_day_remaining_value"),
+        )
+
+        Spacer(modifier = Modifier.height(3.dp))
+
+        Text(
+          text = "Until 12:00 AM day end",
+          color = Zinc400,
+          fontFamily = InterFontFamily,
+          fontSize = metrics.spScaled(10f, 8.6f, 11.4f),
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+
+        Spacer(modifier = Modifier.height(7.dp))
+
+        // Reverse Progress Bar (Drains as day nears midnight)
+        Canvas(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(5.dp),
+        ) {
+          val r = CornerRadius(size.height / 2f, size.height / 2f)
+          drawRoundRect(
+            color = RecessedTrackFill,
+            size = size,
+            cornerRadius = r,
+          )
+          val fillW = (size.width * dayRemainingFraction.coerceIn(0.05f, 1f)).coerceAtLeast(size.height)
+          drawRoundRect(
+            brush = Brush.horizontalGradient(
+              colors = listOf(HydrationMid, HydrationStart, PureWhite),
+              startX = 0f,
+              endX = fillW,
+            ),
+            size = Size(fillW, size.height),
+            cornerRadius = r,
+          )
+        }
+      }
+
+      // Chamber 2: Next Birthday Reverse Countdown
+      Column(
+        modifier = Modifier
+          .weight(1f)
+          .floating3DInnerTile(
+            cornerRadiusDp = 12.dp,
+            accentColor = StepsStart,
+          )
+          .padding(metrics.innerTilePadding)
+          .testTag("dashboard_next_birthday_tile"),
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .width(3.dp)
+                .height(11.dp)
+                .clip(RoundedCornerShape(1.5.dp))
+                .background(StepsStart),
+            )
+            Text(
+              text = "NEXT BIRTHDAY",
+              color = Zinc300,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.SemiBold,
+              fontSize = metrics.spScaled(9.2f, 7.8f, 10.6f),
+              letterSpacing = 0.5.sp,
+              maxLines = 1,
+            )
+          }
+
+          Text(
+            text = nextBirthdayDateLabel,
+            color = StepsStart,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = metrics.spScaled(8.8f, 7.5f, 10f),
+            maxLines = 1,
+          )
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+          text = if (isBirthdayToday) {
+            "TODAY • AGE $upcomingAge"
+          } else {
+            "${bdayDaysLeft}d ${String.format(Locale.US, "%02dh %02dm %02ds", bdayHoursLeft, bdayMinsLeft, bdaySecsLeft)}"
+          },
+          color = PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = metrics.spScaled(14.5f, 11.8f, 16.5f),
+          letterSpacing = (-0.4).sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.testTag("dashboard_next_birthday_value"),
+        )
+
+        Spacer(modifier = Modifier.height(3.dp))
+
+        Text(
+          text = "Reverse • Turning $upcomingAge Yrs",
+          color = Zinc400,
+          fontFamily = InterFontFamily,
+          fontSize = metrics.spScaled(10f, 8.6f, 11.4f),
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+
+        Spacer(modifier = Modifier.height(7.dp))
+
+        // Annual Birthday Countdown Progress Bar
+        Canvas(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(5.dp),
+        ) {
+          val r = CornerRadius(size.height / 2f, size.height / 2f)
+          drawRoundRect(
+            color = RecessedTrackFill,
+            size = size,
+            cornerRadius = r,
+          )
+          val fillW = (size.width * bdayCycleProgress.coerceIn(0.05f, 1f)).coerceAtLeast(size.height)
+          drawRoundRect(
+            brush = Brush.horizontalGradient(
+              colors = listOf(StepsMid, StepsStart, PureWhite),
+              startX = 0f,
+              endX = fillW,
+            ),
+            size = Size(fillW, size.height),
+            cornerRadius = r,
+          )
+        }
+      }
+    }
   }
 }
 
@@ -1038,6 +1924,7 @@ private fun DashboardCombinedStreakHeroCard(
   fatsQualifies: Boolean,
   waterQualifies: Boolean,
   borderFlashProgress: Float = 0f,
+  metrics: DashboardResponsiveMetrics,
 ) {
   val qualifiedCount = listOf(
     stepsQualifies,
@@ -1239,12 +2126,12 @@ private fun DashboardCombinedStreakHeroCard(
 
     Column(
       modifier = Modifier.fillMaxWidth(),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+      verticalArrangement = Arrangement.spacedBy(metrics.bentoGap),
     ) {
       // Row 1: STEPS • KCAL • PROTEIN
       Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(metrics.bentoGap),
       ) {
         StreakPillarCompactCard(
           label = "STEPS",
@@ -1253,6 +2140,7 @@ private fun DashboardCombinedStreakHeroCard(
           qualifies = stepsQualifies,
           accentColor = StepsStart,
           accentMid = StepsMid,
+          metrics = metrics,
           modifier = Modifier.weight(1f),
         )
         StreakPillarCompactCard(
@@ -1262,6 +2150,7 @@ private fun DashboardCombinedStreakHeroCard(
           qualifies = caloriesQualifies,
           accentColor = CaloriesStart,
           accentMid = CaloriesMid,
+          metrics = metrics,
           modifier = Modifier.weight(1f),
         )
         StreakPillarCompactCard(
@@ -1271,6 +2160,7 @@ private fun DashboardCombinedStreakHeroCard(
           qualifies = proteinQualifies,
           accentColor = ProteinStart,
           accentMid = ProteinMid,
+          metrics = metrics,
           modifier = Modifier.weight(1f),
         )
       }
@@ -1278,7 +2168,7 @@ private fun DashboardCombinedStreakHeroCard(
       // Row 2: CARBS • FATS • H₂O
       Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(metrics.bentoGap),
       ) {
         StreakPillarCompactCard(
           label = "CARBS",
@@ -1287,6 +2177,7 @@ private fun DashboardCombinedStreakHeroCard(
           qualifies = carbsQualifies,
           accentColor = CarbsStart,
           accentMid = CarbsMid,
+          metrics = metrics,
           modifier = Modifier.weight(1f),
         )
         StreakPillarCompactCard(
@@ -1296,6 +2187,7 @@ private fun DashboardCombinedStreakHeroCard(
           qualifies = fatsQualifies,
           accentColor = FatsStart,
           accentMid = FatsMid,
+          metrics = metrics,
           modifier = Modifier.weight(1f),
         )
         StreakPillarCompactCard(
@@ -1305,6 +2197,7 @@ private fun DashboardCombinedStreakHeroCard(
           qualifies = waterQualifies,
           accentColor = HydrationStart,
           accentMid = HydrationMid,
+          metrics = metrics,
           modifier = Modifier.weight(1f),
         )
       }
@@ -1325,6 +2218,7 @@ private fun StreakPillarCompactCard(
   qualifies: Boolean,
   accentColor: Color,
   accentMid: Color,
+  metrics: DashboardResponsiveMetrics,
   modifier: Modifier = Modifier,
 ) {
   val barFill = (pct / 100f).coerceIn(0f, 1f)
@@ -1341,7 +2235,7 @@ private fun StreakPillarCompactCard(
         accentColor = accentColor,
         isHighlighted = qualifies,
       )
-      .padding(horizontal = 10.dp, vertical = 9.dp),
+      .padding(horizontal = metrics.innerTilePadding, vertical = 9.dp),
   ) {
     Row(
       modifier = Modifier.fillMaxWidth(),
@@ -1350,11 +2244,12 @@ private fun StreakPillarCompactCard(
     ) {
       Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.weight(1f, fill = false),
       ) {
         Box(
           modifier = Modifier
-            .size(6.dp)
+            .size(5.5.dp)
             .clip(CircleShape)
             .background(accentColor),
         )
@@ -1363,22 +2258,24 @@ private fun StreakPillarCompactCard(
           color = if (qualifies) PureWhite else Zinc300,
           fontFamily = JetBrainsMonoFontFamily,
           fontWeight = FontWeight.Bold,
-          fontSize = 9.5.sp,
-          letterSpacing = 0.4.sp,
+          fontSize = metrics.spScaled(9.2f, 7.6f, 10.4f),
+          letterSpacing = 0.3.sp,
           maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
         )
       }
 
       Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
       ) {
         Text(
           text = "${pct.coerceAtMost(999)}%",
           color = if (qualifies) accentColor else PureWhite,
           fontFamily = JetBrainsMonoFontFamily,
           fontWeight = FontWeight.Bold,
-          fontSize = 11.5.sp,
+          fontSize = metrics.spScaled(11f, 9.2f, 12.2f),
+          maxLines = 1,
         )
         if (qualifies) {
           Text(
@@ -1386,7 +2283,7 @@ private fun StreakPillarCompactCard(
             color = accentColor,
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.ExtraBold,
-            fontSize = 10.5.sp,
+            fontSize = metrics.spScaled(10f, 8.5f, 11.5f),
           )
         }
       }
@@ -1420,6 +2317,7 @@ private fun DashboardPrimaryStepsHeroCard(
   borderFlashProgress: Float = 0f,
   onForceSyncSteps: () -> Unit,
   numberFormat: NumberFormat,
+  metrics: DashboardResponsiveMetrics,
 ) {
   val safeTarget = targetSteps.coerceAtLeast(500)
   val rawFraction = liveSteps.toFloat() / safeTarget.toFloat()
@@ -1677,6 +2575,7 @@ private fun DashboardCaloriesAndMacrosCard(
   fatsQualifies: Boolean,
   borderFlashProgress: Float = 0f,
   numberFormat: NumberFormat,
+  metrics: DashboardResponsiveMetrics,
 ) {
   val safeCalTarget = targetCalories.coerceAtLeast(500)
   val calRawFraction = loggedCalories.toFloat() / safeCalTarget.toFloat()
@@ -1893,7 +2792,7 @@ private fun DashboardCaloriesAndMacrosCard(
     // 3. 3-Column Floating Macro Bento Grid: Protein, Carbs, Fats
     Row(
       modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      horizontalArrangement = Arrangement.spacedBy(metrics.bentoGap),
     ) {
       DashboardMacroBentoTile(
         label = "Protein",
@@ -1904,6 +2803,7 @@ private fun DashboardCaloriesAndMacrosCard(
         startColor = ProteinStart,
         midColor = ProteinMid,
         endColor = ProteinEnd,
+        metrics = metrics,
         testTag = "dashboard_macro_protein_tile",
         modifier = Modifier.weight(1f),
       )
@@ -1917,6 +2817,7 @@ private fun DashboardCaloriesAndMacrosCard(
         startColor = CarbsStart,
         midColor = CarbsMid,
         endColor = CarbsEnd,
+        metrics = metrics,
         testTag = "dashboard_macro_carbs_tile",
         modifier = Modifier.weight(1f),
       )
@@ -1930,6 +2831,7 @@ private fun DashboardCaloriesAndMacrosCard(
         startColor = FatsStart,
         midColor = FatsMid,
         endColor = FatsEnd,
+        metrics = metrics,
         testTag = "dashboard_macro_fats_tile",
         modifier = Modifier.weight(1f),
       )
@@ -1947,6 +2849,7 @@ private fun DashboardMacroBentoTile(
   startColor: Color,
   midColor: Color,
   endColor: Color,
+  metrics: DashboardResponsiveMetrics,
   testTag: String,
   modifier: Modifier = Modifier,
 ) {
@@ -1969,7 +2872,7 @@ private fun DashboardMacroBentoTile(
         accentColor = startColor,
         isHighlighted = qualifies,
       )
-      .padding(11.dp)
+      .padding(metrics.innerTilePadding)
       .testTag(testTag),
   ) {
     Row(
@@ -1979,7 +2882,8 @@ private fun DashboardMacroBentoTile(
     ) {
       Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.5.dp),
+        modifier = Modifier.weight(1f, fill = false),
       ) {
         Box(
           modifier = Modifier
@@ -1993,8 +2897,9 @@ private fun DashboardMacroBentoTile(
           color = Zinc200,
           fontFamily = InterFontFamily,
           fontWeight = FontWeight.SemiBold,
-          fontSize = 11.5.sp,
+          fontSize = metrics.spScaled(11.5f, 9.8f, 13f),
           maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
         )
       }
 
@@ -2003,7 +2908,8 @@ private fun DashboardMacroBentoTile(
         color = startColor,
         fontFamily = JetBrainsMonoFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 9.8.sp,
+        fontSize = metrics.spScaled(9.8f, 8.2f, 11.2f),
+        maxLines = 1,
       )
     }
 
@@ -2015,14 +2921,17 @@ private fun DashboardMacroBentoTile(
         color = PureWhite,
         fontFamily = JetBrainsMonoFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 18.sp,
-        lineHeight = 18.sp,
+        fontSize = metrics.spScaled(18f, 14.5f, 20.5f),
+        lineHeight = metrics.spScaled(18f, 14.5f, 20.5f),
+        maxLines = 1,
       )
       Text(
         text = " /${safeTarget}g",
         color = Zinc400,
         fontFamily = JetBrainsMonoFontFamily,
-        fontSize = 10.sp,
+        fontSize = metrics.spScaled(10f, 8.4f, 11.4f),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
         modifier = Modifier.padding(bottom = 1.dp),
       )
     }
