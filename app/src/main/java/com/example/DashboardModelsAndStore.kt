@@ -370,17 +370,46 @@ object FairNutrientEstimator {
 }
 
 /**
+ * Full daily telemetry & timeline record stored inside the user's local database,
+ * keyed by ISO date string (`yyyy-MM-dd`). Tracks all 6 daily pillars, targets,
+ * streak qualification, and chronological timeline entries for deep analytics & custom calendar inspection.
+ */
+@Immutable
+data class DailyHistoricalRecord(
+  val dayKey: String,
+  val stepsCount: Int = 0,
+  val targetStepsCount: Int = 10000,
+  val caloriesKcal: Int = 0,
+  val targetCaloriesKcal: Int = 2500,
+  val proteinGrams: Int = 0,
+  val targetProteinGrams: Int = 180,
+  val carbsGrams: Int = 0,
+  val targetCarbsGrams: Int = 250,
+  val fatsGrams: Int = 0,
+  val targetFatsGrams: Int = 70,
+  val hydrationMl: Int = 0,
+  val targetHydrationMl: Int = 3500,
+  val streakThresholdPercent: Int = 80,
+  val streakQualified: Boolean = false,
+  val isWorkoutDay: Boolean = false,
+  val timelineEntries: List<DashboardTimelineEntry> = emptyList(),
+  val updatedAtEpochMs: Long = System.currentTimeMillis(),
+)
+
+/**
  * Snapshot of the persisted Dashboard state (Saved Quick Items, Created Single Items for the
- * Meal Builder, Today's Timeline logs, and Streak counter).
+ * Meal Builder, Today's Timeline logs, Streak counter, and Complete Historical Day-by-Day Database).
  */
 @Immutable
 data class DashboardStoredData(
   val dayKey: String = DashboardTimeFormatter.currentDayKey(),
   val baseStreakDays: Int = 0,
   val lastCompletedStreakDayKey: String = "",
+  val manualStepsToday: Int = 0,
   val allCreatedSingleItems: List<SavedQuickNutritionItem> = emptyList(),
   val savedQuickItems: List<SavedQuickNutritionItem> = emptyList(),
   val todayTimelineEntries: List<DashboardTimelineEntry> = emptyList(),
+  val dailyHistoryMap: Map<String, DailyHistoricalRecord> = emptyMap(),
 )
 
 object DashboardLocalStore {
@@ -388,9 +417,11 @@ object DashboardLocalStore {
   private const val KEY_DAY_KEY = "dashboard_day_key"
   private const val KEY_BASE_STREAK_DAYS = "dashboard_base_streak_days"
   private const val KEY_LAST_COMPLETED_STREAK_DAY = "dashboard_last_completed_streak_day"
+  private const val KEY_MANUAL_STEPS_TODAY = "dashboard_manual_steps_today"
   private const val KEY_CREATED_SINGLE_ITEMS_JSON = "dashboard_created_single_items_json"
   private const val KEY_SAVED_QUICK_ITEMS_JSON = "dashboard_saved_quick_items_json"
   private const val KEY_TIMELINE_ENTRIES_JSON = "dashboard_timeline_entries_json"
+  private const val KEY_DAILY_HISTORY_MAP_JSON = "dashboard_daily_history_map_json"
 
   private fun prefs(context: Context): SharedPreferences =
     context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -401,24 +432,50 @@ object DashboardLocalStore {
     val storedDayKey = p.getString(KEY_DAY_KEY, todayKey) ?: todayKey
     val baseStreak = p.getInt(KEY_BASE_STREAK_DAYS, 0).coerceAtLeast(0)
     val lastStreakDay = p.getString(KEY_LAST_COMPLETED_STREAK_DAY, "") ?: ""
+    val storedManualSteps = p.getInt(KEY_MANUAL_STEPS_TODAY, 0).coerceAtLeast(0)
 
     val createdSingles = parseQuickItemsJson(p.getString(KEY_CREATED_SINGLE_ITEMS_JSON, "[]") ?: "[]")
     val savedQuick = parseQuickItemsJson(p.getString(KEY_SAVED_QUICK_ITEMS_JSON, "[]") ?: "[]")
+    val parsedStoredTimeline = parseTimelineJson(p.getString(KEY_TIMELINE_ENTRIES_JSON, "[]") ?: "[]")
+    val loadedHistoryMap = parseDailyHistoryMapJson(
+      p.getString(KEY_DAILY_HISTORY_MAP_JSON, "{}") ?: "{}",
+    ).toMutableMap()
 
-    // If the calendar day rolled over, today's timeline starts fresh at 0 while keeping saved items & streak
+    // If the calendar day rolled over, archive storedDayKey's timeline in dailyHistoryMap before starting fresh today
     val timelineEntries = if (storedDayKey == todayKey) {
-      parseTimelineJson(p.getString(KEY_TIMELINE_ENTRIES_JSON, "[]") ?: "[]")
+      parsedStoredTimeline
     } else {
-      emptyList()
+      if (parsedStoredTimeline.isNotEmpty() || storedManualSteps > 0) {
+        val existingPrev = loadedHistoryMap[storedDayKey]
+        val prevCal = parsedStoredTimeline.sumOf { it.caloriesKcal }.coerceAtLeast(0)
+        val prevPro = parsedStoredTimeline.sumOf { it.proteinGrams }.coerceAtLeast(0)
+        val prevCarb = parsedStoredTimeline.sumOf { it.carbsGrams }.coerceAtLeast(0)
+        val prevFat = parsedStoredTimeline.sumOf { it.fatsGrams }.coerceAtLeast(0)
+        val prevWat = parsedStoredTimeline.sumOf { it.hydrationMl }.coerceAtLeast(0)
+        loadedHistoryMap[storedDayKey] = (existingPrev ?: DailyHistoricalRecord(dayKey = storedDayKey)).copy(
+          stepsCount = max(existingPrev?.stepsCount ?: 0, storedManualSteps),
+          caloriesKcal = max(existingPrev?.caloriesKcal ?: 0, prevCal),
+          proteinGrams = max(existingPrev?.proteinGrams ?: 0, prevPro),
+          carbsGrams = max(existingPrev?.carbsGrams ?: 0, prevCarb),
+          fatsGrams = max(existingPrev?.fatsGrams ?: 0, prevFat),
+          hydrationMl = max(existingPrev?.hydrationMl ?: 0, prevWat),
+          timelineEntries = parsedStoredTimeline,
+          updatedAtEpochMs = System.currentTimeMillis(),
+        )
+      }
+      loadedHistoryMap[todayKey]?.timelineEntries ?: emptyList()
     }
+    val manualStepsToday = if (storedDayKey == todayKey) storedManualSteps else 0
 
     return DashboardStoredData(
       dayKey = todayKey,
       baseStreakDays = baseStreak,
       lastCompletedStreakDayKey = lastStreakDay,
+      manualStepsToday = manualStepsToday,
       allCreatedSingleItems = createdSingles,
       savedQuickItems = savedQuick,
       todayTimelineEntries = timelineEntries,
+      dailyHistoryMap = loadedHistoryMap,
     )
   }
 
@@ -427,21 +484,159 @@ object DashboardLocalStore {
       putString(KEY_DAY_KEY, data.dayKey)
       putInt(KEY_BASE_STREAK_DAYS, data.baseStreakDays.coerceAtLeast(0))
       putString(KEY_LAST_COMPLETED_STREAK_DAY, data.lastCompletedStreakDayKey)
+      putInt(KEY_MANUAL_STEPS_TODAY, data.manualStepsToday.coerceAtLeast(0))
       putString(KEY_CREATED_SINGLE_ITEMS_JSON, serializeQuickItemsJson(data.allCreatedSingleItems))
       putString(KEY_SAVED_QUICK_ITEMS_JSON, serializeQuickItemsJson(data.savedQuickItems))
       putString(KEY_TIMELINE_ENTRIES_JSON, serializeTimelineJson(data.todayTimelineEntries))
+      putString(KEY_DAILY_HISTORY_MAP_JSON, serializeDailyHistoryMapJson(data.dailyHistoryMap))
       apply()
     }
   }
 
   /**
-   * Factory Reset: Wipes all persisted dashboard logs, saved quick items, created items, and streaks.
+   * Synchronizes today's live telemetry (steps, macros, hydration, targets, streak qualification,
+   * and timeline entries) into the persistent `dailyHistoryMap` inside `DashboardStoredData`.
+   */
+  fun withSyncedTodayRecord(
+    data: DashboardStoredData,
+    liveSteps: Int,
+    targetSteps: Int,
+    targetCalories: Int,
+    targetProtein: Int,
+    targetCarbs: Int,
+    targetFats: Int,
+    targetWaterMl: Int,
+    streakThresholdPercent: Int,
+    streakQualified: Boolean,
+    isWorkoutDay: Boolean,
+  ): DashboardStoredData {
+    val todayKey = data.dayKey.ifBlank { DashboardTimeFormatter.currentDayKey() }
+    val entries = data.todayTimelineEntries
+    val loggedCal = entries.sumOf { it.caloriesKcal }.coerceAtLeast(0)
+    val loggedPro = entries.sumOf { it.proteinGrams }.coerceAtLeast(0)
+    val loggedCarb = entries.sumOf { it.carbsGrams }.coerceAtLeast(0)
+    val loggedFat = entries.sumOf { it.fatsGrams }.coerceAtLeast(0)
+    val loggedWater = entries.sumOf { it.hydrationMl }.coerceAtLeast(0)
+    val existingToday = data.dailyHistoryMap[todayKey]
+    val resolvedSteps = max(liveSteps.coerceAtLeast(0), existingToday?.stepsCount ?: 0)
+
+    val updatedRecord = DailyHistoricalRecord(
+      dayKey = todayKey,
+      stepsCount = resolvedSteps,
+      targetStepsCount = targetSteps.coerceAtLeast(1000),
+      caloriesKcal = loggedCal,
+      targetCaloriesKcal = targetCalories.coerceAtLeast(1000),
+      proteinGrams = loggedPro,
+      targetProteinGrams = targetProtein.coerceAtLeast(30),
+      carbsGrams = loggedCarb,
+      targetCarbsGrams = targetCarbs.coerceAtLeast(40),
+      fatsGrams = loggedFat,
+      targetFatsGrams = targetFats.coerceAtLeast(20),
+      hydrationMl = loggedWater,
+      targetHydrationMl = targetWaterMl.coerceAtLeast(500),
+      streakThresholdPercent = streakThresholdPercent,
+      streakQualified = streakQualified,
+      isWorkoutDay = isWorkoutDay,
+      timelineEntries = entries,
+      updatedAtEpochMs = System.currentTimeMillis(),
+    )
+    val updatedMap = data.dailyHistoryMap.toMutableMap()
+    updatedMap[todayKey] = updatedRecord
+    return data.copy(dailyHistoryMap = updatedMap)
+  }
+
+  /**
+   * Updates or inserts a specific date's `DailyHistoricalRecord` in the user's local database
+   * (also keeps `todayTimelineEntries` in sync if `dayKey == data.dayKey`).
+   */
+  fun withUpdatedDayRecord(
+    data: DashboardStoredData,
+    record: DailyHistoricalRecord,
+  ): DashboardStoredData {
+    val updatedMap = data.dailyHistoryMap.toMutableMap()
+    updatedMap[record.dayKey] = record
+    return if (record.dayKey == data.dayKey) {
+      data.copy(
+        todayTimelineEntries = record.timelineEntries,
+        dailyHistoryMap = updatedMap,
+      )
+    } else {
+      data.copy(dailyHistoryMap = updatedMap)
+    }
+  }
+
+  /**
+   * Factory Reset: Wipes all persisted dashboard logs, saved quick items, created items, history, and streaks.
    */
   fun clearAll(context: Context) {
     prefs(context).edit().clear().commit()
   }
 
-  private fun serializeQuickItemsJson(items: List<SavedQuickNutritionItem>): String {
+  internal fun serializeDailyHistoryMapJson(map: Map<String, DailyHistoricalRecord>): String {
+    val root = JSONObject()
+    for ((dayKey, rec) in map) {
+      if (dayKey.isBlank()) continue
+      val obj = JSONObject().apply {
+        put("dayKey", rec.dayKey)
+        put("stepsCount", rec.stepsCount)
+        put("targetStepsCount", rec.targetStepsCount)
+        put("caloriesKcal", rec.caloriesKcal)
+        put("targetCaloriesKcal", rec.targetCaloriesKcal)
+        put("proteinGrams", rec.proteinGrams)
+        put("targetProteinGrams", rec.targetProteinGrams)
+        put("carbsGrams", rec.carbsGrams)
+        put("targetCarbsGrams", rec.targetCarbsGrams)
+        put("fatsGrams", rec.fatsGrams)
+        put("targetFatsGrams", rec.targetFatsGrams)
+        put("hydrationMl", rec.hydrationMl)
+        put("targetHydrationMl", rec.targetHydrationMl)
+        put("streakThresholdPercent", rec.streakThresholdPercent)
+        put("streakQualified", rec.streakQualified)
+        put("isWorkoutDay", rec.isWorkoutDay)
+        put("timelineEntriesJson", serializeTimelineJson(rec.timelineEntries))
+        put("updatedAtEpochMs", rec.updatedAtEpochMs)
+      }
+      root.put(dayKey, obj)
+    }
+    return root.toString()
+  }
+
+  internal fun parseDailyHistoryMapJson(rawJson: String): Map<String, DailyHistoricalRecord> {
+    return runCatching {
+      val root = JSONObject(rawJson)
+      val map = LinkedHashMap<String, DailyHistoricalRecord>()
+      val keys = root.keys()
+      while (keys.hasNext()) {
+        val key = keys.next()
+        val obj = root.optJSONObject(key) ?: continue
+        val timelineRaw = obj.optString("timelineEntriesJson", "[]")
+        val parsedTimeline = parseTimelineJson(timelineRaw)
+        map[key] = DailyHistoricalRecord(
+          dayKey = obj.optString("dayKey", key),
+          stepsCount = obj.optInt("stepsCount", 0).coerceAtLeast(0),
+          targetStepsCount = obj.optInt("targetStepsCount", 10000).coerceAtLeast(1000),
+          caloriesKcal = obj.optInt("caloriesKcal", parsedTimeline.sumOf { it.caloriesKcal }).coerceAtLeast(0),
+          targetCaloriesKcal = obj.optInt("targetCaloriesKcal", 2500).coerceAtLeast(1000),
+          proteinGrams = obj.optInt("proteinGrams", parsedTimeline.sumOf { it.proteinGrams }).coerceAtLeast(0),
+          targetProteinGrams = obj.optInt("targetProteinGrams", 180).coerceAtLeast(30),
+          carbsGrams = obj.optInt("carbsGrams", parsedTimeline.sumOf { it.carbsGrams }).coerceAtLeast(0),
+          targetCarbsGrams = obj.optInt("targetCarbsGrams", 250).coerceAtLeast(40),
+          fatsGrams = obj.optInt("fatsGrams", parsedTimeline.sumOf { it.fatsGrams }).coerceAtLeast(0),
+          targetFatsGrams = obj.optInt("targetFatsGrams", 70).coerceAtLeast(20),
+          hydrationMl = obj.optInt("hydrationMl", parsedTimeline.sumOf { it.hydrationMl }).coerceAtLeast(0),
+          targetHydrationMl = obj.optInt("targetHydrationMl", 3500).coerceAtLeast(500),
+          streakThresholdPercent = obj.optInt("streakThresholdPercent", 80).coerceIn(50, 100),
+          streakQualified = obj.optBoolean("streakQualified", false),
+          isWorkoutDay = obj.optBoolean("isWorkoutDay", false),
+          timelineEntries = parsedTimeline,
+          updatedAtEpochMs = obj.optLong("updatedAtEpochMs", System.currentTimeMillis()),
+        )
+      }
+      map
+    }.getOrDefault(emptyMap())
+  }
+
+  internal fun serializeQuickItemsJson(items: List<SavedQuickNutritionItem>): String {
     val arr = JSONArray()
     for (item in items) {
       val obj = JSONObject().apply {
@@ -467,7 +662,7 @@ object DashboardLocalStore {
     return arr.toString()
   }
 
-  private fun parseQuickItemsJson(rawJson: String): List<SavedQuickNutritionItem> {
+  internal fun parseQuickItemsJson(rawJson: String): List<SavedQuickNutritionItem> {
     return runCatching {
       val arr = JSONArray(rawJson)
       val list = ArrayList<SavedQuickNutritionItem>(arr.length())
@@ -513,7 +708,7 @@ object DashboardLocalStore {
     }.getOrDefault(emptyList())
   }
 
-  private fun serializeTimelineJson(entries: List<DashboardTimelineEntry>): String {
+  internal fun serializeTimelineJson(entries: List<DashboardTimelineEntry>): String {
     val arr = JSONArray()
     for (e in entries) {
       val obj = JSONObject().apply {
@@ -538,7 +733,7 @@ object DashboardLocalStore {
     return arr.toString()
   }
 
-  private fun parseTimelineJson(rawJson: String): List<DashboardTimelineEntry> {
+  internal fun parseTimelineJson(rawJson: String): List<DashboardTimelineEntry> {
     return runCatching {
       val arr = JSONArray(rawJson)
       val list = ArrayList<DashboardTimelineEntry>(arr.length())
@@ -578,3 +773,352 @@ object DashboardLocalStore {
     }.getOrDefault(emptyList())
   }
 }
+
+// ============================================================================
+// COMPLETE DATABASE BACKUP, RECOVERY VAULT & RESTORE ENGINE
+// Packages & restores ALL data across Steps 01–04 (BioSyncLocalStore) AND
+// Dashboard / Quick Actions / Historical Calendar Timelines (DashboardLocalStore).
+// ============================================================================
+
+@Immutable
+data class BioSyncBackupMeta(
+  val createdAtEpochMs: Long,
+  val formattedTimestamp: String,
+  val subjectName: String,
+  val ageYears: Int,
+  val streakDays: Int,
+  val savedQuickItemsCount: Int,
+  val createdSingleItemsCount: Int,
+  val historicalDaysCount: Int,
+  val totalTimelineLogsCount: Int,
+  val targetCaloriesKcal: Int,
+  val targetProteinGrams: Int,
+  val targetHydrationMl: Int,
+  val targetStepsCount: Int,
+)
+
+@Immutable
+data class BioSyncFullBackupBundle(
+  val meta: BioSyncBackupMeta,
+  val storedState: BioSyncStoredState,
+  val dashboardData: DashboardStoredData,
+)
+
+object BioSyncBackupManager {
+  private const val VAULT_PREFS_NAME = "biosync_recovery_vault_v1"
+  private const val KEY_VAULT_BACKUP_JSON = "vault_full_backup_json"
+  private const val KEY_VAULT_CREATED_AT_MS = "vault_created_at_epoch_ms"
+
+  private fun vaultPrefs(context: Context): SharedPreferences =
+    context.applicationContext.getSharedPreferences(VAULT_PREFS_NAME, Context.MODE_PRIVATE)
+
+  fun formatBackupTimestamp(epochMs: Long): String {
+    val sdf = SimpleDateFormat("MMM dd, yyyy • hh:mm a", Locale.US)
+    return sdf.format(Date(epochMs))
+  }
+
+  /**
+   * Serializes the entire on-device database (`BioSyncStoredState` + `DashboardStoredData`)
+   * into a self-contained JSON string for file export, clipboard copy, or Recovery Vault storage.
+   */
+  fun exportFullBackupJson(context: Context): String {
+    val profile = BioSyncLocalStore.load(context)
+    val dash = DashboardLocalStore.load(context)
+    val nowMs = System.currentTimeMillis()
+
+    val profileObj = JSONObject().apply {
+      put("subjectName", profile.subjectName)
+      put("selectedSex", profile.selectedSex)
+      put("birthDay", profile.birthDay)
+      put("birthMonthZeroBased", profile.birthMonthZeroBased)
+      put("birthYear", profile.birthYear)
+      put("ageYears", profile.ageYears)
+      put("heightCm", profile.heightCm.toDouble())
+      put("heightUnit", profile.heightUnit.name)
+      put("weightKg", profile.weightKg.toDouble())
+      put("weightUnit", profile.weightUnit.name)
+      put("activityLevel", profile.activityLevel.name)
+      put("occupationLoad", profile.occupationLoad.name)
+      put("objective", profile.objective.name)
+      put("trainingModality", profile.trainingModality.name)
+      put("workoutDuration", profile.workoutDuration.name)
+      put("experienceLevel", profile.experienceLevel.name)
+      put("targetPace", profile.targetPace.name)
+      put("dayOne", profile.dayOne.name)
+      put("selectedWorkoutDaysCsv", profile.selectedWorkoutDays.joinToString(",") { it.name })
+      put("mealFrequency", profile.mealFrequency.name)
+      put("caffeineAlcoholYes", profile.caffeineAlcoholYes)
+      put("sodiumFrequency", profile.sodiumFrequency.name)
+      put("streakThresholdPercent", profile.streakThreshold.percentage)
+      put("climateBand", profile.climateBand.name)
+      put("bodyFatOverrideEnabled", profile.bodyFatOverrideEnabled)
+      put("bodyFatPercent", profile.bodyFatPercent.toDouble())
+      put("isCustomTargetsMode", profile.isCustomTargetsMode)
+      put("customCaloriesKcal", profile.customCaloriesKcal)
+      put("customProteinGrams", profile.customProteinGrams)
+      put("customCarbsGrams", profile.customCarbsGrams)
+      put("customFatsGrams", profile.customFatsGrams)
+      put("customHydrationMl", profile.customHydrationMl)
+      put("customStepsCount", profile.customStepsCount)
+      put("protocolLockedIn", profile.protocolLockedIn)
+      put("wakeUpHour", profile.wakeUpHour)
+      put("wakeUpMinute", profile.wakeUpMinute)
+      put("sleepHour", profile.sleepHour)
+      put("sleepMinute", profile.sleepMinute)
+      put("protocolLockedAtEpochMillis", profile.protocolLockedAtEpochMillis)
+      put("dayOneAnchorStartEpochMillis", profile.dayOneAnchorStartEpochMillis)
+      put("dayOneInitialCountdownCompleted", profile.dayOneInitialCountdownCompleted)
+      put("dayOneStartNotificationSent", profile.dayOneStartNotificationSent)
+      put("decidedDailyStepsGoal", profile.decidedDailyStepsGoal)
+    }
+
+    val dashObj = JSONObject().apply {
+      put("dayKey", dash.dayKey)
+      put("baseStreakDays", dash.baseStreakDays)
+      put("lastCompletedStreakDayKey", dash.lastCompletedStreakDayKey)
+      put("manualStepsToday", dash.manualStepsToday)
+      put("allCreatedSingleItemsJson", DashboardLocalStore.serializeQuickItemsJson(dash.allCreatedSingleItems))
+      put("savedQuickItemsJson", DashboardLocalStore.serializeQuickItemsJson(dash.savedQuickItems))
+      put("todayTimelineEntriesJson", DashboardLocalStore.serializeTimelineJson(dash.todayTimelineEntries))
+      put("dailyHistoryMapJson", DashboardLocalStore.serializeDailyHistoryMapJson(dash.dailyHistoryMap))
+    }
+
+    val root = JSONObject().apply {
+      put("schema", "BIOSYNC_FULL_BACKUP_V1")
+      put("createdAtEpochMs", nowMs)
+      put("profile", profileObj)
+      put("dashboard", dashObj)
+    }
+    return root.toString(2)
+  }
+
+  /**
+   * Saves a complete snapshot of the user's current database into the independent Recovery Vault
+   * (which survives Factory Resets so accidental resets can be 1-tap recovered).
+   */
+  fun saveSnapshotToRecoveryVault(context: Context): BioSyncBackupMeta {
+    val json = exportFullBackupJson(context)
+    val nowMs = System.currentTimeMillis()
+    vaultPrefs(context).edit()
+      .putString(KEY_VAULT_BACKUP_JSON, json)
+      .putLong(KEY_VAULT_CREATED_AT_MS, nowMs)
+      .commit()
+    return parseBackupBundle(json).getOrNull()?.meta ?: BioSyncBackupMeta(
+      createdAtEpochMs = nowMs,
+      formattedTimestamp = formatBackupTimestamp(nowMs),
+      subjectName = BioSyncLocalStore.load(context).subjectName,
+      ageYears = BioSyncLocalStore.load(context).ageYears,
+      streakDays = DashboardLocalStore.load(context).baseStreakDays,
+      savedQuickItemsCount = DashboardLocalStore.load(context).savedQuickItems.size,
+      createdSingleItemsCount = DashboardLocalStore.load(context).allCreatedSingleItems.size,
+      historicalDaysCount = DashboardLocalStore.load(context).dailyHistoryMap.size,
+      totalTimelineLogsCount = DashboardLocalStore.load(context).todayTimelineEntries.size,
+      targetCaloriesKcal = BioSyncLocalStore.load(context).customCaloriesKcal,
+      targetProteinGrams = BioSyncLocalStore.load(context).customProteinGrams,
+      targetHydrationMl = BioSyncLocalStore.load(context).customHydrationMl,
+      targetStepsCount = BioSyncLocalStore.load(context).customStepsCount,
+    )
+  }
+
+  fun getRecoveryVaultJson(context: Context): String? {
+    val raw = vaultPrefs(context).getString(KEY_VAULT_BACKUP_JSON, null)
+    return if (raw.isNullOrBlank()) null else raw
+  }
+
+  fun getRecoveryVaultMeta(context: Context): BioSyncBackupMeta? {
+    val raw = getRecoveryVaultJson(context) ?: return null
+    return parseBackupBundle(raw).getOrNull()?.meta
+  }
+
+  fun clearRecoveryVault(context: Context) {
+    vaultPrefs(context).edit().clear().commit()
+  }
+
+  /**
+   * Parses a backup JSON string into a strongly-typed `BioSyncFullBackupBundle`.
+   */
+  fun parseBackupBundle(rawJson: String): Result<BioSyncFullBackupBundle> {
+    return runCatching {
+      val trimmed = rawJson.trim()
+      require(trimmed.startsWith("{") && trimmed.endsWith("}")) {
+        "Invalid backup format: expected a JSON backup object."
+      }
+      val root = JSONObject(trimmed)
+      val profileObj = root.optJSONObject("profile")
+        ?: throw IllegalArgumentException("Backup is missing 'profile' section.")
+      val dashObj = root.optJSONObject("dashboard") ?: JSONObject()
+
+      val createdAtMs = root.optLong("createdAtEpochMs", System.currentTimeMillis())
+      val defaults = BioSyncStoredState()
+
+      val activityLevel = runCatching {
+        ActivityLevelOption.valueOf(profileObj.optString("activityLevel", defaults.activityLevel.name))
+      }.getOrDefault(defaults.activityLevel)
+
+      val workoutDaysCsv = profileObj.optString("selectedWorkoutDaysCsv", "")
+      val parsedWorkoutDays = if (activityLevel == ActivityLevelOption.SEDENTARY) {
+        emptySet()
+      } else {
+        val set = workoutDaysCsv.split(",")
+          .mapNotNull { token ->
+            val t = token.trim()
+            if (t.isEmpty()) null else runCatching { DayOfWeekOption.valueOf(t) }.getOrNull()
+          }
+          .toSet()
+        if (set.isEmpty()) DailyTargetsEngine.defaultWorkoutDaysFor(activityLevel) else set
+      }
+
+      val restoredProfile = BioSyncStoredState(
+        subjectName = profileObj.optString("subjectName", defaults.subjectName).ifBlank { defaults.subjectName },
+        selectedSex = profileObj.optString("selectedSex", defaults.selectedSex),
+        birthDay = profileObj.optInt("birthDay", defaults.birthDay).coerceIn(1, 31),
+        birthMonthZeroBased = profileObj.optInt("birthMonthZeroBased", defaults.birthMonthZeroBased).coerceIn(0, 11),
+        birthYear = profileObj.optInt("birthYear", defaults.birthYear).coerceIn(1900, 2026),
+        ageYears = profileObj.optInt("ageYears", defaults.ageYears).coerceIn(5, 120),
+        heightCm = profileObj.optDouble("heightCm", defaults.heightCm.toDouble()).toFloat().coerceIn(80f, 260f),
+        heightUnit = runCatching {
+          HeightUnit.valueOf(profileObj.optString("heightUnit", defaults.heightUnit.name))
+        }.getOrDefault(defaults.heightUnit),
+        weightKg = profileObj.optDouble("weightKg", defaults.weightKg.toDouble()).toFloat().coerceIn(20f, 350f),
+        weightUnit = runCatching {
+          WeightUnit.valueOf(profileObj.optString("weightUnit", defaults.weightUnit.name))
+        }.getOrDefault(defaults.weightUnit),
+        activityLevel = activityLevel,
+        occupationLoad = runCatching {
+          OccupationLoadOption.valueOf(profileObj.optString("occupationLoad", defaults.occupationLoad.name))
+        }.getOrDefault(defaults.occupationLoad),
+        objective = runCatching {
+          BlueprintObjectiveOption.valueOf(profileObj.optString("objective", defaults.objective.name))
+        }.getOrDefault(defaults.objective),
+        trainingModality = runCatching {
+          TrainingModalityOption.valueOf(profileObj.optString("trainingModality", defaults.trainingModality.name))
+        }.getOrDefault(defaults.trainingModality),
+        workoutDuration = runCatching {
+          WorkoutDurationOption.valueOf(profileObj.optString("workoutDuration", defaults.workoutDuration.name))
+        }.getOrDefault(defaults.workoutDuration),
+        experienceLevel = runCatching {
+          ExperienceLevelOption.valueOf(profileObj.optString("experienceLevel", defaults.experienceLevel.name))
+        }.getOrDefault(defaults.experienceLevel),
+        targetPace = runCatching {
+          TargetPaceOption.valueOf(profileObj.optString("targetPace", defaults.targetPace.name))
+        }.getOrDefault(defaults.targetPace),
+        dayOne = runCatching {
+          DayOfWeekOption.valueOf(profileObj.optString("dayOne", defaults.dayOne.name))
+        }.getOrDefault(defaults.dayOne),
+        selectedWorkoutDays = parsedWorkoutDays,
+        mealFrequency = runCatching {
+          MealFrequencyOption.valueOf(profileObj.optString("mealFrequency", defaults.mealFrequency.name))
+        }.getOrDefault(defaults.mealFrequency),
+        caffeineAlcoholYes = profileObj.optBoolean("caffeineAlcoholYes", defaults.caffeineAlcoholYes),
+        sodiumFrequency = runCatching {
+          SodiumFrequencyOption.valueOf(profileObj.optString("sodiumFrequency", defaults.sodiumFrequency.name))
+        }.getOrDefault(defaults.sodiumFrequency),
+        streakThreshold = StreakThresholdOption.fromPercent(
+          profileObj.optInt("streakThresholdPercent", defaults.streakThreshold.percentage),
+        ),
+        climateBand = runCatching {
+          ClimateBandOption.valueOf(profileObj.optString("climateBand", defaults.climateBand.name))
+        }.getOrDefault(defaults.climateBand),
+        bodyFatOverrideEnabled = profileObj.optBoolean("bodyFatOverrideEnabled", defaults.bodyFatOverrideEnabled),
+        bodyFatPercent = profileObj.optDouble("bodyFatPercent", defaults.bodyFatPercent.toDouble()).toFloat().coerceIn(4f, 55f),
+        isCustomTargetsMode = profileObj.optBoolean("isCustomTargetsMode", defaults.isCustomTargetsMode),
+        customCaloriesKcal = profileObj.optInt("customCaloriesKcal", defaults.customCaloriesKcal).coerceIn(800, 7500),
+        customProteinGrams = profileObj.optInt("customProteinGrams", defaults.customProteinGrams).coerceIn(20, 450),
+        customCarbsGrams = profileObj.optInt("customCarbsGrams", defaults.customCarbsGrams).coerceIn(0, 1000),
+        customFatsGrams = profileObj.optInt("customFatsGrams", defaults.customFatsGrams).coerceIn(10, 300),
+        customHydrationMl = profileObj.optInt("customHydrationMl", defaults.customHydrationMl).coerceIn(500, 8000),
+        customStepsCount = profileObj.optInt("customStepsCount", defaults.customStepsCount).coerceIn(1000, 35000),
+        protocolLockedIn = profileObj.optBoolean("protocolLockedIn", true),
+        wakeUpHour = profileObj.optInt("wakeUpHour", defaults.wakeUpHour).coerceIn(0, 23),
+        wakeUpMinute = profileObj.optInt("wakeUpMinute", defaults.wakeUpMinute).coerceIn(0, 59),
+        sleepHour = profileObj.optInt("sleepHour", defaults.sleepHour).coerceIn(0, 23),
+        sleepMinute = profileObj.optInt("sleepMinute", defaults.sleepMinute).coerceIn(0, 59),
+        protocolLockedAtEpochMillis = profileObj.optLong("protocolLockedAtEpochMillis", System.currentTimeMillis()),
+        dayOneAnchorStartEpochMillis = profileObj.optLong("dayOneAnchorStartEpochMillis", 0L),
+        dayOneInitialCountdownCompleted = profileObj.optBoolean("dayOneInitialCountdownCompleted", true),
+        dayOneStartNotificationSent = profileObj.optBoolean("dayOneStartNotificationSent", true),
+        decidedDailyStepsGoal = profileObj.optInt("decidedDailyStepsGoal", defaults.customStepsCount),
+      )
+
+      val todayKey = DashboardTimeFormatter.currentDayKey()
+      val createdSingles = DashboardLocalStore.parseQuickItemsJson(
+        dashObj.optString("allCreatedSingleItemsJson", "[]"),
+      )
+      val savedQuick = DashboardLocalStore.parseQuickItemsJson(
+        dashObj.optString("savedQuickItemsJson", "[]"),
+      )
+      val todayEntries = DashboardLocalStore.parseTimelineJson(
+        dashObj.optString("todayTimelineEntriesJson", "[]"),
+      )
+      val historyMap = DashboardLocalStore.parseDailyHistoryMapJson(
+        dashObj.optString("dailyHistoryMapJson", "{}"),
+      ).toMutableMap()
+
+      // Ensure today's timeline entries are also available if the backup was taken today
+      val resolvedTodayEntries = if (todayEntries.isNotEmpty()) {
+        todayEntries
+      } else {
+        historyMap[todayKey]?.timelineEntries ?: emptyList()
+      }
+
+      val restoredDash = DashboardStoredData(
+        dayKey = todayKey,
+        baseStreakDays = dashObj.optInt("baseStreakDays", 0).coerceAtLeast(0),
+        lastCompletedStreakDayKey = dashObj.optString("lastCompletedStreakDayKey", ""),
+        manualStepsToday = dashObj.optInt("manualStepsToday", 0).coerceAtLeast(0),
+        allCreatedSingleItems = createdSingles,
+        savedQuickItems = savedQuick,
+        todayTimelineEntries = resolvedTodayEntries,
+        dailyHistoryMap = historyMap,
+      )
+
+      val totalTimelineLogs = max(
+        resolvedTodayEntries.size,
+        historyMap.values.sumOf { it.timelineEntries.size },
+      )
+
+      val meta = BioSyncBackupMeta(
+        createdAtEpochMs = createdAtMs,
+        formattedTimestamp = formatBackupTimestamp(createdAtMs),
+        subjectName = restoredProfile.subjectName,
+        ageYears = restoredProfile.ageYears,
+        streakDays = restoredDash.baseStreakDays,
+        savedQuickItemsCount = restoredDash.savedQuickItems.size,
+        createdSingleItemsCount = restoredDash.allCreatedSingleItems.size,
+        historicalDaysCount = max(1, restoredDash.dailyHistoryMap.size),
+        totalTimelineLogsCount = totalTimelineLogs,
+        targetCaloriesKcal = restoredProfile.customCaloriesKcal,
+        targetProteinGrams = restoredProfile.customProteinGrams,
+        targetHydrationMl = restoredProfile.customHydrationMl,
+        targetStepsCount = restoredProfile.customStepsCount,
+      )
+
+      BioSyncFullBackupBundle(
+        meta = meta,
+        storedState = restoredProfile,
+        dashboardData = restoredDash,
+      )
+    }
+  }
+
+  /**
+   * Parses and immediately persists the restored bundle into both `BioSyncLocalStore`
+   * and `DashboardLocalStore` (and updates the Recovery Vault snapshot).
+   */
+  fun importAndPersistBackupJson(
+    context: Context,
+    rawJson: String,
+  ): Result<BioSyncFullBackupBundle> {
+    val parsedResult = parseBackupBundle(rawJson)
+    parsedResult.onSuccess { bundle ->
+      BioSyncLocalStore.save(context, bundle.storedState)
+      DashboardLocalStore.save(context, bundle.dashboardData)
+      vaultPrefs(context).edit()
+        .putString(KEY_VAULT_BACKUP_JSON, rawJson)
+        .putLong(KEY_VAULT_CREATED_AT_MS, bundle.meta.createdAtEpochMs)
+        .apply()
+    }
+    return parsedResult
+  }
+}
+

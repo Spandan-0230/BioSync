@@ -327,10 +327,11 @@ private fun computeCalibrationMetrics(
     return ((base * rawScale).coerceIn(minSp, maxSp) * fontCompensation).sp
   }
 
-  val contentMaxWidth = if (w >= 600f) {
-    (w * 0.78f).coerceIn(450f, 580f).dp
-  } else {
-    w.dp
+  val contentMaxWidth = when {
+    w >= 1100f -> (w * 0.84f).coerceIn(760f, 1020f).dp
+    w >= 840f -> (w * 0.82f).coerceIn(640f, 840f).dp
+    w >= 600f -> (w * 0.80f).coerceIn(500f, 660f).dp
+    else -> w.dp
   }
 
   // Resolution-adaptive logical gaps between every section on the Profile page:
@@ -1178,7 +1179,7 @@ private fun FullNameField(
   ) {
     Row(
       modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
+      horizontalArrangement = Arrangement.Start,
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Text(
@@ -1188,36 +1189,6 @@ private fun FullNameField(
         fontWeight = FontWeight.Medium,
         fontSize = metrics.spScaled(12.4f, 11.2f, 14.8f),
       )
-      // Automatic ID Badge presented at the top right corner of the Full Name section
-      Row(
-        modifier = Modifier
-          .clip(RoundedCornerShape(6.dp))
-          .background(Color(0xFF141419))
-          .border(
-            width = 1.dp,
-            color = if (isNameVerified) PureWhite.copy(alpha = 0.28f) else Zinc800,
-            shape = RoundedCornerShape(6.dp),
-          )
-          .padding(horizontal = 8.dp, vertical = 3.dp)
-          .testTag("profile_fullname_top_right_id_badge"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-      ) {
-        Box(
-          modifier = Modifier
-            .size(4.5.dp)
-            .clip(CircleShape)
-            .background(if (isNameVerified) PureWhite else Zinc600),
-        )
-        Text(
-          text = if (isNameVerified) "ID • $subjectInitials" else "ID • UNV",
-          color = if (isNameVerified) PureWhite else Zinc500,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.SemiBold,
-          fontSize = metrics.spScaled(9.4f, 8.2f, 10.8f),
-          letterSpacing = 0.7.sp,
-        )
-      }
     }
 
     // Architectural Single-Block Identity Field (strictly letters & spaces; blocks numbers/symbols)

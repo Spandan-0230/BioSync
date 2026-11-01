@@ -55,11 +55,12 @@ enum class OccupationLoadOption(
 }
 
 /**
- * Ambient Climate / Temperature Band.
- * Automatically derived from the device calendar (will sync with device weather).
+ * Ambient Area Temperature / Climate Band.
+ * User-selectable on Step 04 & Settings (with smart seasonal default) to calibrate daily thermal hydration and sweat rate.
  */
 enum class ClimateBandOption(
   val tempRangeLabel: String,
+  val tempFahrenheitLabel: String,
   val seasonName: String,
   val baselineWaterAddMl: Int,
   val sweatRateMultiplier: Float,
@@ -67,43 +68,48 @@ enum class ClimateBandOption(
   val accentColor: Color,
 ) {
   COOL_MILD(
-    tempRangeLabel = "< 25°C",
-    seasonName = "Cool / Winter",
+    tempRangeLabel = "< 20°C",
+    tempFahrenheitLabel = "< 68°F",
+    seasonName = "Cool / Chilly",
     baselineWaterAddMl = 0,
-    sweatRateMultiplier = 1.00f,
-    representativeTempC = 22,
+    sweatRateMultiplier = 0.92f,
+    representativeTempC = 17,
     accentColor = Color(0xFF7BE3FF),
   ),
   WARM(
-    tempRangeLabel = "25–29.9°C",
-    seasonName = "Warm / Monsoon",
+    tempRangeLabel = "20–25°C",
+    tempFahrenheitLabel = "68–77°F",
+    seasonName = "Temperate / Mild",
     baselineWaterAddMl = 250,
     sweatRateMultiplier = 1.00f,
-    representativeTempC = 28,
+    representativeTempC = 23,
     accentColor = Color(0xFF34D399),
   ),
   HOT(
-    tempRangeLabel = "30–34.9°C",
-    seasonName = "Hot / Post-Monsoon",
-    baselineWaterAddMl = 400,
-    sweatRateMultiplier = 1.25f,
-    representativeTempC = 32,
+    tempRangeLabel = "26–30°C",
+    tempFahrenheitLabel = "79–86°F",
+    seasonName = "Warm / Humid",
+    baselineWaterAddMl = 500,
+    sweatRateMultiplier = 1.15f,
+    representativeTempC = 28,
     accentColor = Color(0xFFFBBF24),
   ),
   VERY_HOT(
-    tempRangeLabel = "35–39.9°C",
-    seasonName = "Peak Summer",
-    baselineWaterAddMl = 650,
-    sweatRateMultiplier = 1.25f,
-    representativeTempC = 37,
+    tempRangeLabel = "31–35°C",
+    tempFahrenheitLabel = "88–95°F",
+    seasonName = "Hot / Summer",
+    baselineWaterAddMl = 800,
+    sweatRateMultiplier = 1.28f,
+    representativeTempC = 33,
     accentColor = Color(0xFFFF7A29),
   ),
   EXTREME_HEAT(
-    tempRangeLabel = "≥ 40°C",
-    seasonName = "Heatwave",
-    baselineWaterAddMl = 900,
-    sweatRateMultiplier = 1.25f,
-    representativeTempC = 41,
+    tempRangeLabel = "> 35°C",
+    tempFahrenheitLabel = "> 95°F",
+    seasonName = "Tropical / Heatwave",
+    baselineWaterAddMl = 1150,
+    sweatRateMultiplier = 1.42f,
+    representativeTempC = 38,
     accentColor = Color(0xFFF43F5E),
   ),
   ;
@@ -113,8 +119,8 @@ enum class ClimateBandOption(
       val monthZeroBased = Calendar.getInstance().get(Calendar.MONTH)
       return when (monthZeroBased) {
         Calendar.DECEMBER, Calendar.JANUARY -> COOL_MILD
-        Calendar.FEBRUARY, Calendar.JULY, Calendar.AUGUST, Calendar.NOVEMBER -> WARM
-        Calendar.MARCH, Calendar.SEPTEMBER, Calendar.OCTOBER -> HOT
+        Calendar.FEBRUARY, Calendar.NOVEMBER -> WARM
+        Calendar.MARCH, Calendar.JULY, Calendar.AUGUST, Calendar.SEPTEMBER, Calendar.OCTOBER -> HOT
         Calendar.APRIL, Calendar.MAY, Calendar.JUNE -> VERY_HOT
         else -> HOT
       }
@@ -223,6 +229,7 @@ data class DailyTargetsCalculationReport(
   val basePal: Float,
   val occupationPalAddOn: Float,
   val teenPalAddOn: Float,
+  val sessionEatPalAddOn: Float = 0f,
   val totalActivityFactor: Float,
   val tdeeKcalExact: Float,
   val tdeeKcalRounded: Int,
@@ -267,11 +274,14 @@ data class DailyTargetsCalculationReport(
 
   // Hydration (ml/day)
   val baseWaterMl: Int,
+  val anabolicAndProteinWaterAddMl: Int = 0,
   val climateWaterAddMl: Int,
   val occupationWaterAddMl: Int,
   val caffeineWaterAddMl: Int,
   val sodiumWaterAddMl: Int,
   val exerciseWaterAddOnWorkoutDayMl: Int,
+  val workoutDayWaterMl: Int = 0,
+  val restDayWaterMl: Int = 0,
   val primaryRecommendedWaterMl: Int,
   val waterFloorMl: Int,
   val waterCeilingMl: Int,
@@ -385,10 +395,17 @@ object DailyTargetsEngine {
 
     val referenceWeightKg = 25f * heightMeters * heightMeters
     val hasValidBodyFat = bodyFatPercentOverride != null && bodyFatPercentOverride in 4f..60f
-    val isEffectiveWeightAdjusted = !isTeen && !isUnder13 && !hasValidBodyFat && bmi > 27.0f
-    val effectiveWeightKg = if (isEffectiveWeightAdjusted) {
+    val isEffectiveWeightAdjusted: Boolean
+    val effectiveWeightKg: Float = if (hasValidBodyFat && bodyFatPercentOverride != null) {
+      val lbmFromBf = safeWeightKg * (1f - bodyFatPercentOverride / 100f)
+      val healthyBfRef = if (isMale) 0.15f else 0.23f
+      isEffectiveWeightAdjusted = bmi > 27.0f || bodyFatPercentOverride > (if (isMale) 24f else 32f)
+      (lbmFromBf / (1f - healthyBfRef)).coerceIn(35f, safeWeightKg * 1.05f)
+    } else if (!isTeen && !isUnder13 && bmi > 27.0f) {
+      isEffectiveWeightAdjusted = true
       referenceWeightKg + 0.25f * (safeWeightKg - referenceWeightKg)
     } else {
+      isEffectiveWeightAdjusted = false
       safeWeightKg
     }
 
@@ -500,37 +517,61 @@ object DailyTargetsEngine {
     val trainingDaysPerWeek = effectiveWorkoutDays.size.coerceIn(0, 7)
     val restDaysPerWeek = (7 - trainingDaysPerWeek).coerceIn(0, 7)
 
-    // ── TDEE (Total Daily Energy Expenditure) ──────────────────────────────
+    // ── TDEE (Total Daily Energy Expenditure: BMR + NEAT + Occupation + Workout EAT) ──
+    val isYoungAdult18To25 = safeAge in 18..25
     val basePal = when (activityLevel) {
       ActivityLevelOption.SEDENTARY -> 1.200f
       ActivityLevelOption.LIGHT -> when (trainingDaysPerWeek) {
         1 -> 1.325f
-        2 -> 1.350f
-        else -> 1.375f // Max 3 days/week
+        2 -> 1.355f
+        else -> 1.385f // Max 3 days/week
       }
       ActivityLevelOption.MODERATE -> when (trainingDaysPerWeek) {
+        1, 2 -> 1.440f
         3 -> 1.490f
-        4 -> 1.520f
-        else -> 1.550f // Max 5 days/week
+        4 -> 1.525f
+        else -> 1.560f // Max 5 days/week
       }
       ActivityLevelOption.VERY_ACTIVE -> when (trainingDaysPerWeek) {
-        7 -> 1.750f
+        7 -> 1.760f
         else -> 1.725f // 6 days/week
       }
     }
     val occupationPalAddOn = occupationLoad.palAddOn
     val teenPalAddOn = if (isTeen || isUnder13) 0.10f else 0.00f
-    val totalActivityFactor = (basePal + occupationPalAddOn + teenPalAddOn).coerceAtMost(2.00f)
+
+    // Exercise Activity Thermogenesis (EAT) Session Duration & Modality Calibration:
+    // Using Compendium of Physical Activities (Ainsworth et al.) METs & EPOC:
+    val sessionEatPalAddOn: Float = if (activityLevel == ActivityLevelOption.SEDENTARY || trainingDaysPerWeek == 0) {
+      0.00f
+    } else {
+      val modalityIntensityFactor = when (trainingModality) {
+        TrainingModalityOption.STRENGTH -> 1.00f
+        TrainingModalityOption.MIXED -> 1.15f
+        TrainingModalityOption.CARDIO -> 1.28f
+      }
+      val durationDeltaFrom45Min = when (workoutDuration) {
+        WorkoutDurationOption.HR_0_5 -> -0.025f
+        WorkoutDurationOption.HR_1_0 -> 0.020f * modalityIntensityFactor
+        WorkoutDurationOption.HR_1_5 -> 0.065f * modalityIntensityFactor
+        WorkoutDurationOption.HR_2_0 -> 0.110f * modalityIntensityFactor
+        WorkoutDurationOption.HR_2_5_PLUS -> 0.145f * modalityIntensityFactor
+      }
+      val weeklyFreqWeight = (trainingDaysPerWeek / 5f).coerceIn(0.40f, 1.30f)
+      (durationDeltaFrom45Min * weeklyFreqWeight).coerceIn(-0.04f, 0.16f)
+    }
+
+    val totalActivityFactor = (basePal + occupationPalAddOn + teenPalAddOn + sessionEatPalAddOn).coerceIn(1.20f, 2.15f)
     val tdeeKcalExact = bmrKcalExact * totalActivityFactor
     val tdeeKcalRounded = roundToNearest5(tdeeKcalExact)
 
-    // ── Objective Calories ─────────────────────────────────────────────────
+    // ── Objective Calories (Jeff Nippard / Eric Helms / ISSN Evidence-Based Model) ──
     val minSexFloor = if (isMale) 1500f else 1200f
-    val calorieSafetyFloorFloat = max(minSexFloor, 0.90f * bmrKcalExact)
+    val calorieSafetyFloorFloat = max(minSexFloor, 0.92f * bmrKcalExact)
     val calorieSafetyFloorKcal = roundToNearest5(calorieSafetyFloorFloat)
     val calorieSafeCeilingKcal = max(
-      calorieSafetyFloorKcal + 400,
-      roundToNearest5(tdeeKcalExact * 1.18f),
+      calorieSafetyFloorKcal + 450,
+      roundToNearest5(tdeeKcalExact * 1.20f),
     )
     val maxSafeDeficitFloat = 0.25f * tdeeKcalExact
     val maxSafeDeficitKcal = roundToNearest5(maxSafeDeficitFloat)
@@ -546,19 +587,20 @@ object DailyTargetsEngine {
       }
 
       BlueprintObjectiveOption.LOSE_FAT -> {
+        // Evidence-based fat loss rates (% of body weight per week: 0.35% Slow, 0.60% Normal, 0.85% Fast)
         val requestedRate = when (targetPace) {
-          TargetPaceOption.SLOW -> 0.0025f
-          TargetPaceOption.NORMAL -> 0.0050f
-          TargetPaceOption.FAST -> 0.0075f
+          TargetPaceOption.SLOW -> 0.0035f
+          TargetPaceOption.NORMAL -> 0.0060f
+          TargetPaceOption.FAST -> 0.0085f
         }
         val expCap = when (experienceLevel) {
           ExperienceLevelOption.BEGINNER -> 0.0100f
-          ExperienceLevelOption.INTERMEDIATE -> 0.0075f
-          ExperienceLevelOption.ADVANCED -> 0.0050f
+          ExperienceLevelOption.INTERMEDIATE -> 0.0080f
+          ExperienceLevelOption.ADVANCED -> 0.0060f
         }
         val bmiCap = when {
-          bmi < 22.0f -> 0.0050f
-          bmi <= 25.0f -> 0.0075f
+          bmi < 21.5f -> 0.0050f
+          bmi <= 26.0f -> 0.0080f
           else -> 0.0100f
         }
         val ageCap = if (isSenior65Plus) 0.0050f else 0.0100f
@@ -598,92 +640,122 @@ object DailyTargetsEngine {
       }
 
       BlueprintObjectiveOption.BUILD_MUSCLE -> {
+        // Jeff Nippard & Eric Helms Lean Hypertrophy Surplus Model:
+        // Beginners: +10% to +16% TDEE (~250–450 kcal/day)
+        // Intermediates: +8% to +13% TDEE (~200–350 kcal/day)
+        // Advanced lifters: +5% to +9% TDEE (~125–250 kcal/day lean bulk)
         val requestedSurplus = when (targetPace) {
-          TargetPaceOption.SLOW -> 0.05f
-          TargetPaceOption.NORMAL -> 0.10f
+          TargetPaceOption.SLOW -> 0.07f
+          TargetPaceOption.NORMAL -> 0.11f
           TargetPaceOption.FAST -> 0.15f
         }
         val expSurplusCap = when (experienceLevel) {
-          ExperienceLevelOption.BEGINNER -> 0.15f
-          ExperienceLevelOption.INTERMEDIATE -> 0.12f
-          ExperienceLevelOption.ADVANCED -> 0.08f
+          ExperienceLevelOption.BEGINNER -> 0.16f
+          ExperienceLevelOption.INTERMEDIATE -> 0.13f
+          ExperienceLevelOption.ADVANCED -> 0.09f
         }
-        val bmiSurplusCap = if (bmi >= 27.0f) 0.05f else 0.15f
-        val teenSurplusCap = if (isTeen || isUnder13) 0.05f else 0.15f
+        val bmiSurplusCap = if (bmi >= 27.5f) 0.06f else 0.16f
+        val teenSurplusCap = if (isTeen || isUnder13) 0.12f else 0.16f
         val sFinal = min(min(requestedSurplus, expSurplusCap), min(bmiSurplusCap, teenSurplusCap))
 
-        val finalC = roundToNearest5(tdeeKcalExact * (1f + sFinal))
+        val minEffectiveSurplusKcal = when {
+          bmi >= 27.5f -> 120f
+          experienceLevel == ExperienceLevelOption.ADVANCED -> 140f
+          isTeen || isYoungAdult18To25 -> 240f
+          else -> 200f
+        }
+        val rawSurplusKcal = max(tdeeKcalExact * sFinal, minEffectiveSurplusKcal)
+        val finalC = roundToNearest5(tdeeKcalExact + rawSurplusKcal)
         val actualSurplus = (finalC - tdeeKcalExact).coerceAtLeast(0f)
         estimatedWeeklyKgChange = (actualSurplus * 7f) / 7700f
-        weeklyWeightRatePercent = sFinal * 100f
+        weeklyWeightRatePercent = (actualSurplus / tdeeKcalExact.coerceAtLeast(1f)) * 100f
         finalC
       }
     }
 
-    // ── Protein (P, grams — constant across Workout & Rest days) ───────────
-    val proteinFactorGPerKgEff: Float = if (isTeen || isUnder13) {
+    // ── Protein (P, grams — Jeff Nippard & ISSN Position Stand: Jäger et al.) ──
+    val proteinFactorGPerKgEff: Float = if (isUnder13) {
       when (activityLevel) {
-        ActivityLevelOption.SEDENTARY, ActivityLevelOption.LIGHT -> 0.95f
-        ActivityLevelOption.MODERATE, ActivityLevelOption.VERY_ACTIVE -> 1.20f
+        ActivityLevelOption.SEDENTARY, ActivityLevelOption.LIGHT -> 1.10f
+        ActivityLevelOption.MODERATE, ActivityLevelOption.VERY_ACTIVE -> 1.35f
+      }
+    } else if (isTeen) {
+      when (effectiveObjective) {
+        BlueprintObjectiveOption.BUILD_MUSCLE -> when (experienceLevel) {
+          ExperienceLevelOption.BEGINNER -> 1.75f
+          ExperienceLevelOption.INTERMEDIATE -> 1.85f
+          ExperienceLevelOption.ADVANCED -> 1.95f
+        }
+        BlueprintObjectiveOption.MAINTAIN -> when (activityLevel) {
+          ActivityLevelOption.SEDENTARY -> 1.15f
+          ActivityLevelOption.LIGHT -> 1.45f
+          ActivityLevelOption.MODERATE -> 1.65f
+          ActivityLevelOption.VERY_ACTIVE -> 1.80f
+        }
+        BlueprintObjectiveOption.LOSE_FAT -> 1.80f
       }
     } else {
       val baseFactor = when (effectiveObjective) {
         BlueprintObjectiveOption.MAINTAIN -> when (activityLevel) {
-          ActivityLevelOption.SEDENTARY -> 0.9f
-          ActivityLevelOption.LIGHT -> 1.1f
-          ActivityLevelOption.MODERATE -> 1.3f
-          ActivityLevelOption.VERY_ACTIVE -> 1.5f
+          ActivityLevelOption.SEDENTARY -> 1.20f
+          ActivityLevelOption.LIGHT -> 1.55f
+          ActivityLevelOption.MODERATE -> 1.75f // Body Recomposition sweet spot (Jeff Nippard)
+          ActivityLevelOption.VERY_ACTIVE -> 1.90f
         }
         BlueprintObjectiveOption.LOSE_FAT -> when (experienceLevel) {
-          ExperienceLevelOption.BEGINNER -> 1.6f
-          ExperienceLevelOption.INTERMEDIATE -> 2.0f
-          ExperienceLevelOption.ADVANCED -> 2.4f
+          ExperienceLevelOption.BEGINNER -> 1.90f
+          ExperienceLevelOption.INTERMEDIATE -> 2.10f
+          ExperienceLevelOption.ADVANCED -> 2.30f // Helms / Nippard lean-mass retention in deficit
         }
         BlueprintObjectiveOption.BUILD_MUSCLE -> when (experienceLevel) {
-          ExperienceLevelOption.BEGINNER -> 1.6f
-          ExperienceLevelOption.INTERMEDIATE -> 1.8f
-          ExperienceLevelOption.ADVANCED -> 2.0f
+          ExperienceLevelOption.BEGINNER -> 1.85f // 1.85 g/kg (~0.84 g/lb) optimal MPS
+          ExperienceLevelOption.INTERMEDIATE -> 2.00f // 2.00 g/kg (~0.91 g/lb) bodybuilding standard
+          ExperienceLevelOption.ADVANCED -> 2.15f // 2.15 g/kg (~0.98 g/lb)
         }
       }
       val cardioTweaked = if (
         trainingModality == TrainingModalityOption.CARDIO &&
         effectiveObjective != BlueprintObjectiveOption.LOSE_FAT
       ) {
-        val floorAfterCardio = if (effectiveObjective == BlueprintObjectiveOption.MAINTAIN) 0.8f else 1.4f
-        max(floorAfterCardio, baseFactor - 0.1f)
+        val floorAfterCardio = if (effectiveObjective == BlueprintObjectiveOption.MAINTAIN) 1.35f else 1.65f
+        max(floorAfterCardio, baseFactor - 0.15f)
       } else {
         baseFactor
       }
-      val seniorModifier = if (isSenior60Plus) 0.3f else 0.0f
-      cardioTweaked + seniorModifier
+      val seniorModifier = if (isSenior60Plus) 0.20f else 0.0f
+      (cardioTweaked + seniorModifier).coerceAtMost(2.40f)
     }
 
-    val proteinFloorFloat = 0.8f * effectiveWeightKg
-    val proteinCeilingFloat = min(2.5f * effectiveWeightKg, (0.35f * recommendedCaloriesKcal) / 4f)
-    val proteinFloorGrams = proteinFloorFloat.roundToInt().coerceAtLeast(30)
-    val proteinCeilingGrams = max(proteinFloorGrams, proteinCeilingFloat.roundToInt())
+    val proteinFloorFloat = if (activityLevel == ActivityLevelOption.SEDENTARY) {
+      1.0f * effectiveWeightKg
+    } else {
+      1.4f * effectiveWeightKg
+    }
+    val proteinCeilingFloat = min(2.6f * effectiveWeightKg, (0.38f * recommendedCaloriesKcal) / 4f)
+    val proteinFloorGrams = proteinFloorFloat.roundToInt().coerceAtLeast(45)
+    val proteinCeilingGrams = max(proteinFloorGrams + 20, proteinCeilingFloat.roundToInt())
 
     val rawProteinGrams = (proteinFactorGPerKgEff * effectiveWeightKg).roundToInt()
     val recommendedProteinGrams = rawProteinGrams.coerceIn(proteinFloorGrams, proteinCeilingGrams)
 
-    // ── Fat (F, grams) ─────────────────────────────────────────────────────
+    // ── Fat (F, grams — Hormonal & Essential Fatty Acid Floor) ─────────────
     val fatShareFraction = when {
-      isTeen || isUnder13 || isSenior60Plus -> 0.30f
+      isTeen || isUnder13 || isSenior60Plus -> 0.28f
       effectiveObjective == BlueprintObjectiveOption.LOSE_FAT ->
         if (experienceLevel == ExperienceLevelOption.ADVANCED) 0.22f else 0.25f
-      effectiveObjective == BlueprintObjectiveOption.MAINTAIN -> 0.28f
+      effectiveObjective == BlueprintObjectiveOption.MAINTAIN -> 0.27f
       effectiveObjective == BlueprintObjectiveOption.BUILD_MUSCLE -> 0.25f
       else -> 0.25f
     }
     val fatTargetSharePct = (fatShareFraction * 100f).roundToInt()
 
-    val minFatPerKg = if (isMale) 0.5f else 0.6f
-    val fatFloorFloat = max(minFatPerKg * effectiveWeightKg, (0.20f * recommendedCaloriesKcal) / 9f)
-    val maxFatShare = if (isTeen || isUnder13) 0.35f else 0.30f
+    val minFatPerKg = if (isMale) 0.65f else 0.75f
+    val fatFloorFloat = max(minFatPerKg * effectiveWeightKg, (0.18f * recommendedCaloriesKcal) / 9f)
+    val maxFatShare = if (isTeen || isUnder13) 0.35f else 0.32f
     val fatCeilingFloat = (maxFatShare * recommendedCaloriesKcal) / 9f
 
-    val fatFloorGrams = fatFloorFloat.roundToInt().coerceAtLeast(25)
-    val fatCeilingGrams = max(fatFloorGrams, fatCeilingFloat.roundToInt())
+    val fatFloorGrams = fatFloorFloat.roundToInt().coerceAtLeast(35)
+    val fatCeilingGrams = max(fatFloorGrams + 15, fatCeilingFloat.roundToInt())
 
     var recommendedFatsGrams = ((fatShareFraction * recommendedCaloriesKcal) / 9f)
       .roundToInt()
@@ -708,17 +780,17 @@ object DailyTargetsEngine {
     val isCarbsBelowBrainFloor = recommendedCarbsGrams < 130
     val carbsFloorGrams = 130
     val carbsCeilingGrams = max(
-      180,
+      200,
       ((recommendedCaloriesKcal * 0.65f) / 4f).roundToInt(),
     )
 
-    val adultFibreMin = if (isTeen || isUnder13) 19 else 25
+    val adultFibreMin = if (isTeen || isUnder13) 22 else 28
     val recommendedFibreGrams = max(
       adultFibreMin,
       ((14f * recommendedCaloriesKcal) / 1000f).roundToInt(),
-    )
+    ).coerceAtMost(50)
     val maxFreeSugarGrams = ((0.10f * recommendedCaloriesKcal) / 4f).roundToInt()
-    val maxSodiumMg = 2000
+    val maxSodiumMg = 2300
 
     val totalMacroCalories = (4 * recommendedProteinGrams + 4 * recommendedCarbsGrams + 9 * recommendedFatsGrams)
       .coerceAtLeast(1)
@@ -726,25 +798,32 @@ object DailyTargetsEngine {
     val fatCalorieSharePct = ((9f * recommendedFatsGrams / totalMacroCalories) * 100f).roundToInt()
     val carbsCalorieSharePct = (100 - proteinCalorieSharePct - fatCalorieSharePct).coerceIn(0, 100)
 
-    // ── Daily Steps ────────────────────────────────────────────────────────
+    // ── Daily Steps (Activity + Occupation + Objective + Modality) ─────────
     val tierBaseSteps = when (activityLevel) {
-      ActivityLevelOption.SEDENTARY -> 5000
-      ActivityLevelOption.LIGHT -> 7000
+      ActivityLevelOption.SEDENTARY -> 5500
+      ActivityLevelOption.LIGHT -> 7500
       ActivityLevelOption.MODERATE -> 8500
       ActivityLevelOption.VERY_ACTIVE -> 10000
+    }
+    val occupationStepAddOn = when (occupationLoad) {
+      OccupationLoadOption.DESK -> 0
+      OccupationLoadOption.LIGHT_STANDING -> 500
+      OccupationLoadOption.ACTIVE_ON_FEET -> 1500
+      OccupationLoadOption.HEAVY_MANUAL -> 2000
     }
     val objectiveStepTweak = when (effectiveObjective) {
       BlueprintObjectiveOption.LOSE_FAT -> 1500
       BlueprintObjectiveOption.MAINTAIN -> 0
-      BlueprintObjectiveOption.BUILD_MUSCLE -> -500
+      BlueprintObjectiveOption.BUILD_MUSCLE -> 0
     }
-    val stepsFloor = if (isTeen || isUnder13) 10000 else 4000
+    val modalityStepTweak = if (trainingModality == TrainingModalityOption.CARDIO) 500 else 0
+    val stepsFloor = if (isTeen || isUnder13) 7500 else 5000
     val stepsCeiling = when {
-      isTeen || isUnder13 -> 12000
-      isSenior60Plus -> 8000
-      else -> 12000
+      isSenior60Plus -> 10000
+      else -> 14000
     }
-    val rawSteps = (tierBaseSteps + objectiveStepTweak).coerceIn(stepsFloor, stepsCeiling)
+    val rawSteps = (tierBaseSteps + occupationStepAddOn + objectiveStepTweak + modalityStepTweak)
+      .coerceIn(stepsFloor, stepsCeiling)
     val recommendedSteps = roundToNearest500(rawSteps.toFloat()).coerceIn(stepsFloor, stepsCeiling)
 
     val strideFactor = if (isMale) 0.415f else 0.413f
@@ -752,14 +831,31 @@ object DailyTargetsEngine {
     val estimatedWalkingKm = (recommendedSteps * strideLengthMeters) / 1000f
     val informationalWalkingKcal = (recommendedSteps * safeWeightKg * 0.0004f).roundToInt()
 
-    // ── Hydration (ml/day) ─────────────────────────────────────────────────
+    // ── Hydration (ml/day — NASEM DRI + ACSM Sweat Rate + ISSN Muscle & Urea Load) ──
     val waterPerKgFactor = when {
-      isTeen || isUnder13 -> 38f
-      isSenior65Plus -> 30f
-      else -> 32f
+      isTeen || isUnder13 -> if (isMale) 39.0f else 36.0f
+      isYoungAdult18To25 -> if (isMale) 38.5f else 35.0f
+      isSenior65Plus -> if (isMale) 33.0f else 31.0f
+      else -> if (isMale) 36.5f else 33.5f
     }
-    val baseWaterFloat = waterPerKgFactor * effectiveWeightKg
-    val baseWaterMl = baseWaterFloat.roundToInt()
+    val minSexBaselineWaterFloat = when {
+      isUnder13 -> 1600f
+      isTeen -> if (isMale) 2250f else 1900f
+      else -> if (isMale) 2400f else 2000f
+    }
+    val baseWaterFloat = max(waterPerKgFactor * effectiveWeightKg, minSexBaselineWaterFloat)
+    val baseWaterMl = roundToNearest10(baseWaterFloat)
+
+    val objectiveMetabolicWaterMl = when (effectiveObjective) {
+      BlueprintObjectiveOption.BUILD_MUSCLE -> if (activityLevel == ActivityLevelOption.SEDENTARY) 150 else 350
+      BlueprintObjectiveOption.LOSE_FAT -> 220
+      BlueprintObjectiveOption.MAINTAIN -> if (activityLevel == ActivityLevelOption.SEDENTARY) 0 else 120
+    }
+    val proteinUreaClearanceWaterMl = ((recommendedProteinGrams - 95).coerceAtLeast(0) * 2.2f)
+      .roundToInt()
+      .coerceIn(0, 280)
+    val anabolicAndProteinWaterAddMl = roundToNearest10((objectiveMetabolicWaterMl + proteinUreaClearanceWaterMl).toFloat())
+
     val climateWaterAddMl = climateBand.baselineWaterAddMl + (if (highAltitude2500m) 500 else 0)
     val occupationWaterAddMl = occupationLoad.waterAddMl
     val caffeineWaterAddMl = if (caffeineAlcoholYes) 300 else 0
@@ -769,26 +865,47 @@ object DailyTargetsEngine {
       SodiumFrequencyOption.OFTEN -> 350
     }
 
-    val baselineDailyWaterRaw = baseWaterFloat +
+    val restDayWaterRaw = baseWaterMl +
+      anabolicAndProteinWaterAddMl +
       climateWaterAddMl +
       occupationWaterAddMl +
       caffeineWaterAddMl +
       sodiumWaterAddMl
 
-    val workoutMinutes = workoutDuration.hours * 60f
+    val workoutMinutes = if (activityLevel == ActivityLevelOption.SEDENTARY || trainingDaysPerWeek == 0) {
+      0f
+    } else {
+      workoutDuration.hours * 60f
+    }
     val modalitySweatRateMlPerMin = when (trainingModality) {
-      TrainingModalityOption.STRENGTH -> 8f
-      TrainingModalityOption.MIXED -> 10f
-      TrainingModalityOption.CARDIO -> 13f
+      TrainingModalityOption.STRENGTH -> 10.0f
+      TrainingModalityOption.MIXED -> 12.8f
+      TrainingModalityOption.CARDIO -> 15.2f
     }
     val exerciseWaterAddFloat = workoutMinutes * modalitySweatRateMlPerMin * climateBand.sweatRateMultiplier
-    val exerciseWaterAddOnWorkoutDayMl = roundToNearest10(exerciseWaterAddFloat)
-    val dailyWaterRaw = baselineDailyWaterRaw + (trainingDaysPerWeek / 7f) * exerciseWaterAddFloat
 
-    val waterFloorMl = if (isTeen || isUnder13) 1200 else 1500
-    val waterCeilingMl = 5000
+    val waterFloorMl = when {
+      isUnder13 -> 1500
+      isTeen -> if (isMale) 2200 else 1850
+      else -> if (isMale) 2500 else 2100
+    }
+    val waterCeilingMl = 5500
 
-    val primaryRecommendedWaterMl = roundToNearest10(dailyWaterRaw).coerceIn(waterFloorMl, waterCeilingMl)
+    val restDayWaterMl = roundToNearest10(restDayWaterRaw.toFloat()).coerceIn(waterFloorMl, waterCeilingMl)
+    val workoutDayWaterMl = if (trainingDaysPerWeek > 0 && activityLevel != ActivityLevelOption.SEDENTARY) {
+      roundToNearest10(restDayWaterMl + exerciseWaterAddFloat).coerceIn(restDayWaterMl, waterCeilingMl)
+    } else {
+      restDayWaterMl
+    }
+    val exerciseWaterAddOnWorkoutDayMl = (workoutDayWaterMl - restDayWaterMl).coerceAtLeast(0)
+
+    // Primary recommended hydration matches Training Day Target when user has active training days,
+    // or Rest Day Baseline when sedentary (0 training days), eliminating any discrepancy between cards.
+    val primaryRecommendedWaterMl = if (trainingDaysPerWeek > 0 && activityLevel != ActivityLevelOption.SEDENTARY) {
+      workoutDayWaterMl
+    } else {
+      restDayWaterMl
+    }
 
     val waterGlasses250Ml = primaryRecommendedWaterMl / 250f
     val wakingHourlyReminderMl = roundToNearest10(primaryRecommendedWaterMl / 16f)
@@ -837,6 +954,7 @@ object DailyTargetsEngine {
       basePal = basePal,
       occupationPalAddOn = occupationPalAddOn,
       teenPalAddOn = teenPalAddOn,
+      sessionEatPalAddOn = sessionEatPalAddOn,
       totalActivityFactor = totalActivityFactor,
       tdeeKcalExact = tdeeKcalExact,
       tdeeKcalRounded = tdeeKcalRounded,
@@ -869,11 +987,14 @@ object DailyTargetsEngine {
       estimatedWalkingKm = estimatedWalkingKm,
       informationalWalkingKcal = informationalWalkingKcal,
       baseWaterMl = baseWaterMl,
+      anabolicAndProteinWaterAddMl = anabolicAndProteinWaterAddMl,
       climateWaterAddMl = climateWaterAddMl,
       occupationWaterAddMl = occupationWaterAddMl,
       caffeineWaterAddMl = caffeineWaterAddMl,
       sodiumWaterAddMl = sodiumWaterAddMl,
       exerciseWaterAddOnWorkoutDayMl = exerciseWaterAddOnWorkoutDayMl,
+      workoutDayWaterMl = workoutDayWaterMl,
+      restDayWaterMl = restDayWaterMl,
       primaryRecommendedWaterMl = primaryRecommendedWaterMl,
       waterFloorMl = waterFloorMl,
       waterCeilingMl = waterCeilingMl,

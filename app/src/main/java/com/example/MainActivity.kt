@@ -217,6 +217,10 @@ fun BioSyncApp(
   var caffeineAlcoholYes by rememberSaveable { mutableStateOf(initialStored.caffeineAlcoholYes) }
   var selectedSodiumFrequencyName by rememberSaveable { mutableStateOf(initialStored.sodiumFrequency.name) }
   var selectedStreakPercent by rememberSaveable { mutableIntStateOf(initialStored.streakThreshold.percentage) }
+  var wakeUpHour by rememberSaveable { mutableIntStateOf(initialStored.wakeUpHour) }
+  var wakeUpMinute by rememberSaveable { mutableIntStateOf(initialStored.wakeUpMinute) }
+  var sleepHour by rememberSaveable { mutableIntStateOf(initialStored.sleepHour) }
+  var sleepMinute by rememberSaveable { mutableIntStateOf(initialStored.sleepMinute) }
 
   // Persisted Engine State
   var selectedClimateBandName by rememberSaveable { mutableStateOf(initialStored.climateBand.name) }
@@ -332,6 +336,104 @@ fun BioSyncApp(
     }
   }
 
+  val currentEngineReport = remember(
+    calculatedAgeYears,
+    selectedSex,
+    heightCm,
+    weightKg,
+    currentActivityLevel,
+    currentOccupationLoad,
+    currentObjective,
+    currentTrainingModality,
+    currentWorkoutDuration,
+    currentExperienceLevel,
+    currentTargetPace,
+    currentMealFrequency,
+    caffeineAlcoholYes,
+    currentSodiumFrequency,
+    currentClimateBand,
+    bodyFatOverrideEnabled,
+    bodyFatPercent,
+    currentWorkoutDays,
+  ) {
+    DailyTargetsEngine.calculate(
+      ageYears = calculatedAgeYears,
+      biologicalSex = selectedSex,
+      heightCm = heightCm,
+      weightKg = weightKg,
+      activityLevel = currentActivityLevel,
+      occupationLoad = currentOccupationLoad,
+      objective = currentObjective,
+      trainingModality = currentTrainingModality,
+      workoutDuration = currentWorkoutDuration,
+      experienceLevel = currentExperienceLevel,
+      targetPace = currentTargetPace,
+      mealFrequency = currentMealFrequency,
+      caffeineAlcoholYes = caffeineAlcoholYes,
+      sodiumFrequency = currentSodiumFrequency,
+      climateBand = currentClimateBand,
+      bodyFatPercentOverride = if (bodyFatOverrideEnabled) bodyFatPercent else null,
+      selectedWorkoutDays = currentWorkoutDays,
+    )
+  }
+
+  var showWelcomeBackupCheckModal by rememberSaveable { mutableStateOf(false) }
+  var showWelcomeImportBackupDialog by rememberSaveable { mutableStateOf(false) }
+
+  val applyRestoredBackupBundle: (BioSyncFullBackupBundle, Boolean) -> Unit = { bundle, jumpDirectlyToDashboard ->
+    val restored = bundle.storedState
+    subjectName = restored.subjectName
+    selectedSex = restored.selectedSex
+    selectedDay = restored.birthDay
+    selectedMonth = restored.birthMonthZeroBased
+    selectedYear = restored.birthYear
+    calculatedAgeYears = restored.ageYears
+    heightCm = restored.heightCm
+    selectedHeightUnitName = restored.heightUnit.name
+    weightKg = restored.weightKg
+    selectedWeightUnitName = restored.weightUnit.name
+    selectedActivityLevelName = restored.activityLevel.name
+    selectedWorkoutDaysCsv = restored.selectedWorkoutDays.joinToString(",") { day -> day.name }
+    selectedOccupationLoadName = restored.occupationLoad.name
+    selectedObjectiveName = restored.objective.name
+    selectedTrainingModalityName = restored.trainingModality.name
+    selectedWorkoutDurationName = restored.workoutDuration.name
+    selectedExperienceLevelName = restored.experienceLevel.name
+    selectedTargetPaceName = restored.targetPace.name
+    selectedDayOneName = restored.dayOne.name
+    selectedMealFrequencyName = restored.mealFrequency.name
+    caffeineAlcoholYes = restored.caffeineAlcoholYes
+    selectedSodiumFrequencyName = restored.sodiumFrequency.name
+    selectedStreakPercent = restored.streakThreshold.percentage
+    wakeUpHour = restored.wakeUpHour
+    wakeUpMinute = restored.wakeUpMinute
+    sleepHour = restored.sleepHour
+    sleepMinute = restored.sleepMinute
+    selectedClimateBandName = restored.climateBand.name
+    bodyFatOverrideEnabled = restored.bodyFatOverrideEnabled
+    bodyFatPercent = restored.bodyFatPercent
+    isCustomTargetsMode = restored.isCustomTargetsMode
+    customCaloriesKcal = restored.customCaloriesKcal
+    customProteinGrams = restored.customProteinGrams
+    customCarbsGrams = restored.customCarbsGrams
+    customFatsGrams = restored.customFatsGrams
+    customHydrationMl = restored.customHydrationMl
+    customStepsCount = restored.customStepsCount
+    protocolLockedIn = if (jumpDirectlyToDashboard) true else restored.protocolLockedIn
+    protocolLockedAtEpochMillis = if (restored.protocolLockedAtEpochMillis > 0L) {
+      restored.protocolLockedAtEpochMillis
+    } else {
+      System.currentTimeMillis()
+    }
+    dayOneAnchorStartEpochMillis = restored.dayOneAnchorStartEpochMillis
+    dayOneInitialCountdownCompleted = if (jumpDirectlyToDashboard) true else restored.dayOneInitialCountdownCompleted
+    dayOneStartNotificationSent = if (jumpDirectlyToDashboard) true else restored.dayOneStartNotificationSent
+    isQuickEditMode = false
+    quickEditFocusSection = null
+    quickEditReturnStep = 4
+    currentStep = if (jumpDirectlyToDashboard) 5 else 1
+  }
+
   // Automatically persist all collected data locally inside the user's device only
   LaunchedEffect(
     subjectName,
@@ -357,6 +459,10 @@ fun BioSyncApp(
     caffeineAlcoholYes,
     currentSodiumFrequency,
     currentStreakOption,
+    wakeUpHour,
+    wakeUpMinute,
+    sleepHour,
+    sleepMinute,
     currentClimateBand,
     bodyFatOverrideEnabled,
     bodyFatPercent,
@@ -399,6 +505,10 @@ fun BioSyncApp(
         caffeineAlcoholYes = caffeineAlcoholYes,
         sodiumFrequency = currentSodiumFrequency,
         streakThreshold = currentStreakOption,
+        wakeUpHour = wakeUpHour,
+        wakeUpMinute = wakeUpMinute,
+        sleepHour = sleepHour,
+        sleepMinute = sleepMinute,
         climateBand = currentClimateBand,
         bodyFatOverrideEnabled = bodyFatOverrideEnabled,
         bodyFatPercent = bodyFatPercent,
@@ -417,6 +527,20 @@ fun BioSyncApp(
         decidedDailyStepsGoal = customStepsCount,
       ),
     )
+    if (protocolLockedIn && dayOneInitialCountdownCompleted) {
+      BioSyncCircadianHydrationEngine.scheduleCircadianNotifications(
+        context = context,
+        subjectName = subjectName,
+        wakeUpHour = wakeUpHour,
+        wakeUpMinute = wakeUpMinute,
+        sleepHour = sleepHour,
+        sleepMinute = sleepMinute,
+        totalDailyHydrationMl = customHydrationMl,
+        ageYears = calculatedAgeYears,
+        selectedSex = selectedSex,
+        weightKg = weightKg,
+      )
+    }
   }
 
   // Keep internal Health Connect & hardware step sensor sync active whenever permissions are granted or launched from Health Connect
@@ -454,10 +578,7 @@ fun BioSyncApp(
       0 -> {
         BioSyncWelcomeScreen(
           onNavigateToCalibration = {
-            isQuickEditMode = false
-            quickEditFocusSection = null
-            quickEditReturnStep = 4
-            currentStep = 1
+            showWelcomeBackupCheckModal = true
           },
         )
       }
@@ -551,6 +672,7 @@ fun BioSyncApp(
       3 -> {
         BlueprintScreen(
           subjectName = subjectName,
+          selectedSex = selectedSex,
           ageYears = calculatedAgeYears,
           weightKg = weightKg,
           selectedActivityLevel = currentActivityLevel,
@@ -606,6 +728,18 @@ fun BioSyncApp(
           onSelectSodiumFrequency = { selectedSodiumFrequencyName = it.name },
           selectedStreakThreshold = currentStreakOption,
           onSelectStreakThreshold = { selectedStreakPercent = it.percentage },
+          wakeUpHour = wakeUpHour,
+          wakeUpMinute = wakeUpMinute,
+          onUpdateWakeUpTime = { h, m ->
+            wakeUpHour = h
+            wakeUpMinute = m
+          },
+          sleepHour = sleepHour,
+          sleepMinute = sleepMinute,
+          onUpdateSleepTime = { h, m ->
+            sleepHour = h
+            sleepMinute = m
+          },
           onNavigateBack = {
             if (isQuickEditMode) {
               val dest = quickEditReturnStep
@@ -674,6 +808,9 @@ fun BioSyncApp(
           sodiumFrequency = currentSodiumFrequency,
           streakThreshold = currentStreakOption,
           climateBand = currentClimateBand,
+          onSelectClimateBand = { chosenBand ->
+            selectedClimateBandName = chosenBand.name
+          },
           bodyFatOverrideEnabled = bodyFatOverrideEnabled,
           onToggleBodyFatOverride = { bodyFatOverrideEnabled = it },
           bodyFatPercent = bodyFatPercent,
@@ -776,6 +913,7 @@ fun BioSyncApp(
           targetCarbsGrams = customCarbsGrams,
           targetFatsGrams = customFatsGrams,
           targetHydrationMl = customHydrationMl,
+          restDayWaterDeductionMl = currentEngineReport.exerciseWaterAddOnWorkoutDayMl,
           targetStepsCount = customStepsCount,
           streakThreshold = currentStreakOption,
           mealFrequency = currentMealFrequency,
@@ -794,6 +932,42 @@ fun BioSyncApp(
             quickEditFocusSection = null
             quickEditReturnStep = 4
             currentStep = 4
+          },
+          onOpenSettingsPage = {
+            isQuickEditMode = false
+            quickEditFocusSection = null
+            quickEditReturnStep = 6
+            currentStep = 6
+          },
+          onOpenStatsPage = {
+            isQuickEditMode = false
+            quickEditFocusSection = null
+            currentStep = 7
+          },
+        )
+      }
+      7 -> {
+        BioSyncStatsScreen(
+          subjectName = subjectName,
+          ageYears = calculatedAgeYears,
+          birthDay = selectedDay,
+          birthMonthZeroBased = selectedMonth,
+          birthYear = selectedYear,
+          targetCaloriesKcal = customCaloriesKcal,
+          targetProteinGrams = customProteinGrams,
+          targetCarbsGrams = customCarbsGrams,
+          targetFatsGrams = customFatsGrams,
+          targetHydrationMl = customHydrationMl,
+          restDayWaterDeductionMl = currentEngineReport.exerciseWaterAddOnWorkoutDayMl,
+          targetStepsCount = customStepsCount,
+          streakThreshold = currentStreakOption,
+          activityLevel = currentActivityLevel,
+          selectedWorkoutDays = currentWorkoutDays,
+          protocolLockedAtEpochMillis = protocolLockedAtEpochMillis,
+          onNavigateHome = {
+            isQuickEditMode = false
+            quickEditFocusSection = null
+            currentStep = 5
           },
           onOpenSettingsPage = {
             isQuickEditMode = false
@@ -847,6 +1021,12 @@ fun BioSyncApp(
             quickEditFocusSection = null
             currentStep = 5
           },
+          onNavigateToStats = {
+            isQuickEditMode = false
+            quickEditFocusSection = null
+            currentStep = 7
+          },
+          onBackupRestored = applyRestoredBackupBundle,
           onEditStep01FromSettings = { focus ->
             isQuickEditMode = true
             quickEditFocusSection = focus
@@ -871,8 +1051,9 @@ fun BioSyncApp(
             quickEditReturnStep = 6
             currentStep = 4
           },
-            onFactoryResetConfirmed = {
+          onFactoryResetConfirmed = {
             BioSyncDayOneNotificationHelper.cancelOneTimeDayOneAlarm(context)
+            BioSyncCircadianHydrationEngine.cancelAllCircadianAlarms(context)
             BioSyncLocalStore.clearAll(context)
             DashboardLocalStore.clearAll(context)
             val defaults = BioSyncStoredState()
@@ -899,6 +1080,10 @@ fun BioSyncApp(
             caffeineAlcoholYes = defaults.caffeineAlcoholYes
             selectedSodiumFrequencyName = defaults.sodiumFrequency.name
             selectedStreakPercent = defaults.streakThreshold.percentage
+            wakeUpHour = defaults.wakeUpHour
+            wakeUpMinute = defaults.wakeUpMinute
+            sleepHour = defaults.sleepHour
+            sleepMinute = defaults.sleepMinute
             selectedClimateBandName = defaults.climateBand.name
             bodyFatOverrideEnabled = defaults.bodyFatOverrideEnabled
             bodyFatPercent = defaults.bodyFatPercent
@@ -922,6 +1107,37 @@ fun BioSyncApp(
         )
       }
     }
+  }
+
+  if (showWelcomeBackupCheckModal) {
+    WelcomeBackupCheckModal(
+      onStartFreshCalibration = {
+        showWelcomeBackupCheckModal = false
+        isQuickEditMode = false
+        quickEditFocusSection = null
+        quickEditReturnStep = 4
+        currentStep = 1
+      },
+      onOpenImportBackupFlow = {
+        showWelcomeBackupCheckModal = false
+        showWelcomeImportBackupDialog = true
+      },
+      onDismiss = {
+        showWelcomeBackupCheckModal = false
+      },
+    )
+  }
+
+  if (showWelcomeImportBackupDialog) {
+    BioSyncBackupImportDialog(
+      onRestoreComplete = { restoredBundle, jumpDirectlyToDashboard ->
+        showWelcomeImportBackupDialog = false
+        applyRestoredBackupBundle(restoredBundle, jumpDirectlyToDashboard)
+      },
+      onDismiss = {
+        showWelcomeImportBackupDialog = false
+      },
+    )
   }
 }
 
@@ -2266,6 +2482,20 @@ private fun MacroMetricRow(
       barHeight = metrics.macroBarHeight,
       modifier = Modifier.fillMaxWidth(),
     )
+
+    if (item.id == "steps") {
+      Text(
+        text = "* Step counter is not fully accurate yet — we will improve it in future updates.",
+        color = Neutral400.copy(alpha = 0.85f),
+        fontFamily = InterFontFamily,
+        fontSize = (9.5f * metrics.scale).coerceIn(8.2f, 10.8f).sp,
+        lineHeight = (12.5f * metrics.scale).coerceIn(11f, 14f).sp,
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(top = 1.dp)
+          .testTag("welcome_steps_accuracy_disclaimer"),
+      )
+    }
   }
 }
 

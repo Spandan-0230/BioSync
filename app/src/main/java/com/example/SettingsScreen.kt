@@ -1,7 +1,12 @@
 package com.example
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.BlurMaskFilter
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -35,6 +40,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Scaffold
@@ -59,15 +65,18 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -90,7 +99,9 @@ import com.example.ui.theme.ProteinStart
 import com.example.ui.theme.PureWhite
 import com.example.ui.theme.StepsStart
 import java.text.NumberFormat
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -161,13 +172,20 @@ private fun computeSettingsMetrics(
     ((base * scale).coerceIn(minV, maxV) * fontCompensation).sp
   }
 
+  val contentMaxWidth = when {
+    w >= 1100f -> (w * 0.86f).coerceIn(820f, 1060f).dp
+    w >= 840f -> (w * 0.84f).coerceIn(680f, 860f).dp
+    isExpanded -> (w * 0.82f).coerceIn(520f, 680f).dp
+    else -> w.dp
+  }
+
   return SettingsResponsiveMetrics(
     scale = scale,
     fontCompensation = fontCompensation,
-    contentMaxWidth = if (isExpanded) (w * 0.80f).coerceIn(500f, 600f).dp else w.dp,
+    contentMaxWidth = contentMaxWidth,
     horizontalPadding = (20f * widthFactor).coerceIn(14f, 28f).dp,
     topContentPadding = (8f * heightFactor).coerceIn(5f, 14f).dp,
-    bottomContentPadding = (24f * heightFactor).coerceIn(16f, 32f).dp,
+    bottomContentPadding = (106f * heightFactor).coerceIn(88f, 126f).dp,
     headerHeight = (48f * scale).coerceIn(44f, 56f).dp,
     titleFontSize = sp(25f, 21f, 29f),
     subtitleFontSize = sp(12.4f, 11f, 14f),
@@ -183,8 +201,7 @@ private fun computeSettingsMetrics(
  * - Preserves scroll position and state across step edits (`rememberSaveable(saver = ScrollState.Saver)`)
  * - Allows editing ALL user info across Step 01 (Profile), Step 02 (Personal Details), Step 03 (Blueprint),
  *   and Step 04 (Daily Targets & Body Fat %) with direct step teleportation and automatic return to Settings
- * - Includes a high-craft Factory Reset section with confirmation dialog that deletes the app's database
- *   and restarts on the Welcome Home screen.
+ * - Includes Data Backup & Import Recovery Vault + Factory Reset protection with backup warning.
  */
 @Composable
 fun BioSyncSettingsScreen(
@@ -222,15 +239,18 @@ fun BioSyncSettingsScreen(
   activeHydrationMl: Int,
   activeStepsCount: Int,
   onNavigateBackToDashboard: () -> Unit,
+  onNavigateToStats: () -> Unit = {},
   onEditStep01FromSettings: (focusSection: String?) -> Unit,
   onEditStep02FromSettings: (focusSection: String?) -> Unit,
   onEditStep03FromSettings: (focusSection: String?) -> Unit,
   onEditStep04FromSettings: () -> Unit,
+  onBackupRestored: (BioSyncFullBackupBundle, Boolean) -> Unit = { _, _ -> },
   onFactoryResetConfirmed: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
   BackHandler(onBack = onNavigateBackToDashboard)
 
+  val context = LocalContext.current
   val haptics = rememberBioSyncHaptics()
   val numberFormat = remember { NumberFormat.getIntegerInstance(Locale.US) }
   val headerBarAnim = remember { Animatable(0f) }
@@ -240,7 +260,26 @@ fun BioSyncSettingsScreen(
 
   var showWorkoutDaysPicker by rememberSaveable { mutableStateOf(false) }
   var showFactoryResetModal by rememberSaveable { mutableStateOf(false) }
+  var showImportBackupDialog by rememberSaveable { mutableStateOf(false) }
+  var vaultMeta by remember { mutableStateOf(BioSyncBackupManager.getRecoveryVaultMeta(context)) }
+  var backupStatusBanner by remember { mutableStateOf<String?>(null) }
+  var pendingExportJson by remember { mutableStateOf("") }
   var liveNowEpochMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+  val exportDocumentLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.CreateDocument("application/json"),
+  ) { uri ->
+    if (uri != null && pendingExportJson.isNotBlank()) {
+      runCatching {
+        context.contentResolver.openOutputStream(uri)?.use { out ->
+          out.write(pendingExportJson.toByteArray(Charsets.UTF_8))
+        }
+        backupStatusBanner = "Backup file exported & saved to Recovery Vault."
+      }.onFailure {
+        backupStatusBanner = "Saved to Recovery Vault & Clipboard."
+      }
+    }
+  }
 
   LaunchedEffect(Unit) {
     headerBarAnim.snapTo(0f)
@@ -464,7 +503,37 @@ fun BioSyncSettingsScreen(
 
         Spacer(modifier = Modifier.height(metrics.sectionGap))
 
-        // 5. Factory Reset & Database Wipe Card
+        // 5. Data Backup & Import Recovery Vault Card
+        SettingsBackupVaultCard(
+          subjectName = subjectName,
+          subjectIdBadge = subjectIdBadge,
+          vaultMeta = vaultMeta,
+          statusBanner = backupStatusBanner,
+          onCreateBackup = {
+            haptics.confirm()
+            val json = BioSyncBackupManager.exportFullBackupJson(context)
+            val meta = BioSyncBackupManager.saveSnapshotToRecoveryVault(context)
+            vaultMeta = meta
+            pendingExportJson = json
+            runCatching {
+              val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+              clipboard?.setPrimaryClip(ClipData.newPlainText("BioSync Backup JSON", json))
+            }
+            backupStatusBanner = "Full database backup saved to Recovery Vault & copied to Clipboard."
+            runCatching {
+              exportDocumentLauncher.launch("biosync_backup_${subjectIdBadge.lowercase(Locale.US)}.json")
+            }
+          },
+          onOpenImportDialog = {
+            haptics.selection()
+            showImportBackupDialog = true
+          },
+          metrics = metrics,
+        )
+
+        Spacer(modifier = Modifier.height(metrics.sectionGap))
+
+        // 6. Factory Reset & Database Wipe Card
         SettingsFactoryResetCard(
           onRequestFactoryReset = {
             haptics.warning()
@@ -473,6 +542,15 @@ fun BioSyncSettingsScreen(
           metrics = metrics,
         )
       }
+
+      // Centered Floating Bottom Navigation Bar (Home • Stats • Settings)
+      BioSyncFloatingBottomBar(
+        activeDestination = BioSyncFloatingNavDestination.SETTINGS,
+        onSelectHome = onNavigateBackToDashboard,
+        onSelectStats = onNavigateToStats,
+        onSelectSettings = {},
+        modifier = Modifier.align(Alignment.BottomCenter),
+      )
     }
   }
 
@@ -489,12 +567,34 @@ fun BioSyncSettingsScreen(
     )
   }
 
+  if (showImportBackupDialog) {
+    BioSyncBackupImportDialog(
+      onRestoreComplete = { restoredBundle, jumpDirectlyToDashboard ->
+        haptics.confirm()
+        vaultMeta = BioSyncBackupManager.getRecoveryVaultMeta(context)
+        showImportBackupDialog = false
+        onBackupRestored(restoredBundle, jumpDirectlyToDashboard)
+      },
+      onDismiss = {
+        haptics.selection()
+        showImportBackupDialog = false
+      },
+    )
+  }
+
   if (showFactoryResetModal) {
     FactoryResetConfirmationDialog(
       subjectName = subjectName,
       subjectIdBadge = subjectIdBadge,
-      onConfirmReset = {
+      onKeepBackupAndReset = {
+        haptics.confirm()
+        BioSyncBackupManager.saveSnapshotToRecoveryVault(context)
+        showFactoryResetModal = false
+        onFactoryResetConfirmed()
+      },
+      onResetWithoutBackup = {
         haptics.warning()
+        BioSyncBackupManager.clearRecoveryVault(context)
         showFactoryResetModal = false
         onFactoryResetConfirmed()
       },
@@ -1358,6 +1458,16 @@ private fun SettingsAllInfoEditorSection(
           modifier = Modifier.weight(1f),
         )
       }
+      Spacer(modifier = Modifier.height(6.dp))
+      Text(
+        text = "* Step counter is not fully accurate yet — we will improve it in future updates.",
+        color = SettingsZinc400.copy(alpha = 0.85f),
+        fontFamily = InterFontFamily,
+        fontSize = metrics.spScaled(9.2f, 8.2f, 10.2f),
+        modifier = Modifier
+          .fillMaxWidth()
+          .testTag("settings_steps_accuracy_disclaimer"),
+      )
     }
   }
 }
@@ -1990,13 +2100,416 @@ private fun SettingsFactoryResetCard(
 }
 
 @Composable
-private fun FactoryResetConfirmationDialog(
+private fun SettingsBackupVaultCard(
   subjectName: String,
   subjectIdBadge: String,
-  onConfirmReset: () -> Unit,
+  vaultMeta: BioSyncBackupMeta?,
+  statusBanner: String?,
+  onCreateBackup: () -> Unit,
+  onOpenImportDialog: () -> Unit,
+  metrics: SettingsResponsiveMetrics,
+) {
+  val cardShape = RoundedCornerShape(metrics.cardCornerRadius)
+  val platinumLight = Color(0xFFF4F4F5)
+  val platinumMid = Color(0xFFD4D4D8)
+  val goldAccent = Color(0xFFFFD166)
+  val emeraldAccent = Color(0xFF10B981)
+  val dateFormat = remember { SimpleDateFormat("MMM dd, yyyy • HH:mm", Locale.US) }
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(cardShape)
+      .drawWithCache {
+        val cornerPx = metrics.cardCornerRadius.toPx()
+        val bodyBrush = Brush.verticalGradient(
+          colorStops = arrayOf(
+            0.0f to Color(0xFF18181B),
+            0.42f to Color(0xFF101013),
+            1.0f to Color(0xFF070709),
+          ),
+        )
+        val topRadialGlow = Brush.radialGradient(
+          colors = listOf(
+            PureWhite.copy(alpha = 0.14f),
+            goldAccent.copy(alpha = 0.05f),
+            Color.Transparent,
+          ),
+          center = Offset(size.width * 0.25f, 0f),
+          radius = size.width * 0.90f,
+        )
+        val borderBrush = Brush.verticalGradient(
+          colorStops = arrayOf(
+            0.0f to PureWhite.copy(alpha = 0.68f),
+            0.35f to platinumMid.copy(alpha = 0.38f),
+            0.75f to Color(0xFF27272A),
+            1.0f to Color(0xFF141417),
+          ),
+        )
+        onDrawBehind {
+          drawRoundRect(
+            brush = bodyBrush,
+            cornerRadius = CornerRadius(cornerPx, cornerPx),
+          )
+          drawRoundRect(
+            brush = topRadialGlow,
+            cornerRadius = CornerRadius(cornerPx, cornerPx),
+          )
+          drawRoundRect(
+            brush = borderBrush,
+            cornerRadius = CornerRadius(cornerPx, cornerPx),
+            style = Stroke(width = 1.25.dp.toPx()),
+          )
+          drawLine(
+            brush = Brush.horizontalGradient(
+              colors = listOf(
+                Color.Transparent,
+                PureWhite.copy(alpha = 0.92f),
+                goldAccent.copy(alpha = 0.65f),
+                PureWhite.copy(alpha = 0.85f),
+                Color.Transparent,
+              ),
+            ),
+            start = Offset(cornerPx * 0.85f, 1.dp.toPx()),
+            end = Offset(size.width - cornerPx * 0.85f, 1.dp.toPx()),
+            strokeWidth = 1.2.dp.toPx(),
+          )
+        }
+      }
+      .padding(metrics.cardPadding)
+      .testTag("settings_backup_vault_card"),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
+  ) {
+    // 1. Architectural Vault Header Row
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Row(
+        modifier = Modifier.weight(1f),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        // 3D Sculpted Brushed-Platinum Vault Crest
+        Box(
+          modifier = Modifier
+            .size(30.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+              brush = Brush.linearGradient(
+                colors = listOf(PureWhite, platinumMid, Color(0xFFA1A1AA)),
+              ),
+            )
+            .border(1.dp, PureWhite, RoundedCornerShape(8.dp)),
+          contentAlignment = Alignment.Center,
+        ) {
+          Canvas(modifier = Modifier.size(15.dp)) {
+            val w = size.width
+            val h = size.height
+            drawRoundRect(
+              color = ObsidianBlack,
+              topLeft = Offset(w * 0.12f, h * 0.14f),
+              size = Size(w * 0.76f, h * 0.72f),
+              cornerRadius = CornerRadius(2.5.dp.toPx(), 2.5.dp.toPx()),
+              style = Stroke(width = 1.6.dp.toPx()),
+            )
+            drawCircle(
+              color = ObsidianBlack,
+              radius = w * 0.17f,
+              center = Offset(w * 0.50f, h * 0.50f),
+              style = Stroke(width = 1.5.dp.toPx()),
+            )
+            drawCircle(
+              color = ObsidianBlack,
+              radius = w * 0.05f,
+              center = Offset(w * 0.50f, h * 0.50f),
+            )
+          }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+          Text(
+            text = "CRYPTIC DATA VAULT & SNAPSHOTS",
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(10.6f, 9.2f, 12.0f),
+            letterSpacing = 0.8.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+          Text(
+            text = "STEPS 01–04 • TIMELINE LOGS • CALENDAR • SAVED FOODS",
+            color = SettingsZinc300,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = metrics.spScaled(7.5f, 6.6f, 8.5f),
+            letterSpacing = 0.5.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+      }
+
+      Box(
+        modifier = Modifier
+          .clip(RoundedCornerShape(7.dp))
+          .background(if (vaultMeta != null) Color(0xFF0A1F17) else Color(0xFF141418))
+          .border(
+            1.dp,
+            if (vaultMeta != null) emeraldAccent.copy(alpha = 0.75f) else SettingsZinc700,
+            RoundedCornerShape(7.dp),
+          )
+          .padding(horizontal = 8.5.dp, vertical = 4.dp),
+      ) {
+        Text(
+          text = if (vaultMeta != null) "● VAULT ARMED" else "○ STANDBY",
+          color = if (vaultMeta != null) emeraldAccent else SettingsZinc300,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = metrics.spScaled(7.8f, 6.8f, 8.8f),
+          letterSpacing = 0.5.sp,
+        )
+      }
+    }
+
+    // 2. Sculpted 3D Snapshot Telemetry Deck
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(12.dp))
+        .background(Color(0xFF09090C))
+        .border(1.dp, Color(0xFF27272A), RoundedCornerShape(12.dp))
+        .padding(12.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      if (vaultMeta != null) {
+        val vaultBadge = BioSyncLocalStore.computeSubjectIdBadge(vaultMeta.subjectName)
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(goldAccent),
+            )
+            Text(
+              text = "ACTIVE SNAPSHOT • ${vaultMeta.subjectName.uppercase()} ($vaultBadge)",
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = metrics.spScaled(8.6f, 7.6f, 9.6f),
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
+          }
+          Text(
+            text = dateFormat.format(Date(vaultMeta.createdAtEpochMs)),
+            color = goldAccent,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = metrics.spScaled(7.8f, 6.9f, 8.8f),
+          )
+        }
+
+        // 3 Architectural Metric Pills
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+          VaultTelemetryMetricChip(
+            label = "TIMELINE LOGS",
+            value = vaultMeta.totalTimelineLogsCount.toString(),
+            accent = PureWhite,
+            modifier = Modifier.weight(1f),
+          )
+          VaultTelemetryMetricChip(
+            label = "CALENDAR DAYS",
+            value = vaultMeta.historicalDaysCount.toString(),
+            accent = goldAccent,
+            modifier = Modifier.weight(1f),
+          )
+          VaultTelemetryMetricChip(
+            label = "SAVED FOODS",
+            value = vaultMeta.savedQuickItemsCount.toString(),
+            accent = emeraldAccent,
+            modifier = Modifier.weight(1f),
+          )
+        }
+      } else {
+        Text(
+          text = "Create an encrypted local JSON snapshot of your entire BioSync database (Steps 01–04 calibration, custom targets, timeline entries, and calendar history) for instant 1-tap recovery.",
+          color = SettingsZinc300,
+          fontFamily = InterFontFamily,
+          fontSize = metrics.spScaled(10.8f, 9.6f, 12.0f),
+          lineHeight = metrics.spScaled(15.2f, 13.5f, 16.8f),
+        )
+      }
+
+      if (!statusBanner.isNullOrBlank()) {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF071A12))
+            .border(1.dp, emeraldAccent.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 9.dp, vertical = 6.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          Text(
+            text = "✓ $statusBanner",
+            color = emeraldAccent,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(8.6f, 7.6f, 9.6f),
+          )
+        }
+      }
+    }
+
+    // 3. High-Contrast Dual Action Buttons: BACKUP DATA (Pure White 3D) & IMPORT BACKUP (Obsidian + Platinum)
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      Box(
+        modifier = Modifier
+          .weight(1f)
+          .height(48.dp)
+          .clip(RoundedCornerShape(11.dp))
+          .background(
+            brush = Brush.verticalGradient(
+              colors = listOf(PureWhite, platinumLight, platinumMid),
+            ),
+          )
+          .border(1.2.dp, PureWhite, RoundedCornerShape(11.dp))
+          .clickable(role = Role.Button, onClick = onCreateBackup)
+          .testTag("settings_backup_data_button"),
+        contentAlignment = Alignment.Center,
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          Text(
+            text = "▲",
+            color = ObsidianBlack,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Black,
+            fontSize = metrics.spScaled(9.5f, 8.5f, 10.8f),
+          )
+          Text(
+            text = "EXPORT BACKUP",
+            color = ObsidianBlack,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(10.6f, 9.4f, 12.0f),
+            letterSpacing = 0.6.sp,
+          )
+        }
+      }
+
+      Box(
+        modifier = Modifier
+          .weight(1f)
+          .height(48.dp)
+          .clip(RoundedCornerShape(11.dp))
+          .background(
+            brush = Brush.verticalGradient(
+              colors = listOf(Color(0xFF1F1F24), Color(0xFF121216)),
+            ),
+          )
+          .border(1.2.dp, PureWhite.copy(alpha = 0.55f), RoundedCornerShape(11.dp))
+          .clickable(role = Role.Button, onClick = onOpenImportDialog)
+          .testTag("settings_import_backup_button"),
+        contentAlignment = Alignment.Center,
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          Text(
+            text = "▼",
+            color = goldAccent,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Black,
+            fontSize = metrics.spScaled(9.5f, 8.5f, 10.8f),
+          )
+          Text(
+            text = "IMPORT BACKUP",
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(10.6f, 9.4f, 12.0f),
+            letterSpacing = 0.6.sp,
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun VaultTelemetryMetricChip(
+  label: String,
+  value: String,
+  accent: Color,
+  modifier: Modifier = Modifier,
+) {
+  Column(
+    modifier = modifier
+      .clip(RoundedCornerShape(8.dp))
+      .background(Color(0xFF121216))
+      .border(1.dp, Color(0xFF27272A), RoundedCornerShape(8.dp))
+      .padding(horizontal = 8.dp, vertical = 6.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.spacedBy(2.dp),
+  ) {
+    Text(
+      text = value,
+      color = accent,
+      fontFamily = JetBrainsMonoFontFamily,
+      fontWeight = FontWeight.ExtraBold,
+      fontSize = 12.5.sp,
+    )
+    Text(
+      text = label,
+      color = SettingsZinc400,
+      fontFamily = JetBrainsMonoFontFamily,
+      fontWeight = FontWeight.Bold,
+      fontSize = 7.0.sp,
+      letterSpacing = 0.4.sp,
+      maxLines = 1,
+    )
+  }
+}
+
+/**
+ * Shared Welcome Screen Backup Check Modal:
+ * Shown immediately after clicking Continue ("Initialize Calibration") on the Welcome screen.
+ * Asks the user whether they have a backup to restore or want to start fresh.
+ */
+@Composable
+internal fun WelcomeBackupCheckModal(
+  onStartFreshCalibration: () -> Unit,
+  onOpenImportBackupFlow: () -> Unit,
   onDismiss: () -> Unit,
 ) {
-  val roseTint = Color(0xFFFDA4AF)
+  val context = LocalContext.current
+  val vaultMeta = remember { BioSyncBackupManager.getRecoveryVaultMeta(context) }
+  val platinumMid = Color(0xFFD4D4D8)
+  val goldAccent = Color(0xFFFFD166)
+  val emeraldAccent = Color(0xFF10B981)
+
   Dialog(
     onDismissRequest = onDismiss,
     properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -2004,25 +2517,752 @@ private fun FactoryResetConfirmationDialog(
     Box(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 22.dp),
+        .padding(horizontal = 20.dp),
       contentAlignment = Alignment.Center,
     ) {
       Column(
         modifier = Modifier
-          .widthIn(max = 440.dp)
+          .widthIn(max = 450.dp)
           .fillMaxWidth()
-          .clip(RoundedCornerShape(18.dp))
+          .clip(RoundedCornerShape(22.dp))
           .background(
             brush = Brush.verticalGradient(
-              colors = listOf(Color(0xFF1E0D12), Color(0xFF0A0608)),
+              colors = listOf(Color(0xFF18181C), Color(0xFF0D0D10), Color(0xFF060608)),
+            ),
+          )
+          .border(
+            width = 1.3.dp,
+            brush = Brush.verticalGradient(
+              colors = listOf(PureWhite.copy(alpha = 0.78f), platinumMid.copy(alpha = 0.35f), SettingsZinc800),
+            ),
+            shape = RoundedCornerShape(22.dp),
+          )
+          .padding(22.dp)
+          .testTag("welcome_backup_prompt_dialog"),
+        verticalArrangement = Arrangement.spacedBy(13.dp),
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(PureWhite),
+            )
+            Text(
+              text = "BIOSYNC VAULT • ONBOARDING CHECK",
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 10.4.sp,
+              letterSpacing = 0.9.sp,
+            )
+          }
+
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(6.dp))
+              .background(Color(0xFF141418))
+              .border(1.dp, SettingsZinc700, RoundedCornerShape(6.dp))
+              .clickable(role = Role.Button, onClick = onDismiss)
+              .padding(horizontal = 8.dp, vertical = 3.dp),
+          ) {
+            Text(
+              text = "ESC",
+              color = SettingsZinc300,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 9.sp,
+            )
+          }
+        }
+
+        Text(
+          text = "Restore Existing Protocol Vault?",
+          color = PureWhite,
+          fontFamily = InterFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = 20.5.sp,
+          letterSpacing = (-0.4).sp,
+        )
+
+        Text(
+          text = "If you previously exported a BioSync database backup or saved a pre-reset vault snapshot, you can restore 100% of your Steps 01–04 calibration, custom targets, timeline entries, and calendar history immediately.",
+          color = SettingsZinc300,
+          fontFamily = InterFontFamily,
+          fontSize = 12.5.sp,
+          lineHeight = 18.sp,
+        )
+
+        if (vaultMeta != null) {
+          val vaultBadge = BioSyncLocalStore.computeSubjectIdBadge(vaultMeta.subjectName)
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(12.dp))
+              .background(Color(0xFF0A0A0D))
+              .border(1.dp, goldAccent.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
+              .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Text(
+                text = "LOCAL VAULT DETECTED • ${vaultMeta.subjectName.uppercase()} ($vaultBadge)",
+                color = goldAccent,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 9.2.sp,
+                letterSpacing = 0.5.sp,
+              )
+              Text(
+                text = "READY",
+                color = emeraldAccent,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 8.4.sp,
+              )
+            }
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+              VaultTelemetryMetricChip(
+                label = "TIMELINE LOGS",
+                value = vaultMeta.totalTimelineLogsCount.toString(),
+                accent = PureWhite,
+                modifier = Modifier.weight(1f),
+              )
+              VaultTelemetryMetricChip(
+                label = "CALENDAR DAYS",
+                value = vaultMeta.historicalDaysCount.toString(),
+                accent = goldAccent,
+                modifier = Modifier.weight(1f),
+              )
+              VaultTelemetryMetricChip(
+                label = "SAVED FOODS",
+                value = vaultMeta.savedQuickItemsCount.toString(),
+                accent = emeraldAccent,
+                modifier = Modifier.weight(1f),
+              )
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        // Primary CTA: YES — IMPORT / RESTORE BACKUP (Pure White 3D Monolith)
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(50.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+              brush = Brush.verticalGradient(
+                colors = listOf(PureWhite, Color(0xFFE4E4E7)),
+              ),
+            )
+            .border(1.2.dp, PureWhite, RoundedCornerShape(12.dp))
+            .clickable(role = Role.Button, onClick = onOpenImportBackupFlow)
+            .testTag("welcome_has_backup_yes_btn"),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            text = if (vaultMeta != null) "YES — RESTORE FROM VAULT OR .JSON FILE" else "YES — IMPORT BACKUP DATA",
+            color = ObsidianBlack,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 11.6.sp,
+            letterSpacing = 0.7.sp,
+          )
+        }
+
+        // Secondary CTA: NO — START FRESH CALIBRATION (Obsidian + Platinum Border)
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF131317))
+            .border(1.dp, PureWhite.copy(alpha = 0.36f), RoundedCornerShape(12.dp))
+            .clickable(role = Role.Button, onClick = onStartFreshCalibration)
+            .testTag("welcome_has_backup_no_btn"),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            text = "NO — INITIALIZE NEW CALIBRATION (STEP 01)",
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.0.sp,
+            letterSpacing = 0.6.sp,
+          )
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Full Backup Import & Restore Dialog + Post-Import Destination Selector:
+ * - Supports 1-tap restore from Recovery Vault (if present), importing a `.json` backup file,
+ *   or pasting backup JSON from clipboard.
+ * - Automatically persists all restored data into `BioSyncLocalStore` and `DashboardLocalStore`.
+ * - After successful import, asks the user whether they want to:
+ *   1) Go through all calibration steps again (Step 01–04) with their restored data pre-filled
+ *   2) Jump directly to the Live Dashboard (Step 05)
+ */
+@Composable
+internal fun BioSyncBackupImportDialog(
+  onRestoreComplete: (restoredBundle: BioSyncFullBackupBundle, jumpDirectlyToDashboard: Boolean) -> Unit,
+  onDismiss: () -> Unit,
+) {
+  val context = LocalContext.current
+  val haptics = rememberBioSyncHaptics()
+  val platinumMid = Color(0xFFD4D4D8)
+  val goldAccent = Color(0xFFFFD166)
+  val emeraldAccent = Color(0xFF10B981)
+
+  val vaultMeta = remember { BioSyncBackupManager.getRecoveryVaultMeta(context) }
+  var rawJsonInput by rememberSaveable { mutableStateOf("") }
+  var errorMessage by remember { mutableStateOf<String?>(null) }
+  var importedBundle by remember { mutableStateOf<BioSyncFullBackupBundle?>(null) }
+
+  val openDocumentLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.OpenDocument(),
+  ) { uri ->
+    if (uri != null) {
+      runCatching {
+        val text = context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+        if (text.isNotBlank()) {
+          rawJsonInput = text
+          val restored = BioSyncBackupManager.importAndPersistBackupJson(context, text).getOrNull()
+          if (restored != null) {
+            haptics.confirm()
+            errorMessage = null
+            importedBundle = restored
+          } else {
+            haptics.warning()
+            errorMessage = "Selected file is not a valid BioSync backup JSON."
+          }
+        }
+      }.onFailure {
+        haptics.warning()
+        errorMessage = "Unable to read selected backup file."
+      }
+    }
+  }
+
+  Dialog(
+    onDismissRequest = onDismiss,
+    properties = DialogProperties(usePlatformDefaultWidth = false),
+  ) {
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 20.dp),
+      contentAlignment = Alignment.Center,
+    ) {
+      Column(
+        modifier = Modifier
+          .widthIn(max = 460.dp)
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(22.dp))
+          .background(
+            brush = Brush.verticalGradient(
+              colors = listOf(Color(0xFF18181C), Color(0xFF0D0D10), Color(0xFF060608)),
+            ),
+          )
+          .border(
+            width = 1.3.dp,
+            brush = Brush.verticalGradient(
+              colors = listOf(PureWhite.copy(alpha = 0.80f), platinumMid.copy(alpha = 0.35f), SettingsZinc800),
+            ),
+            shape = RoundedCornerShape(22.dp),
+          )
+          .padding(22.dp)
+          .verticalScroll(rememberScrollState())
+          .testTag("backup_import_dialog"),
+        verticalArrangement = Arrangement.spacedBy(13.dp),
+      ) {
+        val activeRestored = importedBundle
+        if (activeRestored == null) {
+          // PHASE 1: SELECT OR PASTE BACKUP SOURCE
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(8.dp)
+                  .clip(CircleShape)
+                  .background(PureWhite),
+              )
+              Text(
+                text = "DATABASE RESTORE ENGINE",
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 10.6.sp,
+                letterSpacing = 0.8.sp,
+              )
+            }
+
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color(0xFF141418))
+                .border(1.dp, SettingsZinc700, RoundedCornerShape(6.dp))
+                .clickable(role = Role.Button, onClick = onDismiss)
+                .padding(horizontal = 8.dp, vertical = 3.dp),
+            ) {
+              Text(
+                text = "CLOSE",
+                color = SettingsZinc300,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = 9.sp,
+              )
+            }
+          }
+
+          Text(
+            text = "Import & Synchronize Vault",
+            color = PureWhite,
+            fontFamily = InterFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 20.sp,
+            letterSpacing = (-0.4).sp,
+          )
+
+          // Option A: 1-Tap Recovery Vault Restore (if available)
+          if (vaultMeta != null) {
+            val vaultBadge = BioSyncLocalStore.computeSubjectIdBadge(vaultMeta.subjectName)
+            Column(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(13.dp))
+                .background(Color(0xFF09090C))
+                .border(1.dp, goldAccent.copy(alpha = 0.65f), RoundedCornerShape(13.dp))
+                .padding(13.dp),
+              verticalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Text(
+                  text = "RECOVERY VAULT • ${vaultMeta.subjectName.uppercase()} ($vaultBadge)",
+                  color = goldAccent,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 9.4.sp,
+                  letterSpacing = 0.5.sp,
+                )
+                Text(
+                  text = "VERIFIED",
+                  color = emeraldAccent,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 8.2.sp,
+                )
+              }
+
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+              ) {
+                VaultTelemetryMetricChip(
+                  label = "TIMELINE LOGS",
+                  value = vaultMeta.totalTimelineLogsCount.toString(),
+                  accent = PureWhite,
+                  modifier = Modifier.weight(1f),
+                )
+                VaultTelemetryMetricChip(
+                  label = "CALENDAR DAYS",
+                  value = vaultMeta.historicalDaysCount.toString(),
+                  accent = goldAccent,
+                  modifier = Modifier.weight(1f),
+                )
+                VaultTelemetryMetricChip(
+                  label = "SAVED FOODS",
+                  value = vaultMeta.savedQuickItemsCount.toString(),
+                  accent = emeraldAccent,
+                  modifier = Modifier.weight(1f),
+                )
+              }
+
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(44.dp)
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(
+                    brush = Brush.verticalGradient(
+                      colors = listOf(PureWhite, Color(0xFFE4E4E7)),
+                    ),
+                  )
+                  .border(1.dp, PureWhite, RoundedCornerShape(10.dp))
+                  .clickable(
+                    role = Role.Button,
+                    onClick = {
+                      val vaultJson = BioSyncBackupManager.getRecoveryVaultJson(context)
+                      if (!vaultJson.isNullOrBlank()) {
+                        val restored = BioSyncBackupManager.importAndPersistBackupJson(context, vaultJson).getOrNull()
+                        if (restored != null) {
+                          haptics.confirm()
+                          errorMessage = null
+                          importedBundle = restored
+                        } else {
+                          errorMessage = "Vault snapshot could not be parsed."
+                        }
+                      }
+                    },
+                  )
+                  .testTag("restore_from_vault_button"),
+                contentAlignment = Alignment.Center,
+              ) {
+                Text(
+                  text = "1-TAP RESTORE FROM RECOVERY VAULT",
+                  color = ObsidianBlack,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 10.6.sp,
+                  letterSpacing = 0.6.sp,
+                )
+              }
+            }
+          }
+
+          // Option B: Pick JSON file or Paste from Clipboard
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .weight(1f)
+                .height(44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFF141418))
+                .border(1.dp, PureWhite.copy(alpha = 0.50f), RoundedCornerShape(10.dp))
+                .clickable(
+                  role = Role.Button,
+                  onClick = {
+                    haptics.selection()
+                    runCatching {
+                      openDocumentLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                    }
+                  },
+                )
+                .testTag("import_backup_pick_file_btn"),
+              contentAlignment = Alignment.Center,
+            ) {
+              Text(
+                text = "SELECT .JSON FILE",
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 10.sp,
+                letterSpacing = 0.5.sp,
+              )
+            }
+
+            Box(
+              modifier = Modifier
+                .weight(1f)
+                .height(44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFF141418))
+                .border(1.dp, SettingsZinc700, RoundedCornerShape(10.dp))
+                .clickable(
+                  role = Role.Button,
+                  onClick = {
+                    haptics.selection()
+                    runCatching {
+                      val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                      val pasted = clipboard?.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+                      if (pasted.isNotBlank()) {
+                        rawJsonInput = pasted
+                        errorMessage = null
+                      }
+                    }
+                  },
+                )
+                .testTag("import_backup_paste_clipboard_btn"),
+              contentAlignment = Alignment.Center,
+            ) {
+              Text(
+                text = "PASTE CLIPBOARD",
+                color = SettingsZinc200,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 10.sp,
+                letterSpacing = 0.5.sp,
+              )
+            }
+          }
+
+          // Option C: Backup JSON Text Box
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(105.dp)
+              .clip(RoundedCornerShape(11.dp))
+              .background(Color(0xFF070709))
+              .border(1.dp, Color(0xFF27272A), RoundedCornerShape(11.dp))
+              .padding(11.dp),
+          ) {
+            if (rawJsonInput.isEmpty()) {
+              Text(
+                text = "Or paste your BioSync JSON backup payload here...",
+                color = SettingsZinc500,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontSize = 10.5.sp,
+              )
+            }
+            BasicTextField(
+              value = rawJsonInput,
+              onValueChange = {
+                rawJsonInput = it
+                errorMessage = null
+              },
+              textStyle = TextStyle(
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontSize = 10.5.sp,
+              ),
+              cursorBrush = SolidColor(PureWhite),
+              modifier = Modifier
+                .fillMaxSize()
+                .testTag("import_backup_json_input"),
+            )
+          }
+
+          if (!errorMessage.isNullOrBlank()) {
+            Text(
+              text = errorMessage!!,
+              color = DangerCrimson,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 10.sp,
+            )
+          }
+
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(48.dp)
+              .clip(RoundedCornerShape(11.dp))
+              .background(
+                brush = Brush.verticalGradient(
+                  colors = listOf(PureWhite, Color(0xFFE4E4E7)),
+                ),
+              )
+              .border(1.2.dp, PureWhite, RoundedCornerShape(11.dp))
+              .clickable(
+                role = Role.Button,
+                onClick = {
+                  val restored = BioSyncBackupManager.importAndPersistBackupJson(context, rawJsonInput).getOrNull()
+                  if (restored != null) {
+                    haptics.confirm()
+                    errorMessage = null
+                    importedBundle = restored
+                  } else {
+                    haptics.warning()
+                    errorMessage = "Invalid backup JSON. Use Recovery Vault, pick a valid .json file, or paste a full backup."
+                  }
+                },
+              )
+              .testTag("import_backup_verify_apply_btn"),
+            contentAlignment = Alignment.Center,
+          ) {
+            Text(
+              text = "VERIFY & SYNCHRONIZE DATABASE",
+              color = ObsidianBlack,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 11.4.sp,
+              letterSpacing = 0.6.sp,
+            )
+          }
+        } else {
+          // PHASE 2: DATA SUCCESSFULLY IMPORTED -> ASK USER WHETHER TO GO THROUGH ALL STEPS AGAIN OR JUMP TO DASHBOARD
+          val restoredBadge = BioSyncLocalStore.computeSubjectIdBadge(activeRestored.meta.subjectName)
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .size(9.dp)
+                .clip(CircleShape)
+                .background(emeraldAccent),
+            )
+            Text(
+              text = "VAULT SYNCHRONIZATION COMPLETE",
+              color = emeraldAccent,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 10.8.sp,
+              letterSpacing = 0.8.sp,
+            )
+          }
+
+          Text(
+            text = "All Database Records Restored",
+            color = PureWhite,
+            fontFamily = InterFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 20.sp,
+            letterSpacing = (-0.4).sp,
+          )
+
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(12.dp))
+              .background(Color(0xFF09090C))
+              .border(1.dp, emeraldAccent.copy(alpha = 0.60f), RoundedCornerShape(12.dp))
+              .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            Text(
+              text = "RESTORED SUBJECT • ${activeRestored.meta.subjectName.uppercase()} ($restoredBadge)",
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 9.5.sp,
+              letterSpacing = 0.5.sp,
+            )
+            Text(
+              text = "Calibrated targets (${activeRestored.storedState.customCaloriesKcal} kcal • ${activeRestored.storedState.customProteinGrams}g P • ${activeRestored.storedState.customHydrationMl} ml H₂O), ${activeRestored.meta.totalTimelineLogsCount} timeline logs, and ${activeRestored.meta.historicalDaysCount} calendar days are now active.",
+              color = SettingsZinc200,
+              fontFamily = InterFontFamily,
+              fontSize = 11.8.sp,
+              lineHeight = 16.8.sp,
+            )
+          }
+
+          Text(
+            text = "Select your launch destination:",
+            color = PureWhite,
+            fontFamily = InterFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 13.5.sp,
+          )
+
+          // Option 1: Jump Directly to Dashboard
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(48.dp)
+              .clip(RoundedCornerShape(12.dp))
+              .background(
+                brush = Brush.verticalGradient(
+                  colors = listOf(PureWhite, Color(0xFFE4E4E7)),
+                ),
+              )
+              .border(1.2.dp, PureWhite, RoundedCornerShape(12.dp))
+              .clickable(
+                role = Role.Button,
+                onClick = { onRestoreComplete(activeRestored, true) },
+              )
+              .testTag("post_import_jump_dashboard_btn"),
+            contentAlignment = Alignment.Center,
+          ) {
+            Text(
+              text = "JUMP DIRECTLY TO DASHBOARD",
+              color = ObsidianBlack,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 11.6.sp,
+              letterSpacing = 0.7.sp,
+            )
+          }
+
+          // Option 2: Go Through All Calibration Steps Again (Step 01-04)
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(46.dp)
+              .clip(RoundedCornerShape(12.dp))
+              .background(Color(0xFF141418))
+              .border(1.dp, PureWhite.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+              .clickable(
+                role = Role.Button,
+                onClick = { onRestoreComplete(activeRestored, false) },
+              )
+              .testTag("post_import_review_steps_btn"),
+            contentAlignment = Alignment.Center,
+          ) {
+            Text(
+              text = "REVIEW CALIBRATION STEPS (STEP 01–04)",
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 11.0.sp,
+              letterSpacing = 0.6.sp,
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun FactoryResetConfirmationDialog(
+  subjectName: String,
+  subjectIdBadge: String,
+  onKeepBackupAndReset: () -> Unit,
+  onResetWithoutBackup: () -> Unit,
+  onDismiss: () -> Unit,
+) {
+  val roseTint = Color(0xFFFDA4AF)
+  val goldAccent = Color(0xFFFFD166)
+  Dialog(
+    onDismissRequest = onDismiss,
+    properties = DialogProperties(usePlatformDefaultWidth = false),
+  ) {
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 20.dp),
+      contentAlignment = Alignment.Center,
+    ) {
+      Column(
+        modifier = Modifier
+          .widthIn(max = 450.dp)
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(20.dp))
+          .background(
+            brush = Brush.verticalGradient(
+              colors = listOf(Color(0xFF1A1014), Color(0xFF0C090B), Color(0xFF060506)),
             ),
           )
           .border(
             width = 1.2.dp,
             brush = Brush.verticalGradient(
-              colors = listOf(roseTint.copy(alpha = 0.72f), DangerCrimson.copy(alpha = 0.55f), SettingsZinc800),
+              colors = listOf(roseTint.copy(alpha = 0.72f), DangerCrimson.copy(alpha = 0.48f), SettingsZinc800),
             ),
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(20.dp),
           )
           .padding(20.dp)
           .verticalScroll(rememberScrollState())
@@ -2073,7 +3313,7 @@ private fun FactoryResetConfirmationDialog(
         Spacer(modifier = Modifier.height(12.dp))
 
         Text(
-          text = "Delete All Database Records?",
+          text = "Purge Active Database Records?",
           color = PureWhite,
           fontFamily = InterFontFamily,
           fontWeight = FontWeight.ExtraBold,
@@ -2101,15 +3341,72 @@ private fun FactoryResetConfirmationDialog(
             letterSpacing = 0.6.sp,
           )
           Text(
-            text = "This action permanently erases all saved protocol data — including Steps 01–04 calibration, custom macro targets, saved nutrition items, timeline logs, and streak progress — and restarts BioSync on the Welcome Home screen.",
+            text = "This action erases your active protocol database — including Steps 01–04 calibration, custom targets, saved foods, timeline logs, and streaks — and restarts BioSync on the Welcome screen.",
             color = SettingsZinc300,
             fontFamily = InterFontFamily,
-            fontSize = 12.6.sp,
-            lineHeight = 18.sp,
+            fontSize = 12.2.sp,
+            lineHeight = 17.5.sp,
           )
         }
 
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Suggestion / Warning Box to keep a Backup before Factory Reset (Obsidian & Gold/White)
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(11.dp))
+            .background(Color(0xFF0B0B0E))
+            .border(1.dp, goldAccent.copy(alpha = 0.62f), RoundedCornerShape(11.dp))
+            .padding(12.dp),
+          verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+          Text(
+            text = "RECOMMENDED • ACCIDENTAL RESET SAFEGUARD",
+            color = goldAccent,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 9.2.sp,
+            letterSpacing = 0.5.sp,
+          )
+          Text(
+            text = "Keep an encrypted Recovery Vault snapshot before resetting. If you reset by mistake, you can restore 100% of your database in 1 tap from the Welcome screen.",
+            color = PureWhite,
+            fontFamily = InterFontFamily,
+            fontSize = 11.6.sp,
+            lineHeight = 16.5.sp,
+          )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Option 1: Keep Backup & Factory Reset (Pure White 3D Primary Action)
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(
+              brush = Brush.verticalGradient(
+                colors = listOf(PureWhite, Color(0xFFE4E4E7)),
+              ),
+            )
+            .border(1.2.dp, PureWhite, RoundedCornerShape(11.dp))
+            .clickable(role = Role.Button, onClick = onKeepBackupAndReset)
+            .testTag("factory_reset_keep_backup_btn"),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            text = "KEEP BACKUP & FACTORY RESET",
+            color = ObsidianBlack,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 11.4.sp,
+            letterSpacing = 0.6.sp,
+          )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -2118,7 +3415,7 @@ private fun FactoryResetConfirmationDialog(
           Box(
             modifier = Modifier
               .weight(1f)
-              .height(46.dp)
+              .height(44.dp)
               .clip(RoundedCornerShape(10.dp))
               .background(SettingsZinc900)
               .border(1.dp, SettingsZinc700, RoundedCornerShape(10.dp))
@@ -2131,14 +3428,14 @@ private fun FactoryResetConfirmationDialog(
               color = PureWhite,
               fontFamily = InterFontFamily,
               fontWeight = FontWeight.SemiBold,
-              fontSize = 13.5.sp,
+              fontSize = 13.sp,
             )
           }
 
           Box(
             modifier = Modifier
               .weight(1.25f)
-              .height(46.dp)
+              .height(44.dp)
               .clip(RoundedCornerShape(10.dp))
               .background(
                 brush = Brush.horizontalGradient(
@@ -2146,16 +3443,16 @@ private fun FactoryResetConfirmationDialog(
                 ),
               )
               .border(1.dp, roseTint.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-              .clickable(role = Role.Button, onClick = onConfirmReset)
+              .clickable(role = Role.Button, onClick = onResetWithoutBackup)
               .testTag("factory_reset_confirm_btn"),
             contentAlignment = Alignment.Center,
           ) {
             Text(
-              text = "Delete & Restart",
+              text = "Reset Without Backup",
               color = PureWhite,
               fontFamily = InterFontFamily,
               fontWeight = FontWeight.Bold,
-              fontSize = 13.5.sp,
+              fontSize = 12.5.sp,
             )
           }
         }
@@ -2163,3 +3460,5 @@ private fun FactoryResetConfirmationDialog(
     }
   }
 }
+
+

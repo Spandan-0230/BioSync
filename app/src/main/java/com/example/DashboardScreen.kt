@@ -79,12 +79,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.ui.theme.CaloriesEnd
 import com.example.ui.theme.CaloriesMid
 import com.example.ui.theme.CaloriesStart
@@ -188,10 +193,11 @@ private fun computeDashboardMetrics(
   }
   val fontCompensation = targetFontGrowth / safeFontScale
 
-  val contentMaxWidth = if (isExpanded) {
-    (w * 0.80f).coerceIn(500f, 600f).dp
-  } else {
-    w.dp
+  val contentMaxWidth = when {
+    w >= 1100f -> (w * 0.86f).coerceIn(820f, 1080f).dp
+    w >= 840f -> (w * 0.84f).coerceIn(680f, 880f).dp
+    isExpanded -> (w * 0.82f).coerceIn(520f, 680f).dp
+    else -> w.dp
   }
 
   return DashboardResponsiveMetrics(
@@ -200,7 +206,7 @@ private fun computeDashboardMetrics(
     contentMaxWidth = contentMaxWidth,
     horizontalPadding = (18f * widthFactor).coerceIn(14f, 28f).dp,
     topOffsetPadding = (12f * heightFactor).coerceIn(8f, 18f).dp,
-    bottomOffsetPadding = (32f * heightFactor).coerceIn(22f, 44f).dp,
+    bottomOffsetPadding = (106f * heightFactor).coerceIn(88f, 126f).dp,
     sectionGap = (15f * heightFactor).coerceIn(11f, 20f).dp,
     cardCornerRadius = (18f * scale).coerceIn(14f, 20f).dp,
     cardPadding = (15f * scale).coerceIn(12f, 19f).dp,
@@ -442,6 +448,7 @@ fun BioSyncDashboardScreen(
   targetCarbsGrams: Int,
   targetFatsGrams: Int,
   targetHydrationMl: Int,
+  restDayWaterDeductionMl: Int = 0,
   targetStepsCount: Int,
   streakThreshold: StreakThresholdOption,
   mealFrequency: MealFrequencyOption,
@@ -454,6 +461,7 @@ fun BioSyncDashboardScreen(
   onDayOneCountdownFinished: () -> Unit = {},
   onOpenProtocolSummary: () -> Unit,
   onOpenSettingsPage: () -> Unit = onOpenProtocolSummary,
+  onOpenStatsPage: () -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
   val context = LocalContext.current
@@ -496,7 +504,13 @@ fun BioSyncDashboardScreen(
   val targetProtein = targetProteinGrams.coerceAtLeast(30)
   val targetCarbs = targetCarbsGrams.coerceAtLeast(40)
   val targetFats = targetFatsGrams.coerceAtLeast(20)
-  val targetWaterMl = targetHydrationMl.coerceAtLeast(500)
+  val trainingWaterMl = targetHydrationMl.coerceAtLeast(500)
+  val restWaterMl = if (activityLevel == ActivityLevelOption.SEDENTARY || selectedWorkoutDays.isEmpty()) {
+    trainingWaterMl
+  } else {
+    (trainingWaterMl - restDayWaterDeductionMl.coerceAtLeast(0)).coerceAtLeast(1500)
+  }
+  val targetWaterMl = if (isActiveWorkoutDay) trainingWaterMl else restWaterMl
   val targetSteps = targetStepsCount.coerceAtLeast(1000)
 
   val stepSyncController = rememberBioSyncStepSyncController(
@@ -524,7 +538,11 @@ fun BioSyncDashboardScreen(
   val loggedWaterMl = remember(timelineEntries) {
     timelineEntries.sumOf { it.hydrationMl }.coerceAtLeast(0)
   }
-  val liveSteps = stepSyncState.liveTodaySteps.coerceAtLeast(0)
+  val sensorSteps = stepSyncState.liveTodaySteps.coerceAtLeast(0)
+  val manualStepsToday = dashboardData.manualStepsToday.coerceAtLeast(0)
+  val liveSteps = (sensorSteps + manualStepsToday).coerceAtLeast(0)
+  val effectiveDistanceKm = stepSyncState.liveDistanceKm.coerceAtLeast(0f) + (manualStepsToday * 0.000762f)
+  var showCustomStepsModal by remember { mutableStateOf(false) }
 
   val streakThresholdPercent = streakThreshold.percentage
 
@@ -573,6 +591,38 @@ fun BioSyncDashboardScreen(
           lastCompletedStreakDayKey = "",
         ),
       )
+    }
+  }
+
+  // Continuously archive today's live telemetry & timeline into dailyHistoryMap inside the user's database
+  LaunchedEffect(
+    timelineEntries,
+    liveSteps,
+    targetCalories,
+    targetProtein,
+    targetCarbs,
+    targetFats,
+    targetWaterMl,
+    targetSteps,
+    streakThresholdPercent,
+    allSixMet,
+    isActiveWorkoutDay,
+  ) {
+    val synced = DashboardLocalStore.withSyncedTodayRecord(
+      data = dashboardData,
+      liveSteps = liveSteps,
+      targetSteps = targetSteps,
+      targetCalories = targetCalories,
+      targetProtein = targetProtein,
+      targetCarbs = targetCarbs,
+      targetFats = targetFats,
+      targetWaterMl = targetWaterMl,
+      streakThresholdPercent = streakThresholdPercent,
+      streakQualified = allSixMet,
+      isWorkoutDay = isActiveWorkoutDay,
+    )
+    if (synced != dashboardData) {
+      persistDashboardData(synced)
     }
   }
 
@@ -764,7 +814,36 @@ fun BioSyncDashboardScreen(
             metrics = metrics,
           )
         } else {
-          // 1B. CHRONOMETRIC REVERSE COUNTDOWN DECK (Day Remaining to End + Next Birthday Reverse Countdown)
+          // 2. PRIORITY #1 TOP BLOCK: STREAK PROTOCOL ENGINE (Positioned directly above Chronometric Reverse Telemetry)
+          DashboardCombinedStreakHeroCard(
+            streakDays = dashboardData.baseStreakDays,
+            streakThresholdPercent = streakThresholdPercent,
+            liveSteps = liveSteps,
+            targetSteps = targetSteps,
+            loggedCalories = loggedCalories,
+            targetCalories = targetCalories,
+            loggedProtein = loggedProtein,
+            targetProtein = targetProtein,
+            loggedCarbs = loggedCarbs,
+            targetCarbs = targetCarbs,
+            loggedFats = loggedFats,
+            targetFats = targetFats,
+            loggedWaterMl = loggedWaterMl,
+            targetWaterMl = targetWaterMl,
+            stepsQualifies = stepsQualifies,
+            caloriesQualifies = caloriesQualifies,
+            proteinQualifies = proteinQualifies,
+            carbsQualifies = carbsQualifies,
+            fatsQualifies = fatsQualifies,
+            waterQualifies = waterQualifies,
+            ambientPhase = ambientPulse,
+            borderFlashProgress = if (activeFlashCardIndex == 0) cardFlashProgress else 0f,
+            metrics = metrics,
+          )
+
+          Spacer(modifier = Modifier.height(metrics.sectionGap))
+
+          // 3. CHRONOMETRIC REVERSE TELEMETRY (Positioned directly below Streak Protocol Engine)
           DashboardChronometricReverseCountdownCard(
             nowEpochMs = liveNowEpochMs,
             ageYears = ageYears,
@@ -777,52 +856,29 @@ fun BioSyncDashboardScreen(
 
           Spacer(modifier = Modifier.height(metrics.sectionGap))
 
-        // 2. FLOATING COMBINED DAILY STREAK CARD (Attractive 3x2 Pillar Bento Grid)
-        DashboardCombinedStreakHeroCard(
-          streakDays = dashboardData.baseStreakDays,
-          streakThresholdPercent = streakThresholdPercent,
-          liveSteps = liveSteps,
-          targetSteps = targetSteps,
-          loggedCalories = loggedCalories,
-          targetCalories = targetCalories,
-          loggedProtein = loggedProtein,
-          targetProtein = targetProtein,
-          loggedCarbs = loggedCarbs,
-          targetCarbs = targetCarbs,
-          loggedFats = loggedFats,
-          targetFats = targetFats,
-          loggedWaterMl = loggedWaterMl,
-          targetWaterMl = targetWaterMl,
-          stepsQualifies = stepsQualifies,
-          caloriesQualifies = caloriesQualifies,
-          proteinQualifies = proteinQualifies,
-          carbsQualifies = carbsQualifies,
-          fatsQualifies = fatsQualifies,
-          waterQualifies = waterQualifies,
-          borderFlashProgress = if (activeFlashCardIndex == 0) cardFlashProgress else 0f,
-          metrics = metrics,
-        )
+          // 4. FLOATING DAILY STEPS COMMAND CARD (With Custom Steps Input Button — Excluded from Timeline)
+          DashboardPrimaryStepsHeroCard(
+            liveSteps = liveSteps,
+            manualStepsToday = manualStepsToday,
+            targetSteps = targetSteps,
+            liveDistanceKm = effectiveDistanceKm,
+            isActivelyWalking = stepSyncState.isActivelyWalking,
+            streakThresholdPercent = streakThresholdPercent,
+            stepsQualifies = stepsQualifies,
+            borderFlashProgress = if (activeFlashCardIndex == 1) cardFlashProgress else 0f,
+            onForceSyncSteps = {
+              haptics.selection()
+              stepSyncController.forceRefreshNow()
+            },
+            onOpenCustomStepsModal = {
+              haptics.selection()
+              showCustomStepsModal = true
+            },
+            numberFormat = numberFormat,
+            metrics = metrics,
+          )
 
-        Spacer(modifier = Modifier.height(metrics.sectionGap))
-
-        // 3. PRIORITY #1: FLOATING DAILY STEPS COMMAND CARD (Dual-Telemetry Layout without clunky boxes)
-        DashboardPrimaryStepsHeroCard(
-          liveSteps = liveSteps,
-          targetSteps = targetSteps,
-          liveDistanceKm = stepSyncState.liveDistanceKm,
-          isActivelyWalking = stepSyncState.isActivelyWalking,
-          streakThresholdPercent = streakThresholdPercent,
-          stepsQualifies = stepsQualifies,
-          borderFlashProgress = if (activeFlashCardIndex == 1) cardFlashProgress else 0f,
-          onForceSyncSteps = {
-            haptics.selection()
-            stepSyncController.forceRefreshNow()
-          },
-          numberFormat = numberFormat,
-          metrics = metrics,
-        )
-
-        Spacer(modifier = Modifier.height(metrics.sectionGap))
+          Spacer(modifier = Modifier.height(metrics.sectionGap))
 
         // 4. FLOATING METABOLIC ENERGY (CALORIES) & 3-COLUMN MACROS CARD (Clean Calorie Balance Readout)
         DashboardCaloriesAndMacrosCard(
@@ -1004,6 +1060,58 @@ fun BioSyncDashboardScreen(
         )
         }
       }
+    }
+
+    val isWaitingForInitialDayOneBottomBar = !dayOneInitialCountdownCompleted &&
+      dayOneAnchorStartEpochMillis > 0L &&
+      liveNowEpochMs < dayOneAnchorStartEpochMillis
+
+    // Centered Floating Bottom Navigation Bar (Home • Stats • Settings; Stats hidden during Day 01 Anchor Lock)
+    BioSyncFloatingBottomBar(
+      activeDestination = BioSyncFloatingNavDestination.HOME,
+      showStatsOption = !isWaitingForInitialDayOneBottomBar,
+      onSelectHome = {},
+      onSelectStats = {
+        if (!isWaitingForInitialDayOneBottomBar) {
+          onOpenStatsPage()
+        }
+      },
+      onSelectSettings = onOpenSettingsPage,
+      modifier = Modifier.align(Alignment.BottomCenter),
+    )
+
+    if (showCustomStepsModal && !isWaitingForInitialDayOneBottomBar) {
+      DashboardCustomStepsInputModal(
+        currentManualSteps = manualStepsToday,
+        currentTotalSteps = liveSteps,
+        targetSteps = targetSteps,
+        numberFormat = numberFormat,
+        onAddCustomSteps = { addedSteps ->
+          haptics.confirm()
+          val newManual = (dashboardData.manualStepsToday + addedSteps).coerceIn(0, 150_000)
+          persistDashboardData(
+            dashboardData.copy(manualStepsToday = newManual),
+          )
+          showCustomStepsModal = false
+        },
+        onSetExactCustomSteps = { exactManualSteps ->
+          haptics.confirm()
+          persistDashboardData(
+            dashboardData.copy(manualStepsToday = exactManualSteps.coerceIn(0, 150_000)),
+          )
+          showCustomStepsModal = false
+        },
+        onResetCustomSteps = {
+          haptics.selection()
+          persistDashboardData(
+            dashboardData.copy(manualStepsToday = 0),
+          )
+          showCustomStepsModal = false
+        },
+        onDismiss = {
+          showCustomStepsModal = false
+        },
+      )
     }
   }
 }
@@ -2415,6 +2523,7 @@ private fun DashboardCombinedStreakHeroCard(
   carbsQualifies: Boolean,
   fatsQualifies: Boolean,
   waterQualifies: Boolean,
+  ambientPhase: Float = 0f,
   borderFlashProgress: Float = 0f,
   metrics: DashboardResponsiveMetrics,
 ) {
@@ -2445,18 +2554,37 @@ private fun DashboardCombinedStreakHeroCard(
     label = "streak_readiness_fill",
   )
 
+  // Distinct Streak Ignition Palette (Burnished Solar Gold + Ember Coral + Pure White on Obsidian Black)
+  val streakGold = Color(0xFFFFD166)
+  val streakEmber = Color(0xFFFF7A45)
+  val streakPlatinum = Color(0xFFE4E4E7)
+
+  // Milestone Tier Progression (3D • 7D • 14D • 30D • 90D)
+  val (tierName, nextMilestoneDays) = remember(streakDays) {
+    when {
+      streakDays >= 90 -> "APEX IMMORTAL" to 180
+      streakDays >= 30 -> "TITAN PROTOCOL" to 90
+      streakDays >= 14 -> "MOMENTUM CORE" to 30
+      streakDays >= 7 -> "IGNITION SURGE" to 14
+      streakDays >= 3 -> "SPARK ACTIVE" to 7
+      streakDays >= 1 -> "EMBER ONLINE" to 3
+      else -> "PRIMED FOR DAY 01" to 3
+    }
+  }
+  val daysToNextMilestone = (nextMilestoneDays - streakDays).coerceAtLeast(1)
+
   Column(
     modifier = Modifier
       .fillMaxWidth()
       .floating3DProtocolCard(
         cornerRadiusDp = 18.dp,
-        topRimTint = if (allSixMet) StepsStart else PureWhite,
+        topRimTint = if (allSixMet || streakDays > 0) streakGold else PureWhite,
         borderFlashProgress = borderFlashProgress,
       )
       .padding(16.dp)
       .testTag("dashboard_streak_card"),
   ) {
-    // 1. Header Row (Single solid status badge on the screen, matching Step 02 OPTIMAL RANGE)
+    // 1. Top Priority Header Row
     Row(
       modifier = Modifier
         .fillMaxWidth()
@@ -2466,18 +2594,28 @@ private fun DashboardCombinedStreakHeroCard(
     ) {
       Row(verticalAlignment = Alignment.CenterVertically) {
         DashboardSyncedHeaderDot(
-          startColor = if (allSixMet) StepsStart else PureWhite,
-          endColor = if (allSixMet) StepsMid else Zinc300,
+          startColor = streakGold,
+          endColor = streakEmber,
         )
         Spacer(modifier = Modifier.width(9.dp))
-        Text(
-          text = "STREAK PROTOCOL ENGINE",
-          color = PureWhite,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.SemiBold,
-          fontSize = 11.2.sp,
-          letterSpacing = 1.0.sp,
-        )
+        Column {
+          Text(
+            text = "PRIORITY 01 • STREAK PROTOCOL ENGINE",
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 10.8.sp,
+            letterSpacing = 0.9.sp,
+          )
+          Text(
+            text = "$tierName • NEXT TIER IN ${daysToNextMilestone}D",
+            color = Zinc400,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = 8.4.sp,
+            letterSpacing = 0.5.sp,
+          )
+        }
       }
 
       Box(
@@ -2486,20 +2624,20 @@ private fun DashboardCombinedStreakHeroCard(
           .background(
             brush = Brush.horizontalGradient(
               colors = if (allSixMet) {
-                listOf(StreakReadinessStart, StreakReadinessMid)
+                listOf(streakGold, streakEmber)
               } else {
-                listOf(PureWhite, StreakReadinessStart)
+                listOf(PureWhite, streakPlatinum)
               },
             ),
           )
           .padding(horizontal = 9.dp, vertical = 4.dp),
       ) {
         Text(
-          text = if (allSixMet) "STREAK UNLOCKED" else "OPTIMAL GATE ≥ $streakThresholdPercent%",
+          text = if (allSixMet) "+1 STREAK LOCKED" else "GATE ≥ $streakThresholdPercent%",
           color = ObsidianBlack,
           fontFamily = JetBrainsMonoFontFamily,
           fontWeight = FontWeight.ExtraBold,
-          fontSize = 9.2.sp,
+          fontSize = 9.0.sp,
           letterSpacing = 0.6.sp,
         )
       }
@@ -2512,307 +2650,190 @@ private fun DashboardCombinedStreakHeroCard(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    // 2. Floating Inner Streak Readout Card
+    // 2. Sculpted 3D Streak Ignition Hero Deck (No redundant pillar progress bars!)
     Column(
       modifier = Modifier
         .fillMaxWidth()
         .floating3DInnerTile(
-          cornerRadiusDp = 12.dp,
-          accentColor = StreakReadinessStart,
-          isHighlighted = allSixMet,
+          cornerRadiusDp = 14.dp,
+          accentColor = streakGold,
+          isHighlighted = allSixMet || streakDays > 0,
         )
-        .padding(horizontal = 13.dp, vertical = 11.dp),
+        .padding(horizontal = 14.dp, vertical = 13.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        Column {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-          ) {
-            Box(
-              modifier = Modifier
-                .width(3.5.dp)
-                .height(12.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(
-                  brush = Brush.verticalGradient(
-                    colors = listOf(StreakReadinessStart, StreakReadinessMid),
+        // Left: 3D Ignition Emblem + Large Addictive Streak Day Counter
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+          Box(
+            modifier = Modifier
+              .size(56.dp)
+              .clip(RoundedCornerShape(14.dp))
+              .background(Color(0xFF0A0A0D))
+              .border(
+                width = 1.1.dp,
+                brush = Brush.verticalGradient(
+                  colors = listOf(
+                    streakGold.copy(alpha = 0.85f),
+                    streakEmber.copy(alpha = 0.45f),
+                    Zinc800,
                   ),
                 ),
-            )
+                shape = RoundedCornerShape(14.dp),
+              ),
+            contentAlignment = Alignment.Center,
+          ) {
+            Canvas(modifier = Modifier.size(34.dp)) {
+              val pulse = 0.90f + 0.10f * sin(ambientPhase).toFloat()
+              val cx = size.width / 2f
+              val cy = size.height / 2f
+              drawCircle(
+                brush = Brush.radialGradient(
+                  colors = listOf(
+                    streakGold.copy(alpha = 0.28f * pulse),
+                    streakEmber.copy(alpha = 0.10f * pulse),
+                    Color.Transparent,
+                  ),
+                  center = Offset(cx, cy),
+                  radius = size.minDimension * 0.55f,
+                ),
+                radius = size.minDimension * 0.55f,
+                center = Offset(cx, cy),
+              )
+              val outerFlame = Path().apply {
+                moveTo(cx, size.height * 0.08f)
+                cubicTo(
+                  size.width * 0.88f, size.height * 0.34f,
+                  size.width * 0.90f, size.height * 0.78f,
+                  cx, size.height * 0.92f,
+                )
+                cubicTo(
+                  size.width * 0.10f, size.height * 0.78f,
+                  size.width * 0.12f, size.height * 0.34f,
+                  cx, size.height * 0.08f,
+                )
+                close()
+              }
+              drawPath(
+                path = outerFlame,
+                brush = Brush.verticalGradient(
+                  colors = listOf(PureWhite, streakGold, streakEmber),
+                ),
+              )
+              val innerCore = Path().apply {
+                moveTo(cx, size.height * 0.36f)
+                cubicTo(
+                  size.width * 0.70f, size.height * 0.54f,
+                  size.width * 0.68f, size.height * 0.80f,
+                  cx, size.height * 0.88f,
+                )
+                cubicTo(
+                  size.width * 0.32f, size.height * 0.80f,
+                  size.width * 0.30f, size.height * 0.54f,
+                  cx, size.height * 0.36f,
+                )
+                close()
+              }
+              drawPath(
+                path = innerCore,
+                color = ObsidianBlack.copy(alpha = 0.72f),
+              )
+            }
+          }
+
+          Column {
             Text(
-              text = "COMBINED DAILY STREAK",
+              text = "ACTIVE STREAK CHAIN",
               color = Zinc300,
               fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.SemiBold,
-              fontSize = 10.sp,
-              letterSpacing = 0.8.sp,
-            )
-          }
-          Spacer(modifier = Modifier.height(5.dp))
-          Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-              text = "$streakDays",
-              color = PureWhite,
-              fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.Bold,
-              fontSize = 30.sp,
-              lineHeight = 30.sp,
-              letterSpacing = (-1.0).sp,
-              modifier = Modifier.testTag("dashboard_combined_streak_value"),
+              fontSize = 9.4.sp,
+              letterSpacing = 0.9.sp,
             )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-              text = if (streakDays == 1) "day active" else "days active",
-              color = Zinc400,
-              fontFamily = InterFontFamily,
-              fontWeight = FontWeight.Medium,
-              fontSize = 12.5.sp,
-              modifier = Modifier.padding(bottom = 3.dp),
-            )
+            Spacer(modifier = Modifier.height(3.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+              Text(
+                text = "$streakDays",
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 36.sp,
+                lineHeight = 36.sp,
+                letterSpacing = (-1.2).sp,
+                modifier = Modifier.testTag("dashboard_combined_streak_value"),
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = if (streakDays == 1) "DAY STREAK" else "DAYS STREAK",
+                color = streakGold,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = 10.5.sp,
+                letterSpacing = 0.6.sp,
+                modifier = Modifier.padding(bottom = 4.dp),
+              )
+            }
           }
         }
 
+        // Right: Daily Readiness Score + Pillars Qualified Count
         Column(horizontalAlignment = Alignment.End) {
-          Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-              text = "READINESS ",
-              color = Zinc400,
-              fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.Medium,
-              fontSize = 9.5.sp,
-              modifier = Modifier.padding(bottom = 2.dp),
-            )
-            Text(
-              text = "${(overallReadinessFraction * 100).roundToInt()}%",
-              color = StreakReadinessStart,
-              fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.Bold,
-              fontSize = 17.sp,
-            )
-          }
+          Text(
+            text = "TODAY'S CHARGE",
+            color = Zinc400,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 8.8.sp,
+            letterSpacing = 0.7.sp,
+          )
           Spacer(modifier = Modifier.height(2.dp))
           Text(
-            text = "$qualifiedCount of 6 pillars ≥$streakThresholdPercent%",
-            color = if (allSixMet) StreakReadinessStart else Zinc400,
+            text = "${(overallReadinessFraction * 100).roundToInt()}%",
+            color = if (allSixMet) streakGold else PureWhite,
             fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Medium,
-            fontSize = 9.8.sp,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 22.sp,
+          )
+          Spacer(modifier = Modifier.height(2.dp))
+          Text(
+            text = "$qualifiedCount / 6 PILLARS LOCKED",
+            color = if (allSixMet) streakGold else Zinc400,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 8.8.sp,
+            letterSpacing = 0.4.sp,
           )
         }
       }
 
-      Spacer(modifier = Modifier.height(9.dp))
-
+      // Unified Master Readiness Gauge Bar
       DashboardSpectrumGaugeBar(
         fillFraction = animatedReadiness,
         thresholdFraction = streakThresholdPercent / 100f,
-        startColor = StreakReadinessEnd,
-        midColor = StreakReadinessMid,
-        endColor = StreakReadinessStart,
-        barHeight = 6.5.dp,
+        startColor = streakEmber,
+        midColor = streakGold,
+        endColor = PureWhite,
+        barHeight = 7.dp,
       )
     }
-
-    Spacer(modifier = Modifier.height(10.dp))
-
-    // 3. REDESIGNED 3x2 PILLAR BENTO GRID (Spacious, attractive, zero congestion, not over-elaborated)
-    val stepsPct = if (targetSteps > 0) ((liveSteps.toFloat() / targetSteps) * 100f).roundToInt() else 0
-    val calPct = if (targetCalories > 0) ((loggedCalories.toFloat() / targetCalories) * 100f).roundToInt() else 0
-    val proPct = if (targetProtein > 0) ((loggedProtein.toFloat() / targetProtein) * 100f).roundToInt() else 0
-    val carbPct = if (targetCarbs > 0) ((loggedCarbs.toFloat() / targetCarbs) * 100f).roundToInt() else 0
-    val fatPct = if (targetFats > 0) ((loggedFats.toFloat() / targetFats) * 100f).roundToInt() else 0
-    val waterPct = if (targetWaterMl > 0) ((loggedWaterMl.toFloat() / targetWaterMl) * 100f).roundToInt() else 0
-
-    Column(
-      modifier = Modifier.fillMaxWidth(),
-      verticalArrangement = Arrangement.spacedBy(metrics.bentoGap),
-    ) {
-      // Row 1: STEPS • KCAL • PROTEIN
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(metrics.bentoGap),
-      ) {
-        StreakPillarCompactCard(
-          label = "STEPS",
-          pct = stepsPct,
-          thresholdPct = streakThresholdPercent,
-          qualifies = stepsQualifies,
-          accentColor = StepsStart,
-          accentMid = StepsMid,
-          metrics = metrics,
-          modifier = Modifier.weight(1f),
-        )
-        StreakPillarCompactCard(
-          label = "CALORIES",
-          pct = calPct,
-          thresholdPct = streakThresholdPercent,
-          qualifies = caloriesQualifies,
-          accentColor = CaloriesStart,
-          accentMid = CaloriesMid,
-          metrics = metrics,
-          modifier = Modifier.weight(1f),
-        )
-        StreakPillarCompactCard(
-          label = "PROTEIN",
-          pct = proPct,
-          thresholdPct = streakThresholdPercent,
-          qualifies = proteinQualifies,
-          accentColor = ProteinStart,
-          accentMid = ProteinMid,
-          metrics = metrics,
-          modifier = Modifier.weight(1f),
-        )
-      }
-
-      // Row 2: CARBS • FATS • H₂O
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(metrics.bentoGap),
-      ) {
-        StreakPillarCompactCard(
-          label = "CARBS",
-          pct = carbPct,
-          thresholdPct = streakThresholdPercent,
-          qualifies = carbsQualifies,
-          accentColor = CarbsStart,
-          accentMid = CarbsMid,
-          metrics = metrics,
-          modifier = Modifier.weight(1f),
-        )
-        StreakPillarCompactCard(
-          label = "FATS",
-          pct = fatPct,
-          thresholdPct = streakThresholdPercent,
-          qualifies = fatsQualifies,
-          accentColor = FatsStart,
-          accentMid = FatsMid,
-          metrics = metrics,
-          modifier = Modifier.weight(1f),
-        )
-        StreakPillarCompactCard(
-          label = "H₂O",
-          pct = waterPct,
-          thresholdPct = streakThresholdPercent,
-          qualifies = waterQualifies,
-          accentColor = HydrationStart,
-          accentMid = HydrationMid,
-          metrics = metrics,
-          modifier = Modifier.weight(1f),
-        )
-      }
-    }
-  }
-}
-
-/**
- * Sleek, spacious, non-congested 3x2 Bento Pillar Card for the Streak Protocol Engine:
- * - Row 1: Colored dot + Pillar Label (`STEPS`, `CALORIES`, etc.) on the left, and live `%` + `✓` on the right
- * - Row 2: Luminous micro-spectrum gauge bar with the `90%` threshold gate marker
- */
-@Composable
-private fun StreakPillarCompactCard(
-  label: String,
-  pct: Int,
-  thresholdPct: Int,
-  qualifies: Boolean,
-  accentColor: Color,
-  accentMid: Color,
-  metrics: DashboardResponsiveMetrics,
-  modifier: Modifier = Modifier,
-) {
-  val barFill = (pct / 100f).coerceIn(0f, 1f)
-  val animatedFill by animateFloatAsState(
-    targetValue = barFill,
-    animationSpec = tween(durationMillis = 420, easing = SmoothOutEasing),
-    label = "pillar_${label}_fill",
-  )
-
-  Column(
-    modifier = modifier
-      .floating3DInnerTile(
-        cornerRadiusDp = 10.dp,
-        accentColor = accentColor,
-        isHighlighted = qualifies,
-      )
-      .padding(horizontal = metrics.innerTilePadding, vertical = 9.dp),
-  ) {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        modifier = Modifier.weight(1f, fill = false),
-      ) {
-        Box(
-          modifier = Modifier
-            .size(5.5.dp)
-            .clip(CircleShape)
-            .background(accentColor),
-        )
-        Text(
-          text = label,
-          color = if (qualifies) PureWhite else Zinc300,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.Bold,
-          fontSize = metrics.spScaled(9.2f, 7.6f, 10.4f),
-          letterSpacing = 0.3.sp,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
-      }
-
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-      ) {
-        Text(
-          text = "${pct.coerceAtMost(999)}%",
-          color = if (qualifies) accentColor else PureWhite,
-          fontFamily = JetBrainsMonoFontFamily,
-          fontWeight = FontWeight.Bold,
-          fontSize = metrics.spScaled(11f, 9.2f, 12.2f),
-          maxLines = 1,
-        )
-        if (qualifies) {
-          Text(
-            text = "✓",
-            color = accentColor,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = metrics.spScaled(10f, 8.5f, 11.5f),
-          )
-        }
-      }
-    }
-
-    Spacer(modifier = Modifier.height(7.dp))
-
-    DashboardSpectrumGaugeBar(
-      fillFraction = animatedFill,
-      thresholdFraction = thresholdPct / 100f,
-      startColor = accentColor,
-      midColor = accentMid,
-      endColor = PureWhite,
-      barHeight = 4.5.dp,
-    )
   }
 }
 
 // ============================================================================
-// PRIORITY #1: DAILY STEPS HERO CARD (No clunky SYNC or DISTANCE box!)
+// DAILY STEPS HERO CARD (With Custom Steps Input Button — Excluded from Timeline)
 // ============================================================================
 
 @Composable
 private fun DashboardPrimaryStepsHeroCard(
   liveSteps: Int,
+  manualStepsToday: Int = 0,
   targetSteps: Int,
   liveDistanceKm: Float,
   isActivelyWalking: Boolean,
@@ -2820,6 +2841,7 @@ private fun DashboardPrimaryStepsHeroCard(
   stepsQualifies: Boolean,
   borderFlashProgress: Float = 0f,
   onForceSyncSteps: () -> Unit,
+  onOpenCustomStepsModal: () -> Unit = {},
   numberFormat: NumberFormat,
   metrics: DashboardResponsiveMetrics,
 ) {
@@ -3053,6 +3075,267 @@ private fun DashboardPrimaryStepsHeroCard(
           fontWeight = FontWeight.Medium,
           fontSize = 9.5.sp,
         )
+      }
+
+      Spacer(modifier = Modifier.height(9.dp))
+
+      // Custom Steps Input Action Row (Updates daily steps & stats without cluttering Today's Timeline)
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            text = if (manualStepsToday > 0) {
+              "Custom logged today: +${numberFormat.format(manualStepsToday)} steps (hidden from timeline)"
+            } else {
+              "Log treadmill or uncounted steps directly (excluded from timeline)"
+            },
+            color = Zinc400,
+            fontFamily = InterFontFamily,
+            fontSize = 10.2.sp,
+            lineHeight = 13.5.sp,
+          )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Row(
+          modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(PureWhite)
+            .clickable(role = Role.Button, onClick = onOpenCustomStepsModal)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .testTag("dashboard_custom_steps_button"),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+          Text(
+            text = "+ CUSTOM STEPS",
+            color = ObsidianBlack,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 9.2.sp,
+            letterSpacing = 0.5.sp,
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(6.dp))
+
+      Text(
+        text = "* Note: Step counter is not fully accurate yet; we will resolve this in future updates.",
+        color = Zinc400.copy(alpha = 0.88f),
+        fontFamily = InterFontFamily,
+        fontSize = 9.8.sp,
+        lineHeight = 13.sp,
+        modifier = Modifier
+          .fillMaxWidth()
+          .testTag("dashboard_steps_accuracy_disclaimer"),
+      )
+    }
+  }
+}
+
+@Composable
+private fun DashboardCustomStepsInputModal(
+  currentManualSteps: Int,
+  currentTotalSteps: Int,
+  targetSteps: Int,
+  numberFormat: NumberFormat,
+  onAddCustomSteps: (Int) -> Unit,
+  onSetExactCustomSteps: (Int) -> Unit,
+  onResetCustomSteps: () -> Unit,
+  onDismiss: () -> Unit,
+) {
+  var customStepsText by remember { mutableStateOf("") }
+  val parsedSteps = customStepsText.filter { it.isDigit() }.toIntOrNull() ?: 0
+
+  Dialog(
+    onDismissRequest = onDismiss,
+    properties = DialogProperties(usePlatformDefaultWidth = false),
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth(0.92f)
+        .widthIn(max = 420.dp)
+        .clip(RoundedCornerShape(18.dp))
+        .background(ObsidianBlack)
+        .border(1.2.dp, PureWhite.copy(alpha = 0.28f), RoundedCornerShape(18.dp))
+        .padding(18.dp)
+        .testTag("dashboard_custom_steps_modal"),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          text = "DIRECT STEP CALIBRATION",
+          color = StepsStart,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = 9.5.sp,
+          letterSpacing = 1.0.sp,
+        )
+        Text(
+          text = "EXCLUDED FROM TIMELINE",
+          color = Zinc400,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.SemiBold,
+          fontSize = 8.5.sp,
+        )
+      }
+
+      Text(
+        text = "Custom Step Input",
+        color = PureWhite,
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 18.sp,
+      )
+      Text(
+        text = "Add or set custom steps directly into today's step counter and analytics database without creating timeline log entries.",
+        color = Zinc400,
+        fontFamily = InterFontFamily,
+        fontSize = 11.8.sp,
+        lineHeight = 16.sp,
+      )
+
+      // Quick Add Presets
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+      ) {
+        listOf(500, 1000, 2500, 5000).forEach { preset ->
+          Box(
+            modifier = Modifier
+              .weight(1f)
+              .clip(RoundedCornerShape(9.dp))
+              .background(Color(0xFF141419))
+              .border(0.9.dp, Zinc700, RoundedCornerShape(9.dp))
+              .clickable { onAddCustomSteps(preset) }
+              .padding(vertical = 9.dp)
+              .testTag("custom_steps_preset_$preset"),
+            contentAlignment = Alignment.Center,
+          ) {
+            Text(
+              text = "+${numberFormat.format(preset)}",
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 10.5.sp,
+            )
+          }
+        }
+      }
+
+      // Custom numeric input field
+      BasicTextField(
+        value = customStepsText,
+        onValueChange = { raw ->
+          customStepsText = raw.filter { it.isDigit() }.take(6)
+        },
+        singleLine = true,
+        textStyle = TextStyle(
+          color = PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = 16.sp,
+        ),
+        cursorBrush = SolidColor(PureWhite),
+        decorationBox = { innerTextField ->
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(10.dp))
+              .background(Color(0xFF111116))
+              .border(1.dp, Zinc700, RoundedCornerShape(10.dp))
+              .padding(horizontal = 13.dp, vertical = 12.dp)
+              .testTag("custom_steps_input_field"),
+          ) {
+            if (customStepsText.isEmpty()) {
+              Text(
+                text = "Enter custom step count (e.g. 1500)",
+                color = Zinc500,
+                fontFamily = InterFontFamily,
+                fontSize = 13.sp,
+              )
+            }
+            innerTextField()
+          }
+        },
+      )
+
+      if (currentManualSteps > 0) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            text = "Current custom steps: +${numberFormat.format(currentManualSteps)}",
+            color = Zinc300,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontSize = 10.5.sp,
+          )
+          Text(
+            text = "RESET CUSTOM STEPS",
+            color = Color(0xFFEF4444),
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 10.sp,
+            modifier = Modifier
+              .clip(RoundedCornerShape(6.dp))
+              .clickable(onClick = onResetCustomSteps)
+              .padding(horizontal = 6.dp, vertical = 3.dp)
+              .testTag("custom_steps_reset_button"),
+          )
+        }
+      }
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Box(
+          modifier = Modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF16161C))
+            .border(1.dp, Zinc700, RoundedCornerShape(10.dp))
+            .clickable(onClick = onDismiss)
+            .padding(vertical = 11.dp),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            text = "CANCEL",
+            color = Zinc300,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp,
+          )
+        }
+        Box(
+          modifier = Modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (parsedSteps > 0) PureWhite else Zinc800)
+            .clickable(enabled = parsedSteps > 0) {
+              onAddCustomSteps(parsedSteps)
+            }
+            .padding(vertical = 11.dp)
+            .testTag("custom_steps_add_confirm_button"),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            text = "ADD STEPS",
+            color = if (parsedSteps > 0) ObsidianBlack else Zinc500,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 11.sp,
+          )
+        }
       }
     }
   }

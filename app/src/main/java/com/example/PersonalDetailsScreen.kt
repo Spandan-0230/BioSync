@@ -469,10 +469,11 @@ private fun computePersonalMetrics(
     return ((base * rawScale).coerceIn(minSp, maxSp) * fontCompensation).sp
   }
 
-  val contentMaxWidth = if (w >= 600f) {
-    (w * 0.78f).coerceIn(450f, 580f).dp
-  } else {
-    w.dp
+  val contentMaxWidth = when {
+    w >= 1100f -> (w * 0.84f).coerceIn(760f, 1020f).dp
+    w >= 840f -> (w * 0.82f).coerceIn(640f, 840f).dp
+    w >= 600f -> (w * 0.80f).coerceIn(500f, 660f).dp
+    else -> w.dp
   }
 
   // Resolution-adaptive logical gaps matching Step 01 Profile Section
@@ -2608,29 +2609,8 @@ private fun UnifiedStepperCapsule(
   incrementTestTag: String,
   metrics: PersonalResponsiveMetrics,
 ) {
-  val capsuleShape = RoundedCornerShape(10.dp)
   Row(
-    modifier = Modifier
-      .clip(capsuleShape)
-      .background(
-        brush = Brush.verticalGradient(
-          colors = listOf(
-            Color(0xFF1B1B22),
-            Color(0xFF101014),
-          ),
-        ),
-      )
-      .border(
-        width = 1.dp,
-        brush = Brush.verticalGradient(
-          colors = listOf(
-            PureWhite.copy(alpha = 0.24f),
-            Zinc700,
-          ),
-        ),
-        shape = capsuleShape,
-      )
-      .padding(2.dp),
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
     HoldableStepperButton(
@@ -2638,12 +2618,6 @@ private fun UnifiedStepperCapsule(
       onStep = onDecrement,
       metrics = metrics,
       testTag = decrementTestTag,
-    )
-    Box(
-      modifier = Modifier
-        .width(1.dp)
-        .height((22f * metrics.scale).coerceIn(18f, 26f).dp)
-        .background(Zinc700.copy(alpha = 0.65f)),
     )
     HoldableStepperButton(
       symbol = "+",
@@ -2656,6 +2630,8 @@ private fun UnifiedStepperCapsule(
 
 /**
  * Tactile Monochrome Stepper Button with Press-and-Hold Continuous Acceleration:
+ * - Uses the app-wide signature PureWhite block (`PureWhite` -> `Color(0xFFF4F4F5)`) with `ObsidianBlack`
+ *   symbol for `+`, and a sculpted dark-zinc block (`Color(0xFF242424)`) with `PureWhite` symbol for `−`.
  * - Single tap fires `onStep()` immediately.
  * - Holding down on `+` or `−` continuously updates the value with accelerating cadence.
  */
@@ -2670,11 +2646,12 @@ private fun HoldableStepperButton(
   val isPressed by interactionSource.collectIsPressedAsState()
   val currentOnStep by rememberUpdatedState(onStep)
   var didRepeatWhileHeld by remember { mutableStateOf(false) }
+  val isMinus = symbol == "−" || symbol == "-"
 
   LaunchedEffect(isPressed) {
     if (isPressed) {
       didRepeatWhileHeld = false
-      delay(300L)
+      delay(260L)
       var ticks = 0
       while (isPressed) {
         didRepeatWhileHeld = true
@@ -2690,33 +2667,58 @@ private fun HoldableStepperButton(
     }
   }
 
-  val btnWidth = (36f * metrics.scale).coerceIn(32f, 40f).dp
-  val btnHeight = (34f * metrics.scale).coerceIn(30f, 38f).dp
-  val shape = RoundedCornerShape(8.dp)
+  val btnWidth = (36f * metrics.scale).coerceIn(33f, 40f).dp
+  val btnHeight = (36f * metrics.scale).coerceIn(33f, 40f).dp
+  val shape = RoundedCornerShape(9.dp)
+
+  val bgBrush = when {
+    isMinus && isPressed -> Brush.verticalGradient(
+      colors = listOf(
+        Color(0xFF2E2E32),
+        Color(0xFF1F1F23),
+      ),
+    )
+    isMinus -> Brush.verticalGradient(
+      colors = listOf(
+        Color(0xFF242428),
+        Color(0xFF1C1C20),
+      ),
+    )
+    isPressed -> Brush.verticalGradient(
+      colors = listOf(
+        Color(0xFFE4E4E7),
+        Color(0xFFD4D4D8),
+      ),
+    )
+    else -> Brush.verticalGradient(
+      colors = listOf(
+        PureWhite,
+        Color(0xFFF4F4F5),
+      ),
+    )
+  }
+
+  val borderColor by animateColorAsState(
+    targetValue = when {
+      isPressed -> PureWhite
+      isMinus -> Color(0xFF36363A)
+      else -> PureWhite
+    },
+    animationSpec = tween(durationMillis = 120),
+    label = "personal_stepper_border_color",
+  )
+
+  val symbolTextColor = if (isMinus) PureWhite else ObsidianBlack
+
   Box(
     modifier = Modifier
       .size(width = btnWidth, height = btnHeight)
       .clip(shape)
-      .background(
-        brush = if (isPressed) {
-          Brush.verticalGradient(
-            colors = listOf(
-              PureWhite,
-              Color(0xFFE4E4E7),
-            ),
-          )
-        } else {
-          Brush.verticalGradient(
-            colors = listOf(
-              Color.Transparent,
-              Color.Transparent,
-            ),
-          )
-        },
-      )
+      .background(brush = bgBrush)
+      .border(1.dp, borderColor, shape)
       .clickable(
         interactionSource = interactionSource,
-        indication = ripple(color = PureWhite),
+        indication = ripple(color = if (isMinus) PureWhite else ObsidianBlack),
         role = Role.Button,
         onClick = {
           if (!didRepeatWhileHeld) {
@@ -2730,10 +2732,10 @@ private fun HoldableStepperButton(
   ) {
     Text(
       text = symbol,
-      color = if (isPressed) ObsidianBlack else PureWhite,
+      color = symbolTextColor,
       fontFamily = JetBrainsMonoFontFamily,
-      fontWeight = FontWeight.SemiBold,
-      fontSize = metrics.spScaled(16f, 14f, 18.5f),
+      fontWeight = FontWeight.Bold,
+      fontSize = metrics.spScaled(16.5f, 14.5f, 19f),
     )
   }
 }

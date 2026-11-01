@@ -337,7 +337,12 @@ private fun computeBlueprintMetrics(
     scale = scale,
     fontCompensation = fontCompensation,
     isExpanded = isExpanded,
-    contentMaxWidth = if (isExpanded) (w * 0.80f).coerceIn(480f, 580f).dp else w.dp,
+    contentMaxWidth = when {
+      w >= 1100f -> (w * 0.84f).coerceIn(760f, 1020f).dp
+      w >= 840f -> (w * 0.82f).coerceIn(640f, 840f).dp
+      isExpanded -> (w * 0.80f).coerceIn(500f, 660f).dp
+      else -> w.dp
+    },
     horizontalPadding = (20f * widthFactor).coerceIn(14f, 28f).dp,
     topContentPadding = (8f * heightFactor).coerceIn(5f, 14f).dp,
     bottomContentPadding = (16f * heightFactor).coerceIn(12f, 24f).dp,
@@ -383,6 +388,13 @@ fun BlueprintScreen(
   onToggleCaffeineAlcohol: (Boolean) -> Unit = {},
   selectedSodiumFrequency: SodiumFrequencyOption = SodiumFrequencyOption.RARELY,
   onSelectSodiumFrequency: (SodiumFrequencyOption) -> Unit = {},
+  selectedSex: String = "MALE",
+  wakeUpHour: Int = 7,
+  wakeUpMinute: Int = 0,
+  sleepHour: Int = 23,
+  sleepMinute: Int = 0,
+  onUpdateWakeUpTime: (Int, Int) -> Unit = { _, _ -> },
+  onUpdateSleepTime: (Int, Int) -> Unit = { _, _ -> },
   selectedStreakThreshold: StreakThresholdOption,
   onSelectStreakThreshold: (StreakThresholdOption) -> Unit,
   onNavigateBack: () -> Unit,
@@ -790,6 +802,21 @@ fun BlueprintScreen(
               }
             },
             calibration = calibration,
+            wakeUpHour = wakeUpHour,
+            wakeUpMinute = wakeUpMinute,
+            sleepHour = sleepHour,
+            sleepMinute = sleepMinute,
+            ageYears = ageYears,
+            selectedSex = selectedSex,
+            weightKg = weightKg,
+            onUpdateWakeUpTime = { h, m ->
+              haptics.confirm()
+              onUpdateWakeUpTime(h, m)
+            },
+            onUpdateSleepTime = { h, m ->
+              haptics.confirm()
+              onUpdateSleepTime(h, m)
+            },
             borderFlashProvider = borderFlashProvider,
             metrics = metrics,
           )

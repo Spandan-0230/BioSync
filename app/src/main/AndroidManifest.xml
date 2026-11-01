@@ -115,6 +115,12 @@
             android:name=".BioSyncDayOneAlarmReceiver"
             android:enabled="true"
             android:exported="false" />
+
+        <!-- Circadian Good Morning, Good Night (-15m), and Scientific Hourly Water reminder receiver -->
+        <receiver
+            android:name=".BioSyncCircadianAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
     </application>
 
 </manifest>

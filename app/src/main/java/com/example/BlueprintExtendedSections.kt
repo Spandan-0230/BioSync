@@ -1276,10 +1276,42 @@ internal fun NutritionHydrationSection(
   selectedSodiumFrequency: SodiumFrequencyOption,
   onSelectSodiumFrequency: (SodiumFrequencyOption) -> Unit,
   calibration: HydrationMacroCalibration,
+  wakeUpHour: Int = 7,
+  wakeUpMinute: Int = 0,
+  sleepHour: Int = 23,
+  sleepMinute: Int = 0,
+  ageYears: Int = 31,
+  selectedSex: String = "MALE",
+  weightKg: Float = 62.0f,
+  onUpdateWakeUpTime: (Int, Int) -> Unit = { _, _ -> },
+  onUpdateSleepTime: (Int, Int) -> Unit = { _, _ -> },
   borderFlashProvider: () -> Float,
   metrics: BlueprintResponsiveMetrics,
 ) {
   val cardShape = RoundedCornerShape(metrics.cardCornerRadius)
+  var activeTimePickerTarget by remember { mutableStateOf<String?>(null) } // "WAKE" or "SLEEP"
+
+  val circadianPlan = remember(
+    wakeUpHour,
+    wakeUpMinute,
+    sleepHour,
+    sleepMinute,
+    calibration.totalWaterMl,
+    ageYears,
+    selectedSex,
+    weightKg,
+  ) {
+    BioSyncCircadianHydrationEngine.computePlan(
+      wakeUpHour = wakeUpHour,
+      wakeUpMinute = wakeUpMinute,
+      sleepHour = sleepHour,
+      sleepMinute = sleepMinute,
+      totalDailyHydrationMl = calibration.totalWaterMl,
+      ageYears = ageYears,
+      selectedSex = selectedSex,
+      weightKg = weightKg,
+    )
+  }
 
   Column(
     modifier = Modifier
@@ -1600,6 +1632,432 @@ internal fun NutritionHydrationSection(
               }
             }
           }
+        }
+
+        HorizontalDivider(color = ExtZinc850, thickness = 0.8.dp)
+
+        // ── Sub-block 4: Circadian Wake-Up & Sleep Schedule + Scientific Hourly Hydration Plan ──
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("blueprint_circadian_schedule_subblock"),
+          verticalArrangement = Arrangement.spacedBy((8.5f * metrics.scale).coerceIn(7f, 11f).dp),
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Column(
+              modifier = Modifier.weight(1f),
+              verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+              Text(
+                text = "CIRCADIAN WAKE / SLEEP & HOURLY HYDRATION",
+                color = ExtZinc400,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = metrics.spScaled(9.2f, 8.0f, 10.4f),
+                letterSpacing = 0.8.sp,
+              )
+              Text(
+                text = "Good Morning at wake-up, Good Night 15m before sleep, and hourly H₂O prompts.",
+                color = ExtZinc300,
+                fontFamily = InterFontFamily,
+                fontWeight = FontWeight.Normal,
+                fontSize = metrics.spScaled(10.2f, 9.0f, 11.5f),
+              )
+            }
+
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(ExtZinc950)
+                .border(0.85.dp, ExtZinc700, RoundedCornerShape(6.dp))
+                .padding(horizontal = 7.dp, vertical = 3.dp),
+            ) {
+              Text(
+                text = "${circadianPlan.wakingHoursCount}H ACTIVE WINDOW",
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = metrics.spScaled(7.8f, 6.8f, 8.8f),
+                letterSpacing = 0.4.sp,
+              )
+            }
+          }
+
+          // Wake-Up Time & Sleep Time interactive cards
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy((8f * metrics.scale).coerceIn(6.5f, 10.5f).dp),
+          ) {
+            val timeTileShape = RoundedCornerShape((10f * metrics.scale).coerceIn(8.5f, 12f).dp)
+
+            // Wake-Up Time Card
+            Column(
+              modifier = Modifier
+                .weight(1f)
+                .clip(timeTileShape)
+                .background(ExtZinc950)
+                .border(1.dp, PureWhite.copy(alpha = 0.25f), timeTileShape)
+                .clickable { activeTimePickerTarget = "WAKE" }
+                .padding(horizontal = 10.dp, vertical = 9.dp)
+                .testTag("blueprint_wakeup_time_card"),
+              verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Text(
+                  text = "WAKE-UP TIME",
+                  color = Color(0xFFFBBF24),
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = metrics.spScaled(7.8f, 6.8f, 8.8f),
+                  letterSpacing = 0.5.sp,
+                )
+                Text(
+                  text = "EDIT",
+                  color = ExtZinc400,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.SemiBold,
+                  fontSize = metrics.spScaled(7.4f, 6.5f, 8.4f),
+                )
+              }
+              Text(
+                text = BioSyncCircadianHydrationEngine.formatTime12h(wakeUpHour, wakeUpMinute),
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = metrics.spScaled(14.6f, 12.6f, 16.5f),
+                letterSpacing = (-0.3).sp,
+              )
+              Text(
+                text = "Good Morning alert @ ${BioSyncCircadianHydrationEngine.formatTime24h(wakeUpHour, wakeUpMinute)}",
+                color = ExtZinc400,
+                fontFamily = InterFontFamily,
+                fontWeight = FontWeight.Normal,
+                fontSize = metrics.spScaled(9.0f, 8.0f, 10.2f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+              )
+            }
+
+            // Sleep Time Card
+            Column(
+              modifier = Modifier
+                .weight(1f)
+                .clip(timeTileShape)
+                .background(ExtZinc950)
+                .border(1.dp, PureWhite.copy(alpha = 0.25f), timeTileShape)
+                .clickable { activeTimePickerTarget = "SLEEP" }
+                .padding(horizontal = 10.dp, vertical = 9.dp)
+                .testTag("blueprint_sleep_time_card"),
+              verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Text(
+                  text = "SLEEP TIME",
+                  color = Color(0xFFA78BFA),
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = metrics.spScaled(7.8f, 6.8f, 8.8f),
+                  letterSpacing = 0.5.sp,
+                )
+                Text(
+                  text = "EDIT",
+                  color = ExtZinc400,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.SemiBold,
+                  fontSize = metrics.spScaled(7.4f, 6.5f, 8.4f),
+                )
+              }
+              Text(
+                text = BioSyncCircadianHydrationEngine.formatTime12h(sleepHour, sleepMinute),
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = metrics.spScaled(14.6f, 12.6f, 16.5f),
+                letterSpacing = (-0.3).sp,
+              )
+              Text(
+                text = "Good Night alert @ ${BioSyncCircadianHydrationEngine.formatTime24h(circadianPlan.goodNightHour, circadianPlan.goodNightMinute)} (-15m)",
+                color = ExtZinc400,
+                fontFamily = InterFontFamily,
+                fontWeight = FontWeight.Normal,
+                fontSize = metrics.spScaled(9.0f, 8.0f, 10.2f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+              )
+            }
+          }
+
+          // Scientific Hourly Hydration Recommendation & Physiological Cap Strip
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(10.dp))
+              .background(Color(0xFF0E0E12))
+              .border(0.9.dp, ExtZinc800, RoundedCornerShape(10.dp))
+              .padding(horizontal = 11.dp, vertical = 9.dp)
+              .testTag("blueprint_hourly_hydration_readout"),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Text(
+                text = "HOURLY H₂O CADENCE (${circadianPlan.wakingHoursCount}HRS)",
+                color = Color(0xFF38BDF8),
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = metrics.spScaled(8.4f, 7.4f, 9.6f),
+                letterSpacing = 0.5.sp,
+              )
+              Text(
+                text = "${circadianPlan.recommendedHourlyMl} ML / HR  •  ~${circadianPlan.recommendedSipEvery30MinMl} ML / 30M",
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = metrics.spScaled(9.4f, 8.2f, 10.8f),
+              )
+            }
+            Text(
+              text = circadianPlan.safetyCapReason,
+              color = ExtZinc400,
+              fontFamily = InterFontFamily,
+              fontWeight = FontWeight.Normal,
+              fontSize = metrics.spScaled(9.4f, 8.4f, 10.6f),
+              lineHeight = metrics.spScaled(13.0f, 11.5f, 14.5f),
+            )
+          }
+        }
+      }
+    }
+  }
+
+  val target = activeTimePickerTarget
+  if (target != null) {
+    val isWake = target == "WAKE"
+    CircadianTimePickerDialog(
+      title = if (isWake) "Select Wake-Up Time" else "Select Sleep Time",
+      subtitle = if (isWake) {
+        "Triggers your Good Morning notification and starts your scientific hourly hydration cadence."
+      } else {
+        "Triggers your Good Night wind-down notification 15 minutes before sleep."
+      },
+      initialHour = if (isWake) wakeUpHour else sleepHour,
+      initialMinute = if (isWake) wakeUpMinute else sleepMinute,
+      onConfirm = { h, m ->
+        if (isWake) onUpdateWakeUpTime(h, m) else onUpdateSleepTime(h, m)
+        activeTimePickerTarget = null
+      },
+      onDismiss = { activeTimePickerTarget = null },
+    )
+  }
+}
+
+@Composable
+internal fun CircadianTimePickerDialog(
+  title: String,
+  subtitle: String,
+  initialHour: Int,
+  initialMinute: Int,
+  onConfirm: (Int, Int) -> Unit,
+  onDismiss: () -> Unit,
+) {
+  var selectedHour by remember(initialHour) { mutableStateOf(initialHour.coerceIn(0, 23)) }
+  var selectedMinute by remember(initialMinute) { mutableStateOf((initialMinute / 15) * 15) }
+  val minuteOptions = remember { listOf(0, 15, 30, 45) }
+
+  Dialog(
+    onDismissRequest = onDismiss,
+    properties = DialogProperties(usePlatformDefaultWidth = false),
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth(0.92f)
+        .widthIn(max = 420.dp)
+        .clip(RoundedCornerShape(16.dp))
+        .background(ObsidianBlack)
+        .border(1.2.dp, PureWhite.copy(alpha = 0.28f), RoundedCornerShape(16.dp))
+        .padding(18.dp)
+        .testTag("circadian_time_picker_dialog"),
+      verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          text = "CIRCADIAN TELEMETRY CLOCK",
+          color = ExtZinc400,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = 9.5.sp,
+          letterSpacing = 1.1.sp,
+        )
+        Text(
+          text = BioSyncCircadianHydrationEngine.formatTime12h(selectedHour, selectedMinute),
+          color = PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = 13.sp,
+        )
+      }
+
+      Text(
+        text = title,
+        color = PureWhite,
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 18.sp,
+      )
+      Text(
+        text = subtitle,
+        color = ExtZinc400,
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 16.5.sp,
+      )
+
+      // Hour Selector Grid (00 .. 23)
+      Text(
+        text = "HOUR (24H FORMAT)",
+        color = ExtZinc300,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 9.5.sp,
+        letterSpacing = 0.8.sp,
+      )
+
+      Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (rowIdx in 0 until 4) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            for (colIdx in 0 until 6) {
+              val h = rowIdx * 6 + colIdx
+              val isSel = h == selectedHour
+              Box(
+                modifier = Modifier
+                  .weight(1f)
+                  .clip(RoundedCornerShape(8.dp))
+                  .background(if (isSel) PureWhite else ExtZinc950)
+                  .border(
+                    width = if (isSel) 1.2.dp else 0.8.dp,
+                    color = if (isSel) PureWhite else ExtZinc800,
+                    shape = RoundedCornerShape(8.dp),
+                  )
+                  .clickable { selectedHour = h }
+                  .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+              ) {
+                Text(
+                  text = String.format(Locale.US, "%02d", h),
+                  color = if (isSel) ObsidianBlack else PureWhite,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 12.sp,
+                )
+              }
+            }
+          }
+        }
+      }
+
+      // Minute Selector (00, 15, 30, 45)
+      Text(
+        text = "MINUTE",
+        color = ExtZinc300,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 9.5.sp,
+        letterSpacing = 0.8.sp,
+      )
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        minuteOptions.forEach { minVal ->
+          val isSel = minVal == selectedMinute
+          Box(
+            modifier = Modifier
+              .weight(1f)
+              .clip(RoundedCornerShape(8.dp))
+              .background(if (isSel) PureWhite else ExtZinc950)
+              .border(
+                width = if (isSel) 1.2.dp else 0.8.dp,
+                color = if (isSel) PureWhite else ExtZinc800,
+                shape = RoundedCornerShape(8.dp),
+              )
+              .clickable { selectedMinute = minVal }
+              .padding(vertical = 9.dp),
+            contentAlignment = Alignment.Center,
+          ) {
+            Text(
+              text = String.format(Locale.US, ":%02d", minVal),
+              color = if (isSel) ObsidianBlack else PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 12.5.sp,
+            )
+          }
+        }
+      }
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Box(
+          modifier = Modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(10.dp))
+            .background(ExtZinc900)
+            .border(1.dp, ExtZinc700, RoundedCornerShape(10.dp))
+            .clickable(onClick = onDismiss)
+            .padding(vertical = 12.dp),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            text = "CANCEL",
+            color = ExtZinc300,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.5.sp,
+          )
+        }
+        Box(
+          modifier = Modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(10.dp))
+            .background(PureWhite)
+            .clickable { onConfirm(selectedHour, selectedMinute) }
+            .padding(vertical = 12.dp)
+            .testTag("circadian_time_confirm_button"),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            text = "LOCK TIME",
+            color = ObsidianBlack,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.5.sp,
+          )
         }
       }
     }

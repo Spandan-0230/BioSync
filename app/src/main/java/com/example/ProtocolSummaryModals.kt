@@ -328,6 +328,7 @@ fun FormulaInspectionDialog(
   targetPace: TargetPaceOption,
   caffeineAlcoholYes: Boolean,
   sodiumFrequency: SodiumFrequencyOption,
+  climateBand: ClimateBandOption = ClimateBandOption.defaultForCurrentDate(),
   onDismiss: () -> Unit,
 ) {
   val numberFormat = remember { NumberFormat.getIntegerInstance(Locale.US) }
@@ -346,13 +347,13 @@ fun FormulaInspectionDialog(
       val deltaSign = if (report.calorieDeltaFromTdeeKcal >= 0) "+" else ""
       formulaEquation = "Daily Goal = Daily Burn (TDEE) ${if (report.calorieDeltaFromTdeeKcal >= 0) "+" else "−"} Goal Adjustment"
       stepByStepLines = listOf(
-        "Resting BMR" to "${numberFormat.format(report.bmrKcalRounded)} kcal/day",
-        "Activity Multiplier" to "×${String.format(Locale.US, "%.3f", report.totalActivityFactor)} (${activityLevel.name.lowercase().replaceFirstChar { it.uppercase() }})",
-        "Daily Burn (TDEE)" to "${numberFormat.format(report.tdeeKcalRounded)} kcal/day",
+        "Resting BMR (${report.bmrDescriptor})" to "${numberFormat.format(report.bmrKcalRounded)} kcal/day",
+        "Total Activity Factor (PAL + EAT)" to "×${String.format(Locale.US, "%.3f", report.totalActivityFactor)} (${activityLevel.name.lowercase().replaceFirstChar { it.uppercase() }})",
+        "Daily Maintenance Burn (TDEE)" to "${numberFormat.format(report.tdeeKcalRounded)} kcal/day",
         "Objective & Pace (${report.effectiveObjective.name.replace('_', ' ')})" to "$deltaSign${report.calorieDeltaFromTdeeKcal} kcal/day",
-        "Minimum Safe Floor" to "${numberFormat.format(report.calorieSafetyFloorKcal)} kcal/day",
+        "Weekly Rate Estimate" to "${if (report.estimatedWeeklyKgChange >= 0f) "+" else ""}${String.format(Locale.US, "%.2f", report.estimatedWeeklyKgChange)} kg/week",
       )
-      simpleExplanation = "Your daily calorie goal starts with how much energy your body burns at rest (BMR), multiplies it by your weekly movement and workout schedule (TDEE), and adjusts for your ${report.effectiveObjective.name.replace('_', ' ').lowercase()} goal while staying above your safe minimum energy floor."
+      simpleExplanation = "Calibrated via evidence-based sports nutrition (Jeff Nippard & Eric Helms): starts with your resting organ burn (BMR), multiplies by your workout schedule + session duration/modality (TDEE), and applies a lean hypertrophy surplus or LBM-preserving deficit."
     }
 
     FormulaInspectionTopic.PROTEIN -> {
@@ -361,11 +362,11 @@ fun FormulaInspectionDialog(
       formulaEquation = "Protein = Effective Weight × ${String.format(Locale.US, "%.2f", report.proteinFactorGPerKgEff)} g/kg"
       stepByStepLines = listOf(
         "Effective Dosing Weight" to "${String.format(Locale.US, "%.1f", report.effectiveWeightKg)} kg",
-        "Goal & Experience Factor" to "${String.format(Locale.US, "%.2f", report.proteinFactorGPerKgEff)} g/kg (${experienceLevel.name.lowercase().replaceFirstChar { it.uppercase() }})",
-        "Per-Meal Protein (${report.mealCount} meals)" to "~${report.proteinPerMealGrams}g / meal",
+        "ISSN / Nippard Factor (${report.effectiveObjective.name.replace('_', ' ')})" to "${String.format(Locale.US, "%.2f", report.proteinFactorGPerKgEff)} g/kg (${experienceLevel.name.lowercase().replaceFirstChar { it.uppercase() }})",
+        "Per-Meal MPS Bolus (${report.mealCount} meals)" to "~${report.proteinPerMealGrams}g / meal (${String.format(Locale.US, "%.2f", report.proteinPerMealGPerKgEff)} g/kg)",
         "Safe Scientific Range" to "${report.proteinFloorGrams}g to ${report.proteinCeilingGrams}g",
       )
-      simpleExplanation = "Protein is scaled to your effective body weight, training experience, and age group so your muscles recover properly and stay protected without overloading your digestion."
+      simpleExplanation = "Based on the ISSN Position Stand & Jeff Nippard's body recomposition research: 1.8–2.2 g/kg (~0.8–1.0 g/lb) maximizes Muscle Protein Synthesis (MPS) for hypertrophy, while 1.9–2.3 g/kg protects lean muscle tissue during fat loss."
     }
 
     FormulaInspectionTopic.CARBS -> {
@@ -375,11 +376,11 @@ fun FormulaInspectionDialog(
       stepByStepLines = listOf(
         "Daily Calorie Goal" to "${numberFormat.format(report.recommendedCaloriesKcal)} kcal",
         "Minus Protein (${report.recommendedProteinGrams}g × 4)" to "−${report.recommendedProteinGrams * 4} kcal",
-        "Minus Healthy Fats (${report.recommendedFatsGrams}g × 9)" to "−${report.recommendedFatsGrams * 9} kcal",
-        "Remaining Carb Energy" to "${report.recommendedCarbsGrams * 4} kcal ÷ 4 = ${report.recommendedCarbsGrams}g",
-        "Brain Glucose Floor" to "Minimum 130g / day",
+        "Minus Essential Fats (${report.recommendedFatsGrams}g × 9)" to "−${report.recommendedFatsGrams * 9} kcal",
+        "Glycogen & Performance Fuel" to "${report.recommendedCarbsGrams * 4} kcal ÷ 4 = ${report.recommendedCarbsGrams}g",
+        "CNS Brain Glucose Floor" to "Minimum 130g / day",
       )
-      simpleExplanation = "Carbohydrates fill your remaining daily energy budget after protein and essential fats are locked in, keeping at least 130g/day to fuel your brain and muscle glycogen."
+      simpleExplanation = "Carbohydrates fill your remaining energy budget after protein and hormonal fats are locked in—replenishing muscle glycogen for high-volume gym sets and keeping at least 130g/day for brain glucose demand."
     }
 
     FormulaInspectionTopic.FATS -> {
@@ -389,38 +390,38 @@ fun FormulaInspectionDialog(
       stepByStepLines = listOf(
         "Target Energy Share" to "${report.fatTargetSharePct}% of ${numberFormat.format(report.recommendedCaloriesKcal)} kcal",
         "Calorie Density" to "9 kcal per gram of fat",
-        "Hormone Protection Floor" to "${report.fatFloorGrams}g minimum",
+        "Endocrine / Hormone Floor" to "${report.fatFloorGrams}g min (${if (biologicalSex.equals("MALE", true)) "0.65" else "0.75"} g/kg)",
         "Upper Safe Ceiling" to "${report.fatCeilingGrams}g maximum",
       )
-      simpleExplanation = "Healthy fats are set to ${report.fatTargetSharePct}% of your daily calories (with a strict floor for ${biologicalSex.lowercase()} hormone health and vitamin absorption)."
+      simpleExplanation = "Dietary fats are set to ${report.fatTargetSharePct}% of calories with a strict floor (${if (biologicalSex.equals("MALE", true)) "0.65" else "0.75"} g/kg) to support testosterone, estrogen, joint health, and fat-soluble vitamins (A, D, E, K)."
     }
 
     FormulaInspectionTopic.HYDRATION -> {
       primaryValueText = "${numberFormat.format(report.primaryRecommendedWaterMl)} ml / day"
       safeRangeText = "${numberFormat.format(report.waterFloorMl)} – ${numberFormat.format(report.waterCeilingMl)} ml"
-      formulaEquation = "Water = Base Body Need + Work & Lifestyle + Workout Sweat"
-      val weeklyAvgExerciseMl = ((report.trainingDaysPerWeek / 7f) * report.exerciseWaterAddOnWorkoutDayMl).toInt()
+      formulaEquation = "Water = Base Fluid + Muscle/Protein Load + Area Temp + Sweat"
       stepByStepLines = listOf(
-        "Base Body Fluid (${String.format(Locale.US, "%.1f", report.effectiveWeightKg)} kg)" to "${numberFormat.format(report.baseWaterMl)} ml",
-        "Occupation & Environment" to "+${report.occupationWaterAddMl + report.climateWaterAddMl} ml",
-        "Caffeine/Alcohol & Sodium Flush" to "+${report.caffeineWaterAddMl + report.sodiumWaterAddMl} ml",
-        "Workout Sweat Allowance (${report.trainingDaysPerWeek}d/wk)" to "+$weeklyAvgExerciseMl ml/day avg",
-        "Daily Sip Rhythm" to "~${String.format(Locale.US, "%.1f", report.waterGlasses250Ml)} glasses (${report.wakingHourlyReminderMl} ml/hr)",
+        "Base Body Fluid (${String.format(Locale.US, "%.1f", report.effectiveWeightKg)} kg • $ageYears yrs)" to "${numberFormat.format(report.baseWaterMl)} ml",
+        "Muscle Volumization & Protein Urea Load" to "+${report.anabolicAndProteinWaterAddMl} ml",
+        "Area Temp (${climateBand.tempRangeLabel} ${climateBand.seasonName})" to "+${report.climateWaterAddMl} ml (×${String.format(Locale.US, "%.2f", climateBand.sweatRateMultiplier)} sweat)",
+        "Job (${occupationLoad.title}) & Caffeine/Sodium" to "+${report.occupationWaterAddMl + report.caffeineWaterAddMl + report.sodiumWaterAddMl} ml",
+        "Workout Sweat (${workoutDuration.displayHours} ${trainingModality.shortLabel})" to "+${report.exerciseWaterAddOnWorkoutDayMl} ml on training days",
+        "Training vs Rest Day Split" to "${numberFormat.format(report.workoutDayWaterMl)} ml (Gym) • ${numberFormat.format(report.restDayWaterMl)} ml (Rest)",
       )
-      simpleExplanation = "Your hydration goal combines your body-weight fluid baseline with extra water for your job activity, workout sweat rate (${trainingModality.shortLabel}, ${workoutDuration.displayHours}), caffeine/alcohol, and salty meals."
+      simpleExplanation = "Calibrated via NASEM DRI, ACSM Sweat Replacement & ISSN Sports Nutrition: combines age/sex fluid turnover (35–39 ml/kg) with intracellular muscle glycogen water (muscle is ~76% water), high-protein renal urea clearance, ambient area temperature (${climateBand.tempRangeLabel}), and workout sweat loss."
     }
 
     FormulaInspectionTopic.STEPS -> {
       primaryValueText = "${numberFormat.format(report.recommendedSteps)} steps / day"
       safeRangeText = "${numberFormat.format(report.stepsFloor)} – ${numberFormat.format(report.stepsCeiling)} steps"
-      formulaEquation = "Steps = Activity Tier Base + Goal Adjustment"
+      formulaEquation = "Steps = Activity Base + Occupation NEAT + Goal Tuning"
       stepByStepLines = listOf(
-        "Activity Tier (${activityLevel.name})" to "Base tier cadence",
-        "Goal Adjustment (${report.effectiveObjective.name.replace('_', ' ')})" to "Tuned for recovery & burn",
-        "Estimated Stride Length" to "${String.format(Locale.US, "%.2f", report.strideLengthMeters)} m",
+        "Activity Tier (${activityLevel.name})" to "Base movement cadence",
+        "Occupation Load (${occupationLoad.title})" to "Daily job NEAT contribution",
+        "Goal & Modality (${report.effectiveObjective.name.replace('_', ' ')})" to "Tuned for work capacity & recovery",
         "Estimated Walking Distance" to "${String.format(Locale.US, "%.1f", report.estimatedWalkingKm)} km / day (~${report.informationalWalkingKcal} kcal)",
       )
-      simpleExplanation = "Daily steps keep your non-exercise calorie burn steady and improve blood sugar control without over-fatiguing your legs before workouts."
+      simpleExplanation = "Daily steps regulate Non-Exercise Activity Thermogenesis (NEAT), insulin sensitivity, and cardiovascular recovery between lifting sessions without causing central nervous system fatigue."
     }
 
     FormulaInspectionTopic.BMI -> {
@@ -433,13 +434,15 @@ fun FormulaInspectionDialog(
         "Standard Classification" to report.bmiCategoryStandard,
         "Asian WHO Classification" to report.bmiCategoryAsianWho,
       )
-      simpleExplanation = "BMI measures your weight relative to height to help calibrate safe deficit/surplus rates and determine whether effective weight adjustment is needed."
+      simpleExplanation = "BMI measures your weight relative to height to help calibrate safe deficit/surplus rates and determine whether effective weight or Body Fat % LBM adjustment is needed."
     }
 
     FormulaInspectionTopic.EFFECTIVE_WEIGHT -> {
       primaryValueText = "${String.format(Locale.US, "%.1f", report.effectiveWeightKg)} kg"
       safeRangeText = "Actual: ${String.format(Locale.US, "%.1f", report.actualWeightKg)} kg"
-      formulaEquation = if (report.isEffectiveWeightAdjusted) {
+      formulaEquation = if (report.leanBodyMassKg != null) {
+        "W_eff = Lean Body Mass ÷ Lean Reference Factor"
+      } else if (report.isEffectiveWeightAdjusted) {
         "W_eff = W_ref + 0.25 × (Actual Weight − W_ref)"
       } else {
         "W_eff = Actual Body Weight"
@@ -447,16 +450,16 @@ fun FormulaInspectionDialog(
       stepByStepLines = listOf(
         "Actual Weight" to "${String.format(Locale.US, "%.1f", report.actualWeightKg)} kg",
         "Reference Weight (BMI 25)" to "${String.format(Locale.US, "%.1f", report.referenceWeightKg)} kg",
-        "Adjustment Status" to if (report.isEffectiveWeightAdjusted) "Adjusted (BMI > 27)" else "Direct 1:1 Dosing",
+        "Adjustment Status" to if (report.leanBodyMassKg != null) "Calibrated from Body Fat % LBM" else if (report.isEffectiveWeightAdjusted) "Adjusted (BMI > 27)" else "Direct 1:1 Dosing",
       )
-      simpleExplanation = "Protein and hydration needs are driven primarily by lean tissue rather than stored fat. When BMI is above 27, effective weight prevents over-prescribing protein and water."
+      simpleExplanation = "Protein and hydration needs are driven primarily by metabolically active lean tissue rather than stored adipose tissue."
     }
 
     FormulaInspectionTopic.BMR -> {
       primaryValueText = "${numberFormat.format(report.bmrKcalRounded)} kcal / day"
       safeRangeText = report.bmrDescriptor
       formulaEquation = if (report.leanBodyMassKg != null) {
-        "BMR = 370 + (21.6 × Lean Body Mass kg)"
+        "BMR = 370 + (21.6 × Lean Body Mass kg) [Katch-McArdle]"
       } else {
         "BMR = (10 × Weight) + (6.25 × Height) − (5 × Age) ${if (biologicalSex.equals("MALE", true)) "+ 5" else "− 161"}"
       }
@@ -465,20 +468,22 @@ fun FormulaInspectionDialog(
         "Stature & Mass" to "${String.format(Locale.US, "%.1f", heightCm)} cm • ${String.format(Locale.US, "%.1f", weightKg)} kg",
         "Calculated Resting Burn" to "${numberFormat.format(report.bmrKcalRounded)} kcal/day",
       )
-      simpleExplanation = "Your Resting Metabolic Rate (BMR) is the energy your brain, heart, lungs, and cells burn every 24 hours just to keep you alive at complete rest."
+      simpleExplanation = "Your Resting Metabolic Rate (BMR) is the energy your brain, heart, liver, and skeletal muscle burn every 24 hours at complete rest."
     }
 
     FormulaInspectionTopic.TDEE -> {
       primaryValueText = "${numberFormat.format(report.tdeeKcalRounded)} kcal / day"
       safeRangeText = "Multiplier ×${String.format(Locale.US, "%.3f", report.totalActivityFactor)}"
-      formulaEquation = "TDEE = Resting BMR × Total Activity Factor"
+      formulaEquation = "TDEE = Resting BMR × (Base PAL + Job + Session EAT)"
+      val eatSign = if (report.sessionEatPalAddOn >= 0f) "+" else ""
       stepByStepLines = listOf(
         "Resting BMR" to "${numberFormat.format(report.bmrKcalRounded)} kcal/day",
         "Activity Tier (${activityLevel.name})" to "${String.format(Locale.US, "%.3f", report.basePal)} (${report.trainingDaysPerWeek}W / ${report.restDaysPerWeek}R)",
         "Occupation Add-On (${occupationLoad.title})" to "+${String.format(Locale.US, "%.2f", report.occupationPalAddOn)}",
+        "Session Duration & Modality (${workoutDuration.displayHours} ${trainingModality.shortLabel})" to "$eatSign${String.format(Locale.US, "%.3f", report.sessionEatPalAddOn)}",
         "Total Activity Factor" to "×${String.format(Locale.US, "%.3f", report.totalActivityFactor)}",
       )
-      simpleExplanation = "Total Daily Energy Expenditure (TDEE) combines your resting organ burn with your weekly workout schedule and daily job movement to estimate your true maintenance calories."
+      simpleExplanation = "Total Daily Energy Expenditure (TDEE) combines your resting organ burn with your weekly workout frequency, session duration (${workoutDuration.displayHours}), training modality (${trainingModality.shortLabel}), and daily job movement."
     }
   }
 

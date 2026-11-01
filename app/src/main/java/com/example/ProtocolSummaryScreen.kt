@@ -114,6 +114,7 @@ import com.example.ui.theme.StepsEnd
 import com.example.ui.theme.StepsMid
 import com.example.ui.theme.StepsStart
 import java.text.NumberFormat
+import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
@@ -174,9 +175,9 @@ private fun computeSummaryMetrics(
   val w = maxWidth.value.coerceAtLeast(280f)
   val h = maxHeight.value.coerceAtLeast(480f)
   val isExpanded = w >= 600f
-  val widthFactor = (w / 392f).coerceIn(0.82f, 1.18f)
-  val heightFactor = (h / 830f).coerceIn(0.76f, 1.12f)
-  val scale = min(widthFactor, heightFactor * 1.05f).coerceIn(0.80f, 1.14f)
+  val widthFactor = (w / 392f).coerceIn(0.82f, 1.26f)
+  val heightFactor = (h / 830f).coerceIn(0.76f, 1.18f)
+  val scale = min(widthFactor, heightFactor * 1.05f).coerceIn(0.80f, 1.20f)
   val safeFontScale = fontScale.coerceIn(0.5f, 3.0f)
   val fontCompensation = when {
     safeFontScale > 1.0f -> (1.0f + (safeFontScale - 1.0f) * 0.25f) / safeFontScale
@@ -186,21 +187,27 @@ private fun computeSummaryMetrics(
   val sp: (Float, Float, Float) -> TextUnit = { base, minV, maxV ->
     ((base * scale).coerceIn(minV, maxV) * fontCompensation).sp
   }
+  val responsiveMaxWidth = when {
+    w >= 1100f -> (w * 0.82f).coerceIn(820f, 1020f).dp
+    w >= 840f -> (w * 0.85f).coerceIn(660f, 860f).dp
+    isExpanded -> (w * 0.88f).coerceIn(500f, 700f).dp
+    else -> w.dp
+  }
 
   return SummaryResponsiveMetrics(
     scale = scale,
     fontCompensation = fontCompensation,
-    contentMaxWidth = if (isExpanded) (w * 0.80f).coerceIn(480f, 580f).dp else w.dp,
-    horizontalPadding = (20f * widthFactor).coerceIn(14f, 28f).dp,
+    contentMaxWidth = responsiveMaxWidth,
+    horizontalPadding = (20f * widthFactor).coerceIn(14f, 32f).dp,
     topContentPadding = (8f * heightFactor).coerceIn(5f, 14f).dp,
-    bottomContentPadding = (18f * heightFactor).coerceIn(12f, 26f).dp,
-    headerHeight = (46f * scale).coerceIn(42f, 54f).dp,
-    titleFontSize = sp(25f, 21f, 29f),
-    subtitleFontSize = sp(12.5f, 11f, 14f),
-    subtitleLineHeight = sp(18f, 15.5f, 20.5f),
+    bottomContentPadding = (18f * heightFactor).coerceIn(12f, 28f).dp,
+    headerHeight = (46f * scale).coerceIn(42f, 56f).dp,
+    titleFontSize = sp(25f, 21f, 30f),
+    subtitleFontSize = sp(12.5f, 11f, 14.5f),
+    subtitleLineHeight = sp(18f, 15.5f, 21f),
     sectionGap = (15f * heightFactor).coerceIn(12f, 20f).dp,
-    cardCornerRadius = (14f * scale).coerceIn(12f, 16f).dp,
-    cardPadding = (15f * scale).coerceIn(12f, 18f).dp,
+    cardCornerRadius = (14f * scale).coerceIn(12f, 17f).dp,
+    cardPadding = (15f * scale).coerceIn(12f, 19f).dp,
     ctaHeight = (50f * scale).coerceIn(48f, 56f).dp,
   )
 }
@@ -233,6 +240,7 @@ fun ProtocolSummaryScreen(
   sodiumFrequency: SodiumFrequencyOption,
   streakThreshold: StreakThresholdOption,
   climateBand: ClimateBandOption,
+  onSelectClimateBand: (ClimateBandOption) -> Unit = {},
   bodyFatOverrideEnabled: Boolean,
   onToggleBodyFatOverride: (Boolean) -> Unit,
   bodyFatPercent: Float,
@@ -621,6 +629,40 @@ fun ProtocolSummaryScreen(
             isLockInDisclaimerFlow = false
             showDisclaimerModal = true
           },
+          climateBand = climateBand,
+          onSelectClimateBand = { chosenBand ->
+            if (chosenBand != climateBand) {
+              haptics.selection()
+              val updatedReport = DailyTargetsEngine.calculate(
+                ageYears = ageYears,
+                biologicalSex = selectedSex,
+                heightCm = heightCm,
+                weightKg = weightKg,
+                activityLevel = activityLevel,
+                occupationLoad = occupationLoad,
+                objective = objective,
+                trainingModality = trainingModality,
+                workoutDuration = workoutDuration,
+                experienceLevel = experienceLevel,
+                targetPace = targetPace,
+                mealFrequency = mealFrequency,
+                caffeineAlcoholYes = caffeineAlcoholYes,
+                sodiumFrequency = sodiumFrequency,
+                climateBand = chosenBand,
+                bodyFatPercentOverride = if (bodyFatOverrideEnabled) bodyFatPercent else null,
+                selectedWorkoutDays = selectedWorkoutDays,
+              )
+              if (isCustomTargetsMode) {
+                val waterDelta = updatedReport.primaryRecommendedWaterMl - report.primaryRecommendedWaterMl
+                onCustomHydrationChange((customHydrationMl + waterDelta).coerceIn(500, 7500))
+              } else {
+                onCustomHydrationChange(updatedReport.primaryRecommendedWaterMl)
+              }
+              onSelectClimateBand(chosenBand)
+            } else {
+              haptics.tick()
+            }
+          },
           haptics = haptics,
           numberFormat = numberFormat,
           metrics = metrics,
@@ -757,6 +799,7 @@ fun ProtocolSummaryScreen(
       targetPace = targetPace,
       caffeineAlcoholYes = caffeineAlcoholYes,
       sodiumFrequency = sodiumFrequency,
+      climateBand = climateBand,
       onDismiss = { inspectedTopic = null },
     )
   }
@@ -1126,6 +1169,8 @@ private fun DailyTargetsCommandDeck(
   onBalanceCarbsToCalories: () -> Unit,
   onInspectFormula: (FormulaInspectionTopic) -> Unit,
   onOpenAlertModal: () -> Unit,
+  climateBand: ClimateBandOption,
+  onSelectClimateBand: (ClimateBandOption) -> Unit,
   haptics: BioSyncHapticController,
   numberFormat: NumberFormat,
   metrics: SummaryResponsiveMetrics,
@@ -1604,14 +1649,26 @@ private fun DailyTargetsCommandDeck(
     Spacer(modifier = Modifier.height(10.dp))
 
     // ── C. 2-Column Hydration & Daily Steps Strip (No Hexagon/Circle Clutter) ─
+    val hasActiveTrainingSchedule = report.trainingDaysPerWeek > 0
+    val syncedRestDayWaterMl = if (hasActiveTrainingSchedule) {
+      (activeHydration - report.exerciseWaterAddOnWorkoutDayMl).coerceAtLeast(report.waterFloorMl)
+    } else {
+      activeHydration
+    }
+    val syncedSweatDeltaMl = (activeHydration - syncedRestDayWaterMl).coerceAtLeast(0)
+
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
       VitalTelemetryCard(
-        title = "Hydration",
+        title = if (hasActiveTrainingSchedule) "Hydration (Train)" else "Hydration (Rest)",
         primaryValue = "${numberFormat.format(activeHydration)} ml",
-        subDetail = "~${String.format(Locale.US, "%.1f", activeHydration / 250f)} glasses • ${((activeHydration / 16f) / 10f).roundToInt() * 10} ml/hr",
+        subDetail = if (hasActiveTrainingSchedule) {
+          "Rest Day: ${numberFormat.format(syncedRestDayWaterMl)} ml (-${syncedSweatDeltaMl}ml sweat)"
+        } else {
+          "~${String.format(Locale.US, "%.1f", activeHydration / 250f)} glasses • ${((activeHydration / 16f) / 10f).roundToInt() * 10} ml/hr"
+        },
         safeRangeLabel = "Safe ${numberFormat.format(report.waterFloorMl)}–${numberFormat.format(report.waterCeilingMl)} ml",
         currentValue = activeHydration,
         safeMin = report.waterFloorMl,
@@ -1651,11 +1708,24 @@ private fun DailyTargetsCommandDeck(
         metrics = metrics,
         minusTestTag = "steps_minus_btn",
         plusTestTag = "steps_plus_btn",
+        disclaimerText = "* Step counter not fully accurate yet; improving in future updates.",
         modifier = Modifier
           .weight(1f)
           .testTag("target_card_steps"),
       )
     }
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    // ── C2. Interactive Average Area Temperature Selector (Directly Calibrates Hydration) ─
+    AreaTemperatureHydrationSelectorCard(
+      selectedClimateBand = climateBand,
+      onSelectClimateBand = onSelectClimateBand,
+      report = report,
+      activeHydrationMl = activeHydration,
+      numberFormat = numberFormat,
+      metrics = metrics,
+    )
 
     Spacer(modifier = Modifier.height(12.dp))
 
@@ -1678,6 +1748,346 @@ private fun DailyTargetsCommandDeck(
     )
   }
 }
+
+@Composable
+private fun AreaTemperatureHydrationSelectorCard(
+  selectedClimateBand: ClimateBandOption,
+  onSelectClimateBand: (ClimateBandOption) -> Unit,
+  report: DailyTargetsCalculationReport,
+  activeHydrationMl: Int,
+  numberFormat: NumberFormat,
+  metrics: SummaryResponsiveMetrics,
+) {
+  val bands = ClimateBandOption.entries
+  val hasTrainingSchedule = report.trainingDaysPerWeek > 0
+  val syncedWorkoutWaterMl = activeHydrationMl
+  val syncedRestWaterMl = if (hasTrainingSchedule) {
+    (activeHydrationMl - report.exerciseWaterAddOnWorkoutDayMl).coerceAtLeast(report.waterFloorMl)
+  } else {
+    activeHydrationMl
+  }
+  val syncedSweatDeltaMl = (syncedWorkoutWaterMl - syncedRestWaterMl).coerceAtLeast(0)
+  val workoutLiters = syncedWorkoutWaterMl / 1000f
+  val restLiters = syncedRestWaterMl / 1000f
+
+  val isTodayTrainingDay = remember(report.selectedWorkoutDays, report.trainingDaysPerWeek) {
+    if (report.trainingDaysPerWeek <= 0) {
+      false
+    } else {
+      val cal = Calendar.getInstance()
+      val todayOption = when (cal.get(Calendar.DAY_OF_WEEK)) {
+        Calendar.MONDAY -> DayOfWeekOption.MONDAY
+        Calendar.TUESDAY -> DayOfWeekOption.TUESDAY
+        Calendar.WEDNESDAY -> DayOfWeekOption.WEDNESDAY
+        Calendar.THURSDAY -> DayOfWeekOption.THURSDAY
+        Calendar.FRIDAY -> DayOfWeekOption.FRIDAY
+        Calendar.SATURDAY -> DayOfWeekOption.SATURDAY
+        Calendar.SUNDAY -> DayOfWeekOption.SUNDAY
+        else -> DayOfWeekOption.MONDAY
+      }
+      todayOption in report.selectedWorkoutDays
+    }
+  }
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .background(ObsidianBlack)
+      .border(
+        width = 1.dp,
+        color = Zinc800,
+        shape = RoundedCornerShape(12.dp),
+      )
+      .padding(12.dp)
+      .testTag("step04_area_temperature_selector_card"),
+  ) {
+    // 1. Executive Single-Line Header (strictly aligned with PER MEAL TARGET & DAILY ESSENTIALS)
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+      ) {
+        Box(
+          modifier = Modifier
+            .width(3.5.dp)
+            .height(13.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(Brush.verticalGradient(listOf(HydrationStart, selectedClimateBand.accentColor))),
+        )
+        Text(
+          text = "AVG AREA TEMPERATURE",
+          color = PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = metrics.spScaled(11f, 9.8f, 12.4f),
+          letterSpacing = 0.9.sp,
+          maxLines = 1,
+        )
+      }
+
+      Box(
+        modifier = Modifier
+          .clip(RoundedCornerShape(6.dp))
+          .background(Zinc950)
+          .border(1.dp, selectedClimateBand.accentColor.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
+          .padding(horizontal = 8.5.dp, vertical = 3.dp),
+      ) {
+        val compactRange = selectedClimateBand.tempRangeLabel.replace(" ", "")
+        Text(
+          text = "${selectedClimateBand.seasonName.uppercase(Locale.US)} • $compactRange",
+          color = selectedClimateBand.accentColor,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = metrics.spScaled(9.2f, 8.2f, 10.4f),
+          letterSpacing = 0.5.sp,
+          maxLines = 1,
+        )
+      }
+    }
+
+    Spacer(modifier = Modifier.height(9.dp))
+
+    // 2. 5-Column Uniform Ambient Temperature Selector Grid
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+      bands.forEach { band ->
+        val isSelected = band == selectedClimateBand
+        val chipBg = if (isSelected) PureWhite else Zinc950
+        val chipBorder = if (isSelected) PureWhite else Zinc850
+        val primaryTextColor = if (isSelected) ObsidianBlack else PureWhite
+        val tierTextColor = if (isSelected) Color(0xFF52525B) else Zinc400
+        val deltaTextColor = if (isSelected) ObsidianBlack else band.accentColor
+        val topBarColor = if (isSelected) ObsidianBlack else band.accentColor.copy(alpha = 0.85f)
+
+        val compactTemp = when (band) {
+          ClimateBandOption.COOL_MILD -> "<20°C"
+          ClimateBandOption.WARM -> "20–25°"
+          ClimateBandOption.HOT -> "26–30°"
+          ClimateBandOption.VERY_HOT -> "31–35°"
+          ClimateBandOption.EXTREME_HEAT -> ">35°C"
+        }
+        val compactTier = when (band) {
+          ClimateBandOption.COOL_MILD -> "COOL"
+          ClimateBandOption.WARM -> "MILD"
+          ClimateBandOption.HOT -> "WARM"
+          ClimateBandOption.VERY_HOT -> "HOT"
+          ClimateBandOption.EXTREME_HEAT -> "PEAK"
+        }
+        val compactDelta = when (band.baselineWaterAddMl) {
+          0 -> "BASE"
+          1150 -> "+1.15L"
+          else -> "+${band.baselineWaterAddMl}mL"
+        }
+
+        Column(
+          modifier = Modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(9.dp))
+            .background(chipBg)
+            .border(1.dp, chipBorder, RoundedCornerShape(9.dp))
+            .clickable(role = Role.RadioButton) { onSelectClimateBand(band) }
+            .padding(horizontal = 4.dp, vertical = 7.dp)
+            .testTag("area_temp_chip_${band.name.lowercase(Locale.US)}"),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center,
+        ) {
+          Box(
+            modifier = Modifier
+              .width(16.dp)
+              .height(2.5.dp)
+              .clip(RoundedCornerShape(1.5.dp))
+              .background(topBarColor),
+          )
+          Spacer(modifier = Modifier.height(5.dp))
+          Text(
+            text = compactTier,
+            color = tierTextColor,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = metrics.spScaled(8.0f, 7.2f, 9.0f),
+            letterSpacing = 0.5.sp,
+            maxLines = 1,
+          )
+          Spacer(modifier = Modifier.height(2.dp))
+          Text(
+            text = compactTemp,
+            color = primaryTextColor,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = metrics.spScaled(11.2f, 9.8f, 12.4f),
+            maxLines = 1,
+          )
+          Spacer(modifier = Modifier.height(3.dp))
+          Text(
+            text = compactDelta,
+            color = deltaTextColor,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = metrics.spScaled(8.6f, 7.6f, 9.6f),
+            maxLines = 1,
+          )
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height(7.dp))
+
+    // 3. Symmetrical 2-Column Hydration Telemetry Split (Training Day vs. Rest Day — 100% Synced with Hydration Card)
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+      HydrationClimateSplitTile(
+        title = "Train Day (${report.trainingDaysPerWeek}d/wk)",
+        badgeText = if (isTodayTrainingDay) "TODAY" else "GYM",
+        isHighlighted = isTodayTrainingDay,
+        primaryValue = String.format(Locale.US, "%.2fL", workoutLiters),
+        secondaryUnit = "${numberFormat.format(syncedWorkoutWaterMl)} ml",
+        subTag = if (hasTrainingSchedule) {
+          "Base + ${syncedSweatDeltaMl}ml sweat (×${String.format(Locale.US, "%.2f", selectedClimateBand.sweatRateMultiplier)})"
+        } else {
+          "0 training days selected"
+        },
+        accentColor = HydrationStart,
+        metrics = metrics,
+        modifier = Modifier.weight(1f),
+      )
+      HydrationClimateSplitTile(
+        title = "Rest Day (${report.restDaysPerWeek}d/wk)",
+        badgeText = if (!isTodayTrainingDay) "TODAY" else "REST",
+        isHighlighted = !isTodayTrainingDay,
+        primaryValue = String.format(Locale.US, "%.2fL", restLiters),
+        secondaryUnit = "${numberFormat.format(syncedRestWaterMl)} ml",
+        subTag = if (hasTrainingSchedule) {
+          "Auto-deducts -${syncedSweatDeltaMl}ml gym sweat"
+        } else {
+          "Thermal +${selectedClimateBand.baselineWaterAddMl}ml • ${selectedClimateBand.tempFahrenheitLabel}"
+        },
+        accentColor = selectedClimateBand.accentColor,
+        metrics = metrics,
+        modifier = Modifier.weight(1f),
+      )
+    }
+  }
+}
+
+@Composable
+private fun HydrationClimateSplitTile(
+  title: String,
+  badgeText: String,
+  isHighlighted: Boolean,
+  primaryValue: String,
+  secondaryUnit: String,
+  subTag: String,
+  accentColor: Color,
+  metrics: SummaryResponsiveMetrics,
+  modifier: Modifier = Modifier,
+) {
+  Column(
+    modifier = modifier
+      .clip(RoundedCornerShape(9.dp))
+      .background(Zinc950)
+      .border(
+        width = 1.dp,
+        color = if (isHighlighted) accentColor.copy(alpha = 0.55f) else Zinc850,
+        shape = RoundedCornerShape(9.dp),
+      )
+      .padding(horizontal = 9.dp, vertical = 8.dp),
+    horizontalAlignment = Alignment.Start,
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        modifier = Modifier.weight(1f, fill = false),
+      ) {
+        Box(
+          modifier = Modifier
+            .width(3.dp)
+            .height(10.dp)
+            .clip(RoundedCornerShape(1.5.dp))
+            .background(accentColor),
+        )
+        Text(
+          text = title,
+          color = Zinc300,
+          fontFamily = InterFontFamily,
+          fontWeight = FontWeight.SemiBold,
+          fontSize = metrics.spScaled(9.8f, 8.6f, 11.0f),
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
+      Box(
+        modifier = Modifier
+          .clip(RoundedCornerShape(4.dp))
+          .background(if (isHighlighted) accentColor.copy(alpha = 0.18f) else Zinc900)
+          .border(
+            width = 0.8.dp,
+            color = if (isHighlighted) accentColor.copy(alpha = 0.65f) else Zinc800,
+            shape = RoundedCornerShape(4.dp),
+          )
+          .padding(horizontal = 4.5.dp, vertical = 1.5.dp),
+      ) {
+        Text(
+          text = badgeText,
+          color = if (isTodayBadge(badgeText)) PureWhite else Zinc400,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = metrics.spScaled(7.5f, 6.8f, 8.5f),
+          letterSpacing = 0.4.sp,
+          maxLines = 1,
+        )
+      }
+    }
+    Spacer(modifier = Modifier.height(4.dp))
+    Row(
+      verticalAlignment = Alignment.Bottom,
+      horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+      Text(
+        text = primaryValue,
+        color = PureWhite,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = metrics.spScaled(14.5f, 12.5f, 16.5f),
+        maxLines = 1,
+      )
+      Text(
+        text = secondaryUnit,
+        color = accentColor,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = metrics.spScaled(9.8f, 8.6f, 11.0f),
+        modifier = Modifier.padding(bottom = 1.dp),
+        maxLines = 1,
+      )
+    }
+    Spacer(modifier = Modifier.height(2.dp))
+    Text(
+      text = subTag,
+      color = Zinc400,
+      fontFamily = InterFontFamily,
+      fontWeight = FontWeight.Medium,
+      fontSize = metrics.spScaled(9.2f, 8.2f, 10.2f),
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
+  }
+}
+
+private fun isTodayBadge(badgeText: String): Boolean = badgeText == "TODAY"
 
 @Composable
 private fun PerMealAndEssentialsSection(
@@ -2250,6 +2660,7 @@ private fun VitalTelemetryCard(
   metrics: SummaryResponsiveMetrics,
   minusTestTag: String,
   plusTestTag: String,
+  disclaimerText: String? = null,
   modifier: Modifier = Modifier,
 ) {
   val inSafe = currentValue in safeMin..safeMax
@@ -2341,6 +2752,18 @@ private fun VitalTelemetryCard(
         fontWeight = FontWeight.Medium,
         fontSize = metrics.spScaled(9.2f, 8.2f, 10.4f),
       )
+
+      if (!disclaimerText.isNullOrBlank()) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+          text = disclaimerText,
+          color = Zinc400.copy(alpha = 0.85f),
+          fontFamily = InterFontFamily,
+          fontSize = metrics.spScaled(8.6f, 7.6f, 9.6f),
+          lineHeight = metrics.spScaled(11.0f, 9.8f, 12.2f),
+          modifier = Modifier.testTag("step04_steps_accuracy_disclaimer"),
+        )
+      }
     }
 
     if (isCustomMode) {

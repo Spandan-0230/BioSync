@@ -162,6 +162,12 @@ data class BioSyncStoredState(
   val protocolLockedIn: Boolean = false,
 
   // Dashboard Anchor & Live Schedule Persistence (one-time initial Day 1 countdown & live active/rest state)
+  // Circadian Wake-Up & Sleep Schedule (Step 03)
+  val wakeUpHour: Int = 7,
+  val wakeUpMinute: Int = 0,
+  val sleepHour: Int = 23,
+  val sleepMinute: Int = 0,
+
   val protocolLockedAtEpochMillis: Long = 0L,
   val dayOneAnchorStartEpochMillis: Long = 0L,
   val dayOneInitialCountdownCompleted: Boolean = false,
@@ -208,6 +214,10 @@ object BioSyncLocalStore {
   private const val KEY_CAFFEINE_ALCOHOL = "caffeine_alcohol"
   private const val KEY_SODIUM_FREQUENCY = "sodium_frequency"
   private const val KEY_STREAK_THRESHOLD = "streak_threshold"
+  private const val KEY_WAKE_UP_HOUR = "wake_up_hour"
+  private const val KEY_WAKE_UP_MINUTE = "wake_up_minute"
+  private const val KEY_SLEEP_HOUR = "sleep_hour"
+  private const val KEY_SLEEP_MINUTE = "sleep_minute"
 
   private const val KEY_CLIMATE_BAND = "climate_band"
   private const val KEY_BF_OVERRIDE_ENABLED = "bf_override_enabled"
@@ -413,6 +423,10 @@ object BioSyncLocalStore {
       customHydrationMl = p.getInt(KEY_CUSTOM_HYDRATION, defaults.customHydrationMl),
       customStepsCount = p.getInt(KEY_CUSTOM_STEPS, defaults.customStepsCount),
       protocolLockedIn = lockedIn,
+      wakeUpHour = p.getInt(KEY_WAKE_UP_HOUR, defaults.wakeUpHour).coerceIn(0, 23),
+      wakeUpMinute = p.getInt(KEY_WAKE_UP_MINUTE, defaults.wakeUpMinute).coerceIn(0, 59),
+      sleepHour = p.getInt(KEY_SLEEP_HOUR, defaults.sleepHour).coerceIn(0, 23),
+      sleepMinute = p.getInt(KEY_SLEEP_MINUTE, defaults.sleepMinute).coerceIn(0, 59),
       protocolLockedAtEpochMillis = lockedAtMs,
       dayOneAnchorStartEpochMillis = effectiveAnchorMs,
       dayOneInitialCountdownCompleted = effectiveCompleted,
@@ -462,6 +476,10 @@ object BioSyncLocalStore {
       putBoolean(KEY_CAFFEINE_ALCOHOL, state.caffeineAlcoholYes)
       putString(KEY_SODIUM_FREQUENCY, state.sodiumFrequency.name)
       putString(KEY_STREAK_THRESHOLD, state.streakThreshold.name)
+      putInt(KEY_WAKE_UP_HOUR, state.wakeUpHour.coerceIn(0, 23))
+      putInt(KEY_WAKE_UP_MINUTE, state.wakeUpMinute.coerceIn(0, 59))
+      putInt(KEY_SLEEP_HOUR, state.sleepHour.coerceIn(0, 23))
+      putInt(KEY_SLEEP_MINUTE, state.sleepMinute.coerceIn(0, 59))
 
       putString(KEY_CLIMATE_BAND, state.climateBand.name)
       putBoolean(KEY_BF_OVERRIDE_ENABLED, state.bodyFatOverrideEnabled)
