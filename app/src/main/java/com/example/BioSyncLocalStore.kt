@@ -360,8 +360,50 @@ object BioSyncLocalStore {
     return todayOption in state.selectedWorkoutDays
   }
 
+  @Volatile
+  private var isRestoringMirrorGuard = false
+
+  private fun migrateLegacyPrefsIfNeeded(context: Context, targetPrefs: SharedPreferences) {
+    if (targetPrefs.contains(KEY_PROTOCOL_LOCKED) || targetPrefs.contains(KEY_SUBJECT_NAME)) return
+    val legacyNames = listOf(
+      "biosync_on_device_protocol_v1",
+      "biosync_on_device_protocol",
+      "biosync_user_profile_v1",
+    )
+    for (legacyName in legacyNames) {
+      val legacy = context.applicationContext.getSharedPreferences(legacyName, Context.MODE_PRIVATE)
+      val allEntries = legacy.all
+      if (allEntries.isNotEmpty()) {
+        val editor = targetPrefs.edit()
+        for ((k, v) in allEntries) {
+          when (v) {
+            is String -> editor.putString(k, v)
+            is Int -> editor.putInt(k, v)
+            is Long -> editor.putLong(k, v)
+            is Float -> editor.putFloat(k, v)
+            is Boolean -> editor.putBoolean(k, v)
+          }
+        }
+        editor.commit()
+        break
+      }
+    }
+  }
+
   fun load(context: Context): BioSyncStoredState {
     val p = prefs(context)
+    migrateLegacyPrefsIfNeeded(context, p)
+
+    // Self-heal from durable mirror file / Recovery Vault if primary prefs were wiped during an APK update
+    if (!isRestoringMirrorGuard && !p.getBoolean(KEY_PROTOCOL_LOCKED, false)) {
+      isRestoringMirrorGuard = true
+      try {
+        BioSyncBackupManager.restoreFromAutoMirrorIfPrimaryMissing(context)
+      } finally {
+        isRestoringMirrorGuard = false
+      }
+    }
+
     val defaults = BioSyncStoredState()
     val loadedActivity = enumOrDefault(p.getString(KEY_ACTIVITY_LEVEL, null), defaults.activityLevel)
     val rawDaysCsv = p.getString(KEY_SELECTED_WORKOUT_DAYS, null)
@@ -377,7 +419,15 @@ object BioSyncLocalStore {
         .toSet()
     }
     val loadedDayOne = enumOrDefault(p.getString(KEY_DAY_ONE, null), defaults.dayOne)
-    val lockedIn = p.getBoolean(KEY_PROTOCOL_LOCKED, defaults.protocolLockedIn)
+    val hasExistingDashboardHistory = runCatching {
+      val dashPrefs = context.applicationContext.getSharedPreferences("biosync_dashboard_telemetry_v1", Context.MODE_PRIVATE)
+      val hist = dashPrefs.getString("dashboard_daily_history_map_json", "{}") ?: "{}"
+      val quick = dashPrefs.getString("dashboard_saved_quick_items_json", "[]") ?: "[]"
+      val tl = dashPrefs.getString("dashboard_timeline_entries_json", "[]") ?: "[]"
+      hist.length > 4 || quick.length > 4 || tl.length > 4
+    }.getOrDefault(false)
+
+    val lockedIn = p.getBoolean(KEY_PROTOCOL_LOCKED, defaults.protocolLockedIn) || hasExistingDashboardHistory
     val lockedAtMs = p.getLong(KEY_PROTOCOL_LOCKED_AT_EPOCH_MS, defaults.protocolLockedAtEpochMillis)
     val storedAnchorMs = p.getLong(KEY_DAY_ONE_ANCHOR_START_EPOCH_MS, defaults.dayOneAnchorStartEpochMillis)
     val effectiveAnchorMs = if (lockedIn && storedAnchorMs <= 0L) {
@@ -385,9 +435,9 @@ object BioSyncLocalStore {
     } else {
       storedAnchorMs
     }
-    val storedCompleted = p.getBoolean(KEY_DAY_ONE_INITIAL_COUNTDOWN_COMPLETED, false)
+    val storedCompleted = p.getBoolean(KEY_DAY_ONE_INITIAL_COUNTDOWN_COMPLETED, false) || hasExistingDashboardHistory
     val effectiveCompleted = storedCompleted || (lockedIn && effectiveAnchorMs > 0L && System.currentTimeMillis() >= effectiveAnchorMs)
-    val storedNotified = p.getBoolean(KEY_DAY_ONE_START_NOTIFICATION_SENT, false)
+    val storedNotified = p.getBoolean(KEY_DAY_ONE_START_NOTIFICATION_SENT, false) || hasExistingDashboardHistory
     return BioSyncStoredState(
       subjectName = p.getString(KEY_SUBJECT_NAME, defaults.subjectName) ?: defaults.subjectName,
       selectedSex = p.getString(KEY_SELECTED_SEX, defaults.selectedSex) ?: defaults.selectedSex,
@@ -444,7 +494,7 @@ object BioSyncLocalStore {
     )
   }
 
-  fun save(context: Context, state: BioSyncStoredState) {
+  fun save(context: Context, state: BioSyncStoredState, mirrorToVault: Boolean = true) {
     prefs(context).edit().apply {
       putString(KEY_SUBJECT_NAME, state.subjectName)
       putString(KEY_SELECTED_SEX, state.selectedSex)
@@ -499,6 +549,10 @@ object BioSyncLocalStore {
       putInt(KEY_DECIDED_DAILY_STEPS_GOAL, state.decidedDailyStepsGoal)
       apply()
     }
+    if (mirrorToVault && state.protocolLockedIn && !isRestoringMirrorGuard) {
+      BioSyncBackupManager.autoMirrorCurrentDatabase(context)
+    }
+    BioSyncWidgetAndNotificationEngine.refreshAllWidgets(context)
   }
 
   /**

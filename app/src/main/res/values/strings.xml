@@ -140,4 +140,6 @@
     <string name="summary_cta_lock_protocol">Lock In Daily Protocol</string>
     <string name="summary_cta_protocol_locked">Protocol Active • Update Anytime</string>
     <string name="cd_back_to_blueprint">Return to Blueprint</string>
+    <string name="widget_name">BioSync Metabolic Telemetry</string>
+    <string name="widget_description">Real-time 6-pillar biometric telemetry and active streak chain</string>
 </resources>

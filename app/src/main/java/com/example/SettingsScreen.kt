@@ -27,12 +27,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -249,6 +252,8 @@ fun BioSyncSettingsScreen(
   onEditStep04FromSettings: () -> Unit,
   onBackupRestored: (BioSyncFullBackupBundle, Boolean) -> Unit = { _, _ -> },
   onFactoryResetConfirmed: () -> Unit,
+  scrollState: ScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) },
+  showInlineBottomBar: Boolean = true,
   modifier: Modifier = Modifier,
 ) {
   BackHandler(onBack = onNavigateBackToDashboard)
@@ -257,9 +262,6 @@ fun BioSyncSettingsScreen(
   val haptics = rememberBioSyncHaptics()
   val numberFormat = remember { NumberFormat.getIntegerInstance(Locale.US) }
   val headerBarAnim = remember { Animatable(0f) }
-
-  // Preserve scroll position so returning from Step 01/02/03/04 restores the exact current state in Settings
-  val scrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
 
   var showWorkoutDaysPicker by rememberSaveable { mutableStateOf(false) }
   var showFactoryResetModal by rememberSaveable { mutableStateOf(false) }
@@ -355,30 +357,37 @@ fun BioSyncSettingsScreen(
       modifier = Modifier
         .fillMaxSize()
         .background(ObsidianBlack)
-        .padding(innerPadding)
-        .windowInsetsPadding(WindowInsets.systemBars),
+        .padding(innerPadding),
       contentAlignment = Alignment.TopCenter,
     ) {
       val fontScale = LocalDensity.current.fontScale
       val metrics = remember(maxWidth, maxHeight, fontScale) {
         computeSettingsMetrics(maxWidth, maxHeight, fontScale)
       }
+      val statusBarTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+      val navBarBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
       Column(
         modifier = Modifier
-          .widthIn(max = metrics.contentMaxWidth)
-          .fillMaxWidth()
+          .fillMaxSize()
+          .padding(top = statusBarTopPadding)
           .verticalScroll(scrollState)
           .padding(
             start = metrics.horizontalPadding,
             end = metrics.horizontalPadding,
-            top = (6f * metrics.scale).coerceIn(4f, 10f).dp,
-            bottom = metrics.bottomContentPadding,
+            top = (10f * metrics.scale).coerceIn(8f, 14f).dp,
+            bottom = navBarBottomPadding + metrics.bottomContentPadding,
           )
           .testTag("settings_screen_root"),
+        horizontalAlignment = Alignment.CenterHorizontally,
       ) {
-        // 1. Top Command Header Bar (Back to Dashboard + BioSync Settings + Automatic Subject ID Badge)
-        SettingsTopHeaderBar(
+        Column(
+          modifier = Modifier
+            .widthIn(max = metrics.contentMaxWidth)
+            .fillMaxWidth(),
+        ) {
+          // 1. Top Command Header Bar (Back to Dashboard + BioSync Settings + Automatic Subject ID Badge)
+          SettingsTopHeaderBar(
           subjectIdBadge = subjectIdBadge,
           phaseProvider = { headerBarAnim.value },
           onBackClick = {
@@ -506,6 +515,13 @@ fun BioSyncSettingsScreen(
 
         Spacer(modifier = Modifier.height(metrics.sectionGap))
 
+        // 4B. Live Home Screen Widget & Notification Telemetry Studio Card
+        BioSyncHomeWidgetAndNotificationStudioCard(
+          haptics = haptics,
+        )
+
+        Spacer(modifier = Modifier.height(metrics.sectionGap))
+
         // 5. Data Backup & Import Recovery Vault Card
         SettingsBackupVaultCard(
           subjectName = subjectName,
@@ -544,6 +560,7 @@ fun BioSyncSettingsScreen(
           },
           metrics = metrics,
         )
+        }
       }
 
       val isWaitingForInitialDayOneBottomBar = !dayOneInitialCountdownCompleted &&
@@ -552,18 +569,20 @@ fun BioSyncSettingsScreen(
       val effectiveShowStats = showStatsOption && !isWaitingForInitialDayOneBottomBar
 
       // Centered Floating Bottom Navigation Bar (Home • Stats • Settings; Stats locked during Day 01 Clock Timer)
-      BioSyncFloatingBottomBar(
-        activeDestination = BioSyncFloatingNavDestination.SETTINGS,
-        showStatsOption = effectiveShowStats,
-        onSelectHome = onNavigateBackToDashboard,
-        onSelectStats = {
-          if (effectiveShowStats) {
-            onNavigateToStats()
-          }
-        },
-        onSelectSettings = {},
-        modifier = Modifier.align(Alignment.BottomCenter),
-      )
+      if (showInlineBottomBar) {
+        BioSyncFloatingBottomBar(
+          activeDestination = BioSyncFloatingNavDestination.SETTINGS,
+          showStatsOption = effectiveShowStats,
+          onSelectHome = onNavigateBackToDashboard,
+          onSelectStats = {
+            if (effectiveShowStats) {
+              onNavigateToStats()
+            }
+          },
+          onSelectSettings = {},
+          modifier = Modifier.align(Alignment.BottomCenter),
+        )
+      }
     }
   }
 

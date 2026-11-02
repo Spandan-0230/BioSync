@@ -7,6 +7,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
@@ -21,6 +22,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -549,31 +551,52 @@ fun BioSyncApp(
     autoRequestPermissionsOnStart = launchedFromHealthConnect,
   )
 
-  AnimatedContent(
-    targetState = currentStep,
-    transitionSpec = {
-      if (targetState > initialState) {
-        (slideInHorizontally(
-          animationSpec = tween(durationMillis = 360, easing = TelemetryEaseOut),
-          initialOffsetX = { fullWidth -> fullWidth / 4 },
-        ) + fadeIn(animationSpec = tween(durationMillis = 300))) togetherWith
-          (slideOutHorizontally(
+  val dashboardScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
+  val statsScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
+  val settingsScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
+
+  fun visualOrderForStep(s: Int): Int = when (s) {
+    5 -> 5 // Home (Left tab)
+    7 -> 6 // Stats (Middle tab)
+    6 -> 7 // Settings (Right tab)
+    else -> s
+  }
+
+  Box(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(ObsidianBlack),
+  ) {
+    AnimatedContent(
+      targetState = currentStep,
+      modifier = Modifier.fillMaxSize(),
+      contentAlignment = Alignment.TopCenter,
+      transitionSpec = {
+        val targetVisualOrder = visualOrderForStep(targetState)
+        val initialVisualOrder = visualOrderForStep(initialState)
+        val spec = if (targetVisualOrder >= initialVisualOrder) {
+          (slideInHorizontally(
             animationSpec = tween(durationMillis = 320, easing = TelemetryEaseOut),
-            targetOffsetX = { fullWidth -> -fullWidth / 5 },
-          ) + fadeOut(animationSpec = tween(durationMillis = 240)))
-      } else {
-        (slideInHorizontally(
-          animationSpec = tween(durationMillis = 340, easing = TelemetryEaseOut),
-          initialOffsetX = { fullWidth -> -fullWidth / 5 },
-        ) + fadeIn(animationSpec = tween(durationMillis = 280))) togetherWith
-          (slideOutHorizontally(
+            initialOffsetX = { fullWidth -> fullWidth / 5 },
+          ) + fadeIn(animationSpec = tween(durationMillis = 260))) togetherWith
+            (slideOutHorizontally(
+              animationSpec = tween(durationMillis = 280, easing = TelemetryEaseOut),
+              targetOffsetX = { fullWidth -> -fullWidth / 6 },
+            ) + fadeOut(animationSpec = tween(durationMillis = 210)))
+        } else {
+          (slideInHorizontally(
             animationSpec = tween(durationMillis = 320, easing = TelemetryEaseOut),
-            targetOffsetX = { fullWidth -> fullWidth / 4 },
-          ) + fadeOut(animationSpec = tween(durationMillis = 240)))
-      }
-    },
-    label = "biosync_screen_transition",
-  ) { step ->
+            initialOffsetX = { fullWidth -> -fullWidth / 5 },
+          ) + fadeIn(animationSpec = tween(durationMillis = 260))) togetherWith
+            (slideOutHorizontally(
+              animationSpec = tween(durationMillis = 280, easing = TelemetryEaseOut),
+              targetOffsetX = { fullWidth -> fullWidth / 6 },
+            ) + fadeOut(animationSpec = tween(durationMillis = 210)))
+        }
+        spec.using(SizeTransform(clip = false))
+      },
+      label = "biosync_screen_transition",
+    ) { step ->
     when (step) {
       0 -> {
         BioSyncWelcomeScreen(
@@ -949,6 +972,8 @@ fun BioSyncApp(
               currentStep = 7
             }
           },
+          scrollState = dashboardScrollState,
+          showInlineBottomBar = false,
         )
       }
       7 -> {
@@ -993,6 +1018,8 @@ fun BioSyncApp(
             quickEditReturnStep = 6
             currentStep = 6
           },
+          scrollState = statsScrollState,
+          showInlineBottomBar = false,
         )
       }
       else -> {
@@ -1134,8 +1161,50 @@ fun BioSyncApp(
             quickEditReturnStep = 4
             currentStep = 0
           },
+          scrollState = settingsScrollState,
+          showInlineBottomBar = false,
         )
       }
+    }
+    }
+
+    // Stationary, persistent Floating Bottom Navigation Bar anchored across Home (5), Stats (7), and Settings (6)
+    if (currentStep in setOf(5, 6, 7)) {
+      val isDayOneAnchorActiveForNav = !dayOneInitialCountdownCompleted &&
+        dayOneAnchorStartEpochMillis > 0L &&
+        System.currentTimeMillis() < dayOneAnchorStartEpochMillis
+      val activeNavDestination = when (currentStep) {
+        5 -> BioSyncFloatingNavDestination.HOME
+        7 -> BioSyncFloatingNavDestination.STATS
+        else -> BioSyncFloatingNavDestination.SETTINGS
+      }
+      BioSyncFloatingBottomBar(
+        activeDestination = activeNavDestination,
+        showStatsOption = !isDayOneAnchorActiveForNav,
+        onSelectHome = {
+          if (currentStep != 5) {
+            isQuickEditMode = false
+            quickEditFocusSection = null
+            currentStep = 5
+          }
+        },
+        onSelectStats = {
+          if (!isDayOneAnchorActiveForNav && currentStep != 7) {
+            isQuickEditMode = false
+            quickEditFocusSection = null
+            currentStep = 7
+          }
+        },
+        onSelectSettings = {
+          if (currentStep != 6) {
+            isQuickEditMode = false
+            quickEditFocusSection = null
+            quickEditReturnStep = 6
+            currentStep = 6
+          }
+        },
+        modifier = Modifier.align(Alignment.BottomCenter),
+      )
     }
   }
 

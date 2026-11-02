@@ -45,6 +45,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -59,6 +60,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -462,11 +464,12 @@ fun BioSyncDashboardScreen(
   onOpenProtocolSummary: () -> Unit,
   onOpenSettingsPage: () -> Unit = onOpenProtocolSummary,
   onOpenStatsPage: () -> Unit = {},
+  scrollState: ScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) },
+  showInlineBottomBar: Boolean = true,
   modifier: Modifier = Modifier,
 ) {
   val context = LocalContext.current
   val haptics = rememberBioSyncHaptics()
-  val scrollState = rememberScrollState()
   val numberFormat = remember { NumberFormat.getIntegerInstance(Locale.US) }
 
   var dashboardData by remember { mutableStateOf(DashboardLocalStore.load(context)) }
@@ -475,6 +478,7 @@ fun BioSyncDashboardScreen(
   }
   var liveNowEpochMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
   var showTopRightSettingsMenu by remember { mutableStateOf(false) }
+  var lastQuickLogEpochMs by remember { mutableLongStateOf(0L) }
 
   fun persistDashboardData(updated: DashboardStoredData) {
     dashboardData = updated
@@ -729,9 +733,10 @@ fun BioSyncDashboardScreen(
     Column(
       modifier = Modifier
         .fillMaxSize()
+        .padding(top = statusBarTopPadding)
         .verticalScroll(scrollState)
         .padding(
-          top = statusBarTopPadding + metrics.topOffsetPadding,
+          top = metrics.topOffsetPadding,
           bottom = navBarBottomPadding + metrics.bottomOffsetPadding,
           start = metrics.horizontalPadding,
           end = metrics.horizontalPadding,
@@ -972,67 +977,75 @@ fun BioSyncDashboardScreen(
           mealCount = mealFrequency.count,
           borderFlashProgress = if (activeFlashCardIndex == 4) cardFlashProgress else 0f,
           onLogNutritionItem = { itemToLog, saveToQuickActions ->
-            val updatedSingles = if (!itemToLog.isMeal) {
-              listOf(itemToLog) + dashboardData.allCreatedSingleItems.filterNot {
-                it.id == itemToLog.id || it.name.equals(itemToLog.name, ignoreCase = true)
-              }
-            } else {
-              dashboardData.allCreatedSingleItems
-            }
-            val updatedSaved = if (saveToQuickActions) {
-              val savedCopy = itemToLog.copy(isSavedToQuickActions = true)
-              listOf(savedCopy) + dashboardData.savedQuickItems.filterNot {
-                it.id == savedCopy.id || (it.isMeal == savedCopy.isMeal && it.name.equals(savedCopy.name, ignoreCase = true))
-              }
-            } else {
-              dashboardData.savedQuickItems
-            }
-            val newEntry = DashboardTimelineEntry(
-              type = if (itemToLog.isMeal) DashboardEntryType.MEAL else DashboardEntryType.SINGLE_ITEM,
-              title = itemToLog.name,
-              subtitle = if (itemToLog.componentNames.isNotEmpty()) {
-                itemToLog.componentNames.joinToString(" + ")
+            val nowMs = System.currentTimeMillis()
+            if (nowMs - lastQuickLogEpochMs >= 280L) {
+              lastQuickLogEpochMs = nowMs
+              val updatedSingles = if (!itemToLog.isMeal) {
+                listOf(itemToLog) + dashboardData.allCreatedSingleItems.filterNot {
+                  it.id == itemToLog.id || it.name.equals(itemToLog.name, ignoreCase = true)
+                }
               } else {
-                ""
-              },
-              caloriesKcal = itemToLog.caloriesKcal,
-              proteinGrams = itemToLog.proteinGrams,
-              carbsGrams = itemToLog.carbsGrams,
-              fatsGrams = itemToLog.fatsGrams,
-              hydrationMl = 0,
-              colorArgb = itemToLog.colorArgb,
-              mixedFromColorArgbs = itemToLog.mixedFromColorArgbs,
-            )
-            persistDashboardData(
-              dashboardData.copy(
-                allCreatedSingleItems = updatedSingles,
-                savedQuickItems = updatedSaved,
-                todayTimelineEntries = listOf(newEntry) + dashboardData.todayTimelineEntries,
-              ),
-            )
+                dashboardData.allCreatedSingleItems
+              }
+              val updatedSaved = if (saveToQuickActions) {
+                val savedCopy = itemToLog.copy(isSavedToQuickActions = true)
+                listOf(savedCopy) + dashboardData.savedQuickItems.filterNot {
+                  it.id == savedCopy.id || (it.isMeal == savedCopy.isMeal && it.name.equals(savedCopy.name, ignoreCase = true))
+                }
+              } else {
+                dashboardData.savedQuickItems
+              }
+              val newEntry = DashboardTimelineEntry(
+                type = if (itemToLog.isMeal) DashboardEntryType.MEAL else DashboardEntryType.SINGLE_ITEM,
+                title = itemToLog.name,
+                subtitle = if (itemToLog.componentNames.isNotEmpty()) {
+                  itemToLog.componentNames.joinToString(" + ")
+                } else {
+                  ""
+                },
+                caloriesKcal = itemToLog.caloriesKcal,
+                proteinGrams = itemToLog.proteinGrams,
+                carbsGrams = itemToLog.carbsGrams,
+                fatsGrams = itemToLog.fatsGrams,
+                hydrationMl = 0,
+                colorArgb = itemToLog.colorArgb,
+                mixedFromColorArgbs = itemToLog.mixedFromColorArgbs,
+              )
+              persistDashboardData(
+                dashboardData.copy(
+                  allCreatedSingleItems = updatedSingles,
+                  savedQuickItems = updatedSaved,
+                  todayTimelineEntries = listOf(newEntry) + dashboardData.todayTimelineEntries,
+                ),
+              )
+            }
           },
           onQuickTapSavedItem = { savedItem ->
-            val newEntry = DashboardTimelineEntry(
-              type = if (savedItem.isMeal) DashboardEntryType.MEAL else DashboardEntryType.SINGLE_ITEM,
-              title = savedItem.name,
-              subtitle = if (savedItem.componentNames.isNotEmpty()) {
-                savedItem.componentNames.joinToString(" + ")
-              } else {
-                "Quick Action"
-              },
-              caloriesKcal = savedItem.caloriesKcal,
-              proteinGrams = savedItem.proteinGrams,
-              carbsGrams = savedItem.carbsGrams,
-              fatsGrams = savedItem.fatsGrams,
-              hydrationMl = 0,
-              colorArgb = savedItem.colorArgb,
-              mixedFromColorArgbs = savedItem.mixedFromColorArgbs,
-            )
-            persistDashboardData(
-              dashboardData.copy(
-                todayTimelineEntries = listOf(newEntry) + dashboardData.todayTimelineEntries,
-              ),
-            )
+            val nowMs = System.currentTimeMillis()
+            if (nowMs - lastQuickLogEpochMs >= 280L) {
+              lastQuickLogEpochMs = nowMs
+              val newEntry = DashboardTimelineEntry(
+                type = if (savedItem.isMeal) DashboardEntryType.MEAL else DashboardEntryType.SINGLE_ITEM,
+                title = savedItem.name,
+                subtitle = if (savedItem.componentNames.isNotEmpty()) {
+                  savedItem.componentNames.joinToString(" + ")
+                } else {
+                  "Quick Action"
+                },
+                caloriesKcal = savedItem.caloriesKcal,
+                proteinGrams = savedItem.proteinGrams,
+                carbsGrams = savedItem.carbsGrams,
+                fatsGrams = savedItem.fatsGrams,
+                hydrationMl = 0,
+                colorArgb = savedItem.colorArgb,
+                mixedFromColorArgbs = savedItem.mixedFromColorArgbs,
+              )
+              persistDashboardData(
+                dashboardData.copy(
+                  todayTimelineEntries = listOf(newEntry) + dashboardData.todayTimelineEntries,
+                ),
+              )
+            }
           },
           onDeleteSavedQuickItem = { itemId ->
             val targetToDelete = dashboardData.savedQuickItems.firstOrNull { it.id == itemId }
@@ -1101,18 +1114,20 @@ fun BioSyncDashboardScreen(
       liveNowEpochMs < dayOneAnchorStartEpochMillis
 
     // Centered Floating Bottom Navigation Bar (Home • Stats • Settings; Stats hidden during Day 01 Anchor Lock)
-    BioSyncFloatingBottomBar(
-      activeDestination = BioSyncFloatingNavDestination.HOME,
-      showStatsOption = !isWaitingForInitialDayOneBottomBar,
-      onSelectHome = {},
-      onSelectStats = {
-        if (!isWaitingForInitialDayOneBottomBar) {
-          onOpenStatsPage()
-        }
-      },
-      onSelectSettings = onOpenSettingsPage,
-      modifier = Modifier.align(Alignment.BottomCenter),
-    )
+    if (showInlineBottomBar) {
+      BioSyncFloatingBottomBar(
+        activeDestination = BioSyncFloatingNavDestination.HOME,
+        showStatsOption = !isWaitingForInitialDayOneBottomBar,
+        onSelectHome = {},
+        onSelectStats = {
+          if (!isWaitingForInitialDayOneBottomBar) {
+            onOpenStatsPage()
+          }
+        },
+        onSelectSettings = onOpenSettingsPage,
+        modifier = Modifier.align(Alignment.BottomCenter),
+      )
+    }
 
     if (showCustomStepsModal && !isWaitingForInitialDayOneBottomBar) {
       DashboardCustomStepsInputModal(

@@ -89,6 +89,7 @@ class BioSyncStepBackgroundService : Service() {
           lastNotifiedDistanceHundredthsKm = distHundredthsKm
           runCatching {
             nm?.notify(NOTIFICATION_ID, buildSilentTelemetryNotification(channelId))
+            BioSyncWidgetAndNotificationEngine.refreshAllWidgets(this@BioSyncStepBackgroundService)
           }
           delay(300L)
         }
@@ -144,23 +145,47 @@ class BioSyncStepBackgroundService : Service() {
       PendingIntent.FLAG_UPDATE_CURRENT
     }
     val pendingIntent = PendingIntent.getActivity(this, 0, openAppIntent, pendingFlags)
+    val water250Pending = PendingIntent.getBroadcast(
+      this,
+      4109,
+      Intent(this, BioSyncWidgetActionReceiver::class.java).apply {
+        action = BioSyncWidgetAndNotificationEngine.ACTION_WIDGET_LOG_WATER_250
+      },
+      pendingFlags,
+    )
     val state = BioSyncHealthStepManager.syncState.value
+    val snap = runCatching { BioSyncWidgetAndNotificationEngine.collectSnapshot(this) }.getOrNull()
     val fmt = NumberFormat.getIntegerInstance(Locale.US)
-    val stepsFormatted = fmt.format(state.liveTodaySteps)
+    val stepsFormatted = fmt.format(snap?.liveSteps ?: state.liveTodaySteps)
     val distKmFormatted = String.format(Locale.US, "%.2f km", state.liveDistanceKm.coerceAtLeast(0f))
-    val summaryLine = "$stepsFormatted steps • $distKmFormatted"
+    val summaryLine = if (snap != null) {
+      "$stepsFormatted/${fmt.format(snap.targetSteps)} steps ($distKmFormatted) • " +
+        "${fmt.format(snap.loggedCalories)} kcal • ${fmt.format(snap.loggedWaterMl)}ml H₂O"
+    } else {
+      "$stepsFormatted steps • $distKmFormatted"
+    }
+    val titleText = if (snap != null) {
+      "BioSync HUD • 🔥 ${snap.streakDays}d Streak • ${snap.overallReadinessPercent}% Ready"
+    } else {
+      "BioSync • Synced with Google Fit"
+    }
 
     return NotificationCompat.Builder(this, channelId)
-      .setSmallIcon(R.mipmap.ic_launcher)
-      .setContentTitle("BioSync • Synced with Google Fit")
+      .setSmallIcon(R.drawable.ic_widget_pulse)
+      .setColor(0xFF10B981.toInt())
+      .setContentTitle(titleText)
       .setContentText(summaryLine)
+      .setSubText("LIVE TELEMETRY")
       .setStyle(NotificationCompat.BigTextStyle().bigText(summaryLine))
       .setOngoing(true)
       .setSilent(true)
       .setOnlyAlertOnce(true)
       .setPriority(NotificationCompat.PRIORITY_LOW)
       .setCategory(NotificationCompat.CATEGORY_SERVICE)
+      .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
       .setContentIntent(pendingIntent)
+      .addAction(R.drawable.ic_widget_plus, "+250ml H₂O", water250Pending)
+      .addAction(R.drawable.ic_widget_flame, "Open HUD", pendingIntent)
       .build()
   }
 
@@ -200,8 +225,8 @@ class BioSyncStepBackgroundService : Service() {
 }
 
 /**
- * Restores background step sensor & Health Connect synchronization automatically after a device
- * reboot or app update once the user has configured their BioSync protocol.
+ * Restores background step sensor, Health Connect synchronization, durable user database mirror,
+ * Home Screen widgets, and Circadian notifications automatically after a device reboot or app version update.
  */
 class BioSyncBootReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context?, intent: Intent?) {
@@ -212,7 +237,27 @@ class BioSyncBootReceiver : BroadcastReceiver() {
       action == "android.intent.action.QUICKBOOT_POWERON" ||
       action == Intent.ACTION_MY_PACKAGE_REPLACED
     ) {
+      // Load both stores so self-healing from durable mirror runs immediately on app update
       val stored = BioSyncLocalStore.load(appContext)
+      val dash = DashboardLocalStore.load(appContext)
+      if (stored.protocolLockedIn || dash.dailyHistoryMap.isNotEmpty() || dash.todayTimelineEntries.isNotEmpty()) {
+        BioSyncBackupManager.autoMirrorCurrentDatabase(appContext)
+      }
+      BioSyncWidgetAndNotificationEngine.refreshAllWidgets(appContext)
+      if (stored.protocolLockedIn && stored.dayOneInitialCountdownCompleted) {
+        BioSyncCircadianHydrationEngine.scheduleCircadianNotifications(
+          context = appContext,
+          subjectName = stored.subjectName,
+          wakeUpHour = stored.wakeUpHour,
+          wakeUpMinute = stored.wakeUpMinute,
+          sleepHour = stored.sleepHour,
+          sleepMinute = stored.sleepMinute,
+          totalDailyHydrationMl = stored.customHydrationMl,
+          ageYears = stored.ageYears,
+          selectedSex = stored.selectedSex,
+          weightKg = stored.weightKg,
+        )
+      }
       BioSyncHealthStepManager.initializeFromLocalStore(
         context = appContext,
         currentDecidedGoal = stored.decidedDailyStepsGoal,

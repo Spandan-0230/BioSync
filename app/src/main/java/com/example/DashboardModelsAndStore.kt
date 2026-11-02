@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -648,8 +649,20 @@ object DashboardLocalStore {
     return newDayData
   }
 
+  @Volatile
+  private var isRestoringDashboardGuard = false
+
   fun load(context: Context): DashboardStoredData {
     val p = prefs(context)
+    if (!isRestoringDashboardGuard && p.all.isEmpty()) {
+      isRestoringDashboardGuard = true
+      try {
+        BioSyncBackupManager.restoreFromAutoMirrorIfPrimaryMissing(context)
+      } finally {
+        isRestoringDashboardGuard = false
+      }
+    }
+
     val todayKey = DashboardTimeFormatter.currentDayKey()
     val storedDayKey = p.getString(KEY_DAY_KEY, todayKey) ?: todayKey
     val baseStreak = p.getInt(KEY_BASE_STREAK_DAYS, 0).coerceAtLeast(0)
@@ -681,7 +694,7 @@ object DashboardLocalStore {
     }
   }
 
-  fun save(context: Context, data: DashboardStoredData) {
+  fun save(context: Context, data: DashboardStoredData, mirrorToVault: Boolean = true) {
     prefs(context).edit().apply {
       putString(KEY_DAY_KEY, data.dayKey)
       putInt(KEY_BASE_STREAK_DAYS, data.baseStreakDays.coerceAtLeast(0))
@@ -693,6 +706,16 @@ object DashboardLocalStore {
       putString(KEY_DAILY_HISTORY_MAP_JSON, serializeDailyHistoryMapJson(data.dailyHistoryMap))
       apply()
     }
+    val hasMeaningfulData = data.todayTimelineEntries.isNotEmpty() ||
+      data.dailyHistoryMap.isNotEmpty() ||
+      data.savedQuickItems.isNotEmpty() ||
+      data.allCreatedSingleItems.isNotEmpty() ||
+      data.baseStreakDays > 0 ||
+      data.manualStepsToday > 0
+    if (mirrorToVault && hasMeaningfulData && !isRestoringDashboardGuard) {
+      BioSyncBackupManager.autoMirrorCurrentDatabase(context)
+    }
+    BioSyncWidgetAndNotificationEngine.refreshAllWidgets(context)
   }
 
   /**
@@ -772,6 +795,8 @@ object DashboardLocalStore {
    */
   fun clearAll(context: Context) {
     prefs(context).edit().clear().commit()
+    BioSyncBackupManager.clearAutoMirrorFiles(context)
+    BioSyncWidgetAndNotificationEngine.refreshAllWidgets(context)
   }
 
   internal fun serializeDailyHistoryMapJson(map: Map<String, DailyHistoricalRecord>): String {
@@ -1094,6 +1119,104 @@ object BioSyncBackupManager {
     return root.toString(2)
   }
 
+  private const val AUTO_MIRROR_FILE_NAME = "biosync_durable_state_mirror.json"
+  private const val KEY_AUTO_MIRROR_JSON = "vault_auto_mirror_json"
+
+  @Volatile
+  private var isMirroringGuard = false
+
+  /**
+   * Automatically mirrors the active database to durable internal storage (`filesDir`, `noBackupFilesDir`,
+   * and `biosync_recovery_vault_v1`) so app updates (`MY_PACKAGE_REPLACED`), process restarts, or
+   * OS cache cleanups never wipe out the user's profile, streaks, quick actions, or daily logs.
+   */
+  fun autoMirrorCurrentDatabase(context: Context) {
+    if (isMirroringGuard) return
+    isMirroringGuard = true
+    try {
+      val appCtx = context.applicationContext
+      val json = exportFullBackupJson(appCtx)
+      val nowMs = System.currentTimeMillis()
+      vaultPrefs(appCtx).edit().apply {
+        putString(KEY_AUTO_MIRROR_JSON, json)
+        // Also populate the primary Recovery Vault if no manual snapshot exists yet
+        if (vaultPrefs(appCtx).getString(KEY_VAULT_BACKUP_JSON, null).isNullOrBlank()) {
+          putString(KEY_VAULT_BACKUP_JSON, json)
+          putLong(KEY_VAULT_CREATED_AT_MS, nowMs)
+        }
+        apply()
+      }
+      runCatching {
+        File(appCtx.filesDir, AUTO_MIRROR_FILE_NAME).writeText(json, Charsets.UTF_8)
+      }
+      runCatching {
+        File(appCtx.noBackupFilesDir, AUTO_MIRROR_FILE_NAME).writeText(json, Charsets.UTF_8)
+      }
+    } finally {
+      isMirroringGuard = false
+    }
+  }
+
+  /**
+   * Restores the user's profile and dashboard database from the durable mirror if the primary
+   * SharedPreferences were missing or cleared after installing a new version of the app.
+   */
+  fun restoreFromAutoMirrorIfPrimaryMissing(context: Context): Boolean {
+    if (isMirroringGuard) return false
+    isMirroringGuard = true
+    return try {
+      val appCtx = context.applicationContext
+      val candidateJson = runCatching {
+        val f1 = File(appCtx.filesDir, AUTO_MIRROR_FILE_NAME)
+        if (f1.exists() && f1.length() > 20L) f1.readText(Charsets.UTF_8) else null
+      }.getOrNull()
+        ?: runCatching {
+          val f2 = File(appCtx.noBackupFilesDir, AUTO_MIRROR_FILE_NAME)
+          if (f2.exists() && f2.length() > 20L) f2.readText(Charsets.UTF_8) else null
+        }.getOrNull()
+        ?: vaultPrefs(appCtx).getString(KEY_AUTO_MIRROR_JSON, null)?.takeIf { it.isNotBlank() }
+
+      if (candidateJson.isNullOrBlank()) return false
+      val bundle = parseBackupBundle(candidateJson).getOrNull() ?: return false
+      if (!bundle.storedState.protocolLockedIn &&
+        bundle.dashboardData.dailyHistoryMap.isEmpty() &&
+        bundle.dashboardData.todayTimelineEntries.isEmpty() &&
+        bundle.dashboardData.savedQuickItems.isEmpty()
+      ) {
+        return false
+      }
+
+      BioSyncLocalStore.save(
+        context = appCtx,
+        state = bundle.storedState.copy(protocolLockedIn = true),
+        mirrorToVault = false,
+      )
+      val todayKey = DashboardTimeFormatter.currentDayKey()
+      val resolvedDash = if (bundle.dashboardData.dayKey != todayKey) {
+        DashboardLocalStore.rolloverToDate(appCtx, bundle.dashboardData, todayKey)
+      } else {
+        bundle.dashboardData
+      }
+      DashboardLocalStore.save(
+        context = appCtx,
+        data = resolvedDash,
+        mirrorToVault = false,
+      )
+      true
+    } catch (_: Throwable) {
+      false
+    } finally {
+      isMirroringGuard = false
+    }
+  }
+
+  fun clearAutoMirrorFiles(context: Context) {
+    val appCtx = context.applicationContext
+    vaultPrefs(appCtx).edit().remove(KEY_AUTO_MIRROR_JSON).commit()
+    runCatching { File(appCtx.filesDir, AUTO_MIRROR_FILE_NAME).delete() }
+    runCatching { File(appCtx.noBackupFilesDir, AUTO_MIRROR_FILE_NAME).delete() }
+  }
+
   /**
    * Saves a complete snapshot of the user's current database into the independent Recovery Vault
    * (which survives Factory Resets so accidental resets can be 1-tap recovered).
@@ -1103,8 +1226,13 @@ object BioSyncBackupManager {
     val nowMs = System.currentTimeMillis()
     vaultPrefs(context).edit()
       .putString(KEY_VAULT_BACKUP_JSON, json)
+      .putString(KEY_AUTO_MIRROR_JSON, json)
       .putLong(KEY_VAULT_CREATED_AT_MS, nowMs)
       .commit()
+    runCatching {
+      File(context.applicationContext.filesDir, AUTO_MIRROR_FILE_NAME).writeText(json, Charsets.UTF_8)
+      File(context.applicationContext.noBackupFilesDir, AUTO_MIRROR_FILE_NAME).writeText(json, Charsets.UTF_8)
+    }
     return parseBackupBundle(json).getOrNull()?.meta ?: BioSyncBackupMeta(
       createdAtEpochMs = nowMs,
       formattedTimestamp = formatBackupTimestamp(nowMs),
@@ -1123,7 +1251,14 @@ object BioSyncBackupManager {
   }
 
   fun getRecoveryVaultJson(context: Context): String? {
-    val raw = vaultPrefs(context).getString(KEY_VAULT_BACKUP_JSON, null)
+    val appCtx = context.applicationContext
+    val raw = vaultPrefs(appCtx).getString(KEY_VAULT_BACKUP_JSON, null)
+      ?.takeIf { it.isNotBlank() }
+      ?: vaultPrefs(appCtx).getString(KEY_AUTO_MIRROR_JSON, null)?.takeIf { it.isNotBlank() }
+      ?: runCatching {
+        val f = File(appCtx.filesDir, AUTO_MIRROR_FILE_NAME)
+        if (f.exists() && f.length() > 20L) f.readText(Charsets.UTF_8) else null
+      }.getOrNull()
     return if (raw.isNullOrBlank()) null else raw
   }
 
@@ -1134,6 +1269,7 @@ object BioSyncBackupManager {
 
   fun clearRecoveryVault(context: Context) {
     vaultPrefs(context).edit().clear().commit()
+    clearAutoMirrorFiles(context)
   }
 
   /**
@@ -1243,6 +1379,7 @@ object BioSyncBackupManager {
       )
 
       val todayKey = DashboardTimeFormatter.currentDayKey()
+      val storedDayKey = dashObj.optString("dayKey", todayKey).ifBlank { todayKey }
       val createdSingles = DashboardLocalStore.parseQuickItemsJson(
         dashObj.optString("allCreatedSingleItemsJson", "[]"),
       )
@@ -1256,26 +1393,26 @@ object BioSyncBackupManager {
         dashObj.optString("dailyHistoryMapJson", "{}"),
       ).toMutableMap()
 
-      // Ensure today's timeline entries are also available if the backup was taken today
-      val resolvedTodayEntries = if (todayEntries.isNotEmpty()) {
+      // Ensure that day's timeline entries are preserved
+      val resolvedDayEntries = if (todayEntries.isNotEmpty()) {
         todayEntries
       } else {
-        historyMap[todayKey]?.timelineEntries ?: emptyList()
+        historyMap[storedDayKey]?.timelineEntries ?: emptyList()
       }
 
       val restoredDash = DashboardStoredData(
-        dayKey = todayKey,
+        dayKey = storedDayKey,
         baseStreakDays = dashObj.optInt("baseStreakDays", 0).coerceAtLeast(0),
         lastCompletedStreakDayKey = dashObj.optString("lastCompletedStreakDayKey", ""),
         manualStepsToday = dashObj.optInt("manualStepsToday", 0).coerceAtLeast(0),
         allCreatedSingleItems = createdSingles,
         savedQuickItems = savedQuick,
-        todayTimelineEntries = resolvedTodayEntries,
+        todayTimelineEntries = resolvedDayEntries,
         dailyHistoryMap = historyMap,
       )
 
       val totalTimelineLogs = max(
-        resolvedTodayEntries.size,
+        resolvedDayEntries.size,
         historyMap.values.sumOf { it.timelineEntries.size },
       )
 
@@ -1305,22 +1442,29 @@ object BioSyncBackupManager {
 
   /**
    * Parses and immediately persists the restored bundle into both `BioSyncLocalStore`
-   * and `DashboardLocalStore` (and updates the Recovery Vault snapshot).
+   * and `DashboardLocalStore` (rolling over if the backup was from a previous day, and updating the Recovery Vault).
    */
   fun importAndPersistBackupJson(
     context: Context,
     rawJson: String,
   ): Result<BioSyncFullBackupBundle> {
     val parsedResult = parseBackupBundle(rawJson)
-    parsedResult.onSuccess { bundle ->
+    return parsedResult.map { bundle ->
+      val todayKey = DashboardTimeFormatter.currentDayKey()
+      val finalDash = if (bundle.dashboardData.dayKey != todayKey) {
+        DashboardLocalStore.rolloverToDate(context, bundle.dashboardData, todayKey)
+      } else {
+        bundle.dashboardData
+      }
       BioSyncLocalStore.save(context, bundle.storedState)
-      DashboardLocalStore.save(context, bundle.dashboardData)
+      DashboardLocalStore.save(context, finalDash)
       vaultPrefs(context).edit()
         .putString(KEY_VAULT_BACKUP_JSON, rawJson)
+        .putString(KEY_AUTO_MIRROR_JSON, rawJson)
         .putLong(KEY_VAULT_CREATED_AT_MS, bundle.meta.createdAtEpochMs)
         .apply()
+      bundle.copy(dashboardData = finalDash)
     }
-    return parsedResult
   }
 }
 

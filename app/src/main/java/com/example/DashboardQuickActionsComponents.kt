@@ -1596,19 +1596,8 @@ fun DashboardQuickActionsHubCard(
                           isHoveredTarget = isHoveredTarget,
                           isArmedInFusionSlot = isArmedInFusionSlot,
                           numberFormat = numberFormat,
-                          onTap = {
-                            val armed = armedFusionSlotItem
-                            if (armed != null && armed.id != singleItem.id) {
-                              haptics.confirm()
-                              armedFusionSlotItem = null
-                              popupPreselectedPair = armed to singleItem
-                              popupInitialIsMealTab = true
-                              showQuickActionPopup = true
-                            } else {
-                              haptics.confirm()
-                              onQuickTapSavedItem(singleItem)
-                            }
-                          },
+                          enableBuiltInClick = false,
+                          onTap = {},
                           onDelete = {
                             haptics.tick()
                             onDeleteSavedQuickItem(singleItem.id)
@@ -1715,19 +1704,8 @@ fun DashboardQuickActionsHubCard(
                       isHoveredTarget = isHoveredTarget,
                       isArmedInFusionSlot = isArmedInFusionSlot,
                       numberFormat = numberFormat,
-                      onTap = {
-                        val armed = armedFusionSlotItem
-                        if (armed != null && armed.id != singleItem.id) {
-                          haptics.confirm()
-                          armedFusionSlotItem = null
-                          popupPreselectedPair = armed to singleItem
-                          popupInitialIsMealTab = true
-                          showQuickActionPopup = true
-                        } else {
-                          haptics.confirm()
-                          onQuickTapSavedItem(singleItem)
-                        }
-                      },
+                      enableBuiltInClick = false,
+                      onTap = {},
                       onDelete = {
                         haptics.tick()
                         onDeleteSavedQuickItem(singleItem.id)
@@ -1881,8 +1859,9 @@ private fun Modifier.twoSecondHoldToOverlapGesture(
   onShortTap: () -> Unit,
 ): Modifier = this.pointerInput(item.id, savedSingles) {
   val touchSlopPx = viewConfiguration.touchSlop
+  var lastShortTapEpochMs = 0L
   awaitEachGesture {
-    val down = awaitFirstDown(requireUnconsumed = false)
+    val down = awaitFirstDown(requireUnconsumed = true)
     var isArmedAfterTwoSec = false
     var isCancelledBeforeArm = false
     var totalPreArmMoveX = 0f
@@ -1920,8 +1899,19 @@ private fun Modifier.twoSecondHoldToOverlapGesture(
     while (true) {
       val event = awaitPointerEvent()
       val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.firstOrNull()
-      if (change == null || change.changedToUpIgnoreConsumed() || !change.pressed) {
-        releasedUp = true
+      if (change == null) {
+        isCancelledBeforeArm = true
+        break
+      }
+      if (!isArmedAfterTwoSec && change.isConsumed) {
+        // A child button (such as the × delete button) consumed the tap; cancel hold & short tap
+        isCancelledBeforeArm = true
+        holdJob.cancel()
+        onHoldProgress(null, 0f)
+        break
+      }
+      if (change.changedToUpIgnoreConsumed() || !change.pressed) {
+        releasedUp = !change.isConsumed
         break
       }
       val delta = change.positionChange()
@@ -1963,7 +1953,11 @@ private fun Modifier.twoSecondHoldToOverlapGesture(
     } else {
       onHoldProgress(null, 0f)
       if (releasedUp && !isCancelledBeforeArm) {
-        onShortTap()
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - lastShortTapEpochMs >= 320L) {
+          lastShortTapEpochMs = nowMs
+          onShortTap()
+        }
       }
     }
   }
@@ -2028,8 +2022,10 @@ private fun SavedQuickActionItemCard(
   numberFormat: NumberFormat,
   onTap: () -> Unit,
   onDelete: () -> Unit,
+  enableBuiltInClick: Boolean = true,
   modifier: Modifier = Modifier,
 ) {
+  var lastClickEpochMs by remember { mutableStateOf(0L) }
   val primaryColor = remember(item.colorArgb) {
     QuickItemColorAlchemy.argbToColor(item.colorArgb)
   }
@@ -2103,7 +2099,22 @@ private fun SavedQuickActionItemCard(
           )
         }
       }
-      .clickable(role = Role.Button, onClick = onTap)
+      .then(
+        if (enableBuiltInClick) {
+          Modifier.clickable(
+            role = Role.Button,
+            onClick = {
+              val nowMs = System.currentTimeMillis()
+              if (nowMs - lastClickEpochMs >= 320L) {
+                lastClickEpochMs = nowMs
+                onTap()
+              }
+            },
+          )
+        } else {
+          Modifier
+        },
+      )
       .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp)
       .testTag("saved_quick_item_${item.id}"),
     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -3649,6 +3660,7 @@ private fun QuickActionPopupDialog(
         Spacer(modifier = Modifier.height(12.dp))
 
         // Primary Action Button
+        var isSubmitLocked by remember { mutableStateOf(false) }
         val hasValidNutrients = resolvedDraft.caloriesKcal > 0 ||
           resolvedDraft.proteinGrams > 0 ||
           resolvedDraft.carbsGrams > 0 ||
@@ -3672,8 +3684,9 @@ private fun QuickActionPopupDialog(
               },
             )
             .border(1.dp, if (hasValidNutrients) PureWhite else Zinc700, RoundedCornerShape(11.dp))
-            .clickable(enabled = hasValidNutrients, role = Role.Button) {
-              if (hasValidNutrients) {
+            .clickable(enabled = hasValidNutrients && !isSubmitLocked, role = Role.Button) {
+              if (hasValidNutrients && !isSubmitLocked) {
+                isSubmitLocked = true
                 haptics.confirm()
                 val defaultTitle = if (isCreateMealTab) "Custom Meal" else "Single Item"
                 val finalTitle = itemNameText.trim().ifEmpty { defaultTitle }

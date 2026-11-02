@@ -40,6 +40,7 @@
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
+        android:hasFragileUserData="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -121,6 +122,32 @@
             android:name=".BioSyncCircadianAlarmReceiver"
             android:enabled="true"
             android:exported="false" />
+
+        <!-- Auto-Resizable 6-Pillar Obsidian Home Screen Widget Provider -->
+        <receiver
+            android:name=".BioSyncHomeWidgetProvider"
+            android:enabled="true"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/biosync_home_widget_info" />
+        </receiver>
+
+        <!-- Instant Quick-Action Receiver for Home Screen Widget & Live HUD Notification Buttons -->
+        <receiver
+            android:name=".BioSyncWidgetActionReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.action.WIDGET_LOG_WATER_250" />
+                <action android:name="com.example.action.WIDGET_LOG_WATER_500" />
+                <action android:name="com.example.action.WIDGET_SYNC_TELEMETRY" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

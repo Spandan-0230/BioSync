@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,6 +55,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -600,17 +602,19 @@ fun BioSyncStatsScreen(
   showStatsOption: Boolean = true,
   onNavigateHome: () -> Unit,
   onOpenSettingsPage: () -> Unit,
+  scrollState: ScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) },
+  showInlineBottomBar: Boolean = true,
   modifier: Modifier = Modifier,
 ) {
   BackHandler(onBack = onNavigateHome)
 
   val context = LocalContext.current
   val haptics = rememberBioSyncHaptics()
-  val scrollState = rememberScrollState()
   val numberFormat = remember { NumberFormat.getIntegerInstance(Locale.US) }
 
   var dashboardData by remember { mutableStateOf(DashboardLocalStore.load(context)) }
   var showTopRightSettingsMenu by remember { mutableStateOf(false) }
+  var lastStatsQuickLogEpochMs by remember { mutableLongStateOf(0L) }
 
   val targetCalories = targetCaloriesKcal.coerceAtLeast(1000)
   val targetProtein = targetProteinGrams.coerceAtLeast(30)
@@ -1066,33 +1070,46 @@ fun BioSyncStatsScreen(
             onQuickLogEntryToSelectedDate = { newEntry ->
               // Strictly block logging into past or future dates (only todayKey is writable)
               if (selectedCustomDateKey == todayKey) {
-                haptics.confirm()
-                val currentRec = resolveDayRecord(selectedCustomDateKey)
-                val updatedEntries = listOf(newEntry) + currentRec.timelineEntries
-                val newCal = updatedEntries.sumOf { it.caloriesKcal }.coerceAtLeast(0)
-                val newPro = updatedEntries.sumOf { it.proteinGrams }.coerceAtLeast(0)
-                val newCarb = updatedEntries.sumOf { it.carbsGrams }.coerceAtLeast(0)
-                val newFat = updatedEntries.sumOf { it.fatsGrams }.coerceAtLeast(0)
-                val newWat = updatedEntries.sumOf { it.hydrationMl }.coerceAtLeast(0)
-                val allMet = ((currentRec.stepsCount * 100f) / currentRec.targetStepsCount).roundToInt() >= streakThresholdPercent &&
-                  ((newCal * 100f) / currentRec.targetCaloriesKcal).roundToInt() >= streakThresholdPercent &&
-                  ((newPro * 100f) / currentRec.targetProteinGrams).roundToInt() >= streakThresholdPercent &&
-                  ((newCarb * 100f) / currentRec.targetCarbsGrams).roundToInt() >= streakThresholdPercent &&
-                  ((newFat * 100f) / currentRec.targetFatsGrams).roundToInt() >= streakThresholdPercent &&
-                  ((newWat * 100f) / currentRec.targetHydrationMl).roundToInt() >= streakThresholdPercent
-                val updatedRec = currentRec.copy(
-                  caloriesKcal = newCal,
-                  proteinGrams = newPro,
-                  carbsGrams = newCarb,
-                  fatsGrams = newFat,
-                  hydrationMl = newWat,
-                  streakQualified = allMet,
-                  timelineEntries = updatedEntries,
-                  updatedAtEpochMs = System.currentTimeMillis(),
-                )
-                val updatedStore = DashboardLocalStore.withUpdatedDayRecord(dashboardData, updatedRec)
-                dashboardData = updatedStore
-                DashboardLocalStore.save(context, updatedStore)
+                val nowMs = System.currentTimeMillis()
+                if (nowMs - lastStatsQuickLogEpochMs >= 280L) {
+                  lastStatsQuickLogEpochMs = nowMs
+                  haptics.confirm()
+                  val currentRec = resolveDayRecord(selectedCustomDateKey)
+                  val updatedEntries = listOf(newEntry) + currentRec.timelineEntries
+                  val newCal = updatedEntries.sumOf { it.caloriesKcal }.coerceAtLeast(0)
+                  val newPro = updatedEntries.sumOf { it.proteinGrams }.coerceAtLeast(0)
+                  val newCarb = updatedEntries.sumOf { it.carbsGrams }.coerceAtLeast(0)
+                  val newFat = updatedEntries.sumOf { it.fatsGrams }.coerceAtLeast(0)
+                  val newWat = updatedEntries.sumOf { it.hydrationMl }.coerceAtLeast(0)
+                  val allMet = ((currentRec.stepsCount * 100f) / currentRec.targetStepsCount).roundToInt() >= streakThresholdPercent &&
+                    ((newCal * 100f) / currentRec.targetCaloriesKcal).roundToInt() >= streakThresholdPercent &&
+                    ((newPro * 100f) / currentRec.targetProteinGrams).roundToInt() >= streakThresholdPercent &&
+                    ((newCarb * 100f) / currentRec.targetCarbsGrams).roundToInt() >= streakThresholdPercent &&
+                    ((newFat * 100f) / currentRec.targetFatsGrams).roundToInt() >= streakThresholdPercent &&
+                    ((newWat * 100f) / currentRec.targetHydrationMl).roundToInt() >= streakThresholdPercent
+                  val updatedRec = currentRec.copy(
+                    caloriesKcal = newCal,
+                    proteinGrams = newPro,
+                    carbsGrams = newCarb,
+                    fatsGrams = newFat,
+                    hydrationMl = newWat,
+                    streakQualified = allMet,
+                    timelineEntries = updatedEntries,
+                    updatedAtEpochMs = nowMs,
+                  )
+                  val streakEval = BioSyncStreakEngine.evaluateStreak(
+                    storedBaseStreak = dashboardData.baseStreakDays,
+                    lastCompletedDayKey = dashboardData.lastCompletedStreakDayKey,
+                    todayKey = todayKey,
+                    todayQualified = allMet,
+                  )
+                  val updatedStore = DashboardLocalStore.withUpdatedDayRecord(dashboardData, updatedRec).copy(
+                    baseStreakDays = streakEval.streakDays,
+                    lastCompletedStreakDayKey = streakEval.lastCompletedDayKey,
+                  )
+                  dashboardData = updatedStore
+                  DashboardLocalStore.save(context, updatedStore)
+                }
               } else {
                 haptics.warning()
               }
@@ -1124,7 +1141,21 @@ fun BioSyncStatsScreen(
                   timelineEntries = updatedEntries,
                   updatedAtEpochMs = System.currentTimeMillis(),
                 )
-                val updatedStore = DashboardLocalStore.withUpdatedDayRecord(dashboardData, updatedRec)
+                val streakEval = BioSyncStreakEngine.evaluateStreak(
+                  storedBaseStreak = dashboardData.baseStreakDays,
+                  lastCompletedDayKey = dashboardData.lastCompletedStreakDayKey,
+                  todayKey = todayKey,
+                  todayQualified = allMet,
+                )
+                val fallbackLastKey = if (!allMet && streakEval.lastCompletedDayKey.isBlank()) {
+                  BioSyncStreakEngine.findLatestHistoricalCompletedDay(dashboardData.dailyHistoryMap, todayKey)
+                } else {
+                  streakEval.lastCompletedDayKey
+                }
+                val updatedStore = DashboardLocalStore.withUpdatedDayRecord(dashboardData, updatedRec).copy(
+                  baseStreakDays = streakEval.streakDays,
+                  lastCompletedStreakDayKey = fallbackLastKey,
+                )
                 dashboardData = updatedStore
                 DashboardLocalStore.save(context, updatedStore)
               } else {
@@ -1241,14 +1272,16 @@ fun BioSyncStatsScreen(
     val effectiveShowStats = showStatsOption && !isWaitingForInitialDayOneBottomBar
 
     // Centered Floating Bottom Bar (Home • Stats • Settings)
-    BioSyncFloatingBottomBar(
-      activeDestination = BioSyncFloatingNavDestination.STATS,
-      showStatsOption = effectiveShowStats,
-      onSelectHome = onNavigateHome,
-      onSelectStats = {},
-      onSelectSettings = onOpenSettingsPage,
-      modifier = Modifier.align(Alignment.BottomCenter),
-    )
+    if (showInlineBottomBar) {
+      BioSyncFloatingBottomBar(
+        activeDestination = BioSyncFloatingNavDestination.STATS,
+        showStatsOption = effectiveShowStats,
+        onSelectHome = onNavigateHome,
+        onSelectStats = {},
+        onSelectSettings = onOpenSettingsPage,
+        modifier = Modifier.align(Alignment.BottomCenter),
+      )
+    }
   }
 }
 

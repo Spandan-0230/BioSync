@@ -473,6 +473,9 @@ object BioSyncHealthStepManager {
       lastStepDetectedEpochMillis = 0L,
       isActivelyWalking = false,
     )
+    runCatching {
+      BioSyncAppWidgetProvider.updateAllWidgets(appContext)
+    }
   }
 
   fun initializeFromLocalStore(context: Context, currentDecidedGoal: Int) {

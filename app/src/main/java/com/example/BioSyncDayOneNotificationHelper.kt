@@ -89,29 +89,53 @@ object BioSyncDayOneNotificationHelper {
     )
 
     val cleanName = subjectName.ifBlank { "Subject" }
+    val snap = BioSyncWidgetAndNotificationEngine.collectSnapshot(appContext)
+    val bannerBmp = BioSyncWidgetAndNotificationEngine.renderWidgetTelemetryBitmap(
+      snapshot = snap,
+      widthDp = 360f,
+      heightDp = 195f,
+      density = 2.4f,
+    )
+    val water250Pending = PendingIntent.getBroadcast(
+      appContext,
+      9111,
+      Intent(appContext, BioSyncWidgetActionReceiver::class.java).apply {
+        action = BioSyncWidgetAndNotificationEngine.ACTION_WIDGET_LOG_WATER_250
+      },
+      pendingFlags,
+    )
     val notification = NotificationCompat.Builder(appContext, CHANNEL_ID)
-      .setSmallIcon(R.mipmap.ic_launcher)
-      .setContentTitle("Protocol Day 01 Is Live • ${dayOne.fullName}")
-      .setContentText("$cleanName, your Day 01 countdown reached 00:00:00. Your BioSync Dashboard is now unlocked.")
+      .setSmallIcon(R.drawable.ic_widget_flame)
+      .setColor(0xFFFFB703.toInt())
+      .setContentTitle("🔥 Protocol Day 01 Is Live • ${dayOne.fullName}")
+      .setContentText("$cleanName, your Day 01 countdown reached 00:00:00. All 6 pillars are unlocked!")
+      .setSubText("BIOSYNC LAUNCH GATE")
       .setStyle(
-        NotificationCompat.BigTextStyle().bigText(
-          "$cleanName, your ${dayOne.fullName} Day 01 Anchor has arrived. Your daily steps, calories, macros, and hydration dashboard is now live.",
-        ),
+        NotificationCompat.BigPictureStyle()
+          .bigPicture(bannerBmp)
+          .setBigContentTitle("🔥 Protocol Day 01 Is Live • ${dayOne.fullName}")
+          .setSummaryText("$cleanName, your BioSync 6-pillar telemetry HUD is now unlocked."),
       )
       .setPriority(NotificationCompat.PRIORITY_HIGH)
       .setCategory(NotificationCompat.CATEGORY_REMINDER)
+      .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
       .setAutoCancel(true)
+      .setWhen(System.currentTimeMillis())
+      .setShowWhen(true)
       .setContentIntent(contentPendingIntent)
+      .addAction(R.drawable.ic_widget_plus, "+250ml H₂O", water250Pending)
+      .addAction(R.drawable.ic_widget_pulse, "Open HUD", contentPendingIntent)
       .build()
 
     runCatching {
       NotificationManagerCompat.from(appContext).notify(NOTIFICATION_ID, notification)
     }
+    BioSyncWidgetAndNotificationEngine.refreshAllWidgets(appContext)
     return true
   }
 
   /**
-   * Schedules a one-time AlarmManager broadcast at [triggerAtEpochMillis] so that if the user
+   * Schedules a one-time exact AlarmManager broadcast at [triggerAtEpochMillis] so that if the user
    * leaves the app while waiting for their Day 1 Anchor date, the notification still triggers
    * at 00:00:00 when the timer reaches 0.
    */
@@ -135,14 +159,25 @@ object BioSyncDayOneNotificationHelper {
     )
 
     runCatching {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      val canExact = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        alarmManager.canScheduleExactAlarms()
+      } else {
+        true
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && canExact) {
+        alarmManager.setExactAndAllowWhileIdle(
+          AlarmManager.RTC_WAKEUP,
+          triggerAtEpochMillis,
+          pendingIntent,
+        )
+      } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
         alarmManager.setAndAllowWhileIdle(
           AlarmManager.RTC_WAKEUP,
           triggerAtEpochMillis,
           pendingIntent,
         )
       } else {
-        alarmManager.set(
+        alarmManager.setExact(
           AlarmManager.RTC_WAKEUP,
           triggerAtEpochMillis,
           pendingIntent,
@@ -472,10 +507,17 @@ object BioSyncCircadianHydrationEngine {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
     val pendingIntent = PendingIntent.getBroadcast(context, requestCode, intent, pendingFlags)
     runCatching {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      val canExact = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        alarmManager.canScheduleExactAlarms()
+      } else {
+        true
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && canExact) {
+        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+      } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
         alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
       } else {
-        alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+        alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
       }
     }
   }
@@ -518,6 +560,13 @@ object BioSyncCircadianHydrationEngine {
     ensureChannel(appContext)
     val stored = BioSyncLocalStore.load(appContext)
     val cleanName = stored.subjectName.ifBlank { "Athlete" }
+    val snap = BioSyncWidgetAndNotificationEngine.collectSnapshot(appContext)
+    val bannerBmp = BioSyncWidgetAndNotificationEngine.renderWidgetTelemetryBitmap(
+      snapshot = snap,
+      widthDp = 360f,
+      heightDp = 195f,
+      density = 2.4f,
+    )
 
     val launchIntent = Intent(appContext, MainActivity::class.java).apply {
       flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -530,45 +579,74 @@ object BioSyncCircadianHydrationEngine {
       launchIntent,
       pendingFlags,
     )
+    val water250Pending = PendingIntent.getBroadcast(
+      appContext,
+      9600 + hourIndex,
+      Intent(appContext, BioSyncWidgetActionReceiver::class.java).apply {
+        action = BioSyncWidgetAndNotificationEngine.ACTION_WIDGET_LOG_WATER_250
+      },
+      pendingFlags,
+    )
+    val water500Pending = PendingIntent.getBroadcast(
+      appContext,
+      9700 + hourIndex,
+      Intent(appContext, BioSyncWidgetActionReceiver::class.java).apply {
+        action = BioSyncWidgetAndNotificationEngine.ACTION_WIDGET_LOG_WATER_500
+      },
+      pendingFlags,
+    )
 
     val (title, shortBody, bigBody, notifId) = when (eventType) {
       EVENT_GOOD_MORNING -> {
         val wakeBolus = (recommendedMl + 60).coerceAtMost(maxSafeMl)
         Quadruple(
-          "Good Morning, $cleanName • Circadian Protocol Online",
-          "Start your day with $wakeBolus ml H₂O to restore overnight fluid balance.",
-          "Good Morning, $cleanName! Your ${totalHours}h waking telemetry cycle has begun. Drink $wakeBolus ml of water now (physiologically capped at $maxSafeMl ml/hr for your age, sex & weight) to prime metabolism.",
+          "☀️ Good Morning, $cleanName • ${snap.streakDays}d Streak Active",
+          "Prime metabolism with $wakeBolus ml H₂O • Daily Readiness ${snap.overallReadinessPercent}%.",
+          "Good Morning, $cleanName! Your ${totalHours}h waking telemetry cycle has begun. Drink $wakeBolus ml of water now (capped at $maxSafeMl ml/hr for your physiology).",
           REQ_GOOD_MORNING,
         )
       }
       EVENT_GOOD_NIGHT -> {
         Quadruple(
-          "Good Night in 15 Mins, $cleanName • Recovery Lock",
+          "🌙 Recovery Lock in 15m, $cleanName • ${snap.overallReadinessPercent}% Ready",
           "Sleep window starts in 15 mins. Take a light 80–120 ml sip only if thirsty.",
-          "Good Night, $cleanName! Your sleep recovery window begins in 15 minutes (${formatTime12h(stored.sleepHour, stored.sleepMinute)}). Avoid heavy fluid boluses now to protect uninterrupted deep sleep.",
+          "Good Night, $cleanName! Your sleep recovery window begins in 15 minutes (${formatTime12h(stored.sleepHour, stored.sleepMinute)}). Today's readiness: ${snap.overallReadinessPercent}%.",
           REQ_GOOD_NIGHT,
         )
       }
       else -> {
         val sipHalf = (recommendedMl / 2).coerceAtLeast(75)
         Quadruple(
-          "Hour $hourIndex/$totalHours Hydration • Drink $recommendedMl ml H₂O",
-          "Recommended: $recommendedMl ml this hour (~$sipHalf ml every 30m • Cap $maxSafeMl ml/hr).",
-          "$cleanName, stay on pace with your daily hydration goal: drink $recommendedMl ml of water this hour (or $sipHalf ml every 30 mins). Scientifically capped at $maxSafeMl ml/hr for your age, sex, and body mass.",
+          "💧 Hour $hourIndex/$totalHours Hydration • +$recommendedMl ml H₂O",
+          "Logged ${snap.loggedWaterMl}/${snap.targetWaterMl} ml • Drink $recommendedMl ml (~$sipHalf ml/30m).",
+          "$cleanName, stay on pace with your hydration target (${snap.loggedWaterMl}/${snap.targetWaterMl} ml logged): drink $recommendedMl ml this hour (capped at $maxSafeMl ml/hr).",
           REQ_HOURLY_WATER_BASE + hourIndex,
         )
       }
     }
 
     val notification = NotificationCompat.Builder(appContext, CHANNEL_ID)
-      .setSmallIcon(R.mipmap.ic_launcher)
+      .setSmallIcon(R.drawable.ic_widget_pulse)
+      .setColor(0xFF06B6D4.toInt())
       .setContentTitle(title)
       .setContentText(shortBody)
-      .setStyle(NotificationCompat.BigTextStyle().bigText(bigBody))
+      .setSubText("BIOSYNC CIRCADIAN HUD")
+      .setStyle(
+        NotificationCompat.BigPictureStyle()
+          .bigPicture(bannerBmp)
+          .setBigContentTitle(title)
+          .setSummaryText(bigBody),
+      )
       .setPriority(NotificationCompat.PRIORITY_HIGH)
       .setCategory(NotificationCompat.CATEGORY_REMINDER)
+      .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
       .setAutoCancel(true)
+      .setWhen(System.currentTimeMillis())
+      .setShowWhen(true)
       .setContentIntent(contentIntent)
+      .addAction(R.drawable.ic_widget_plus, "+250ml H₂O", water250Pending)
+      .addAction(R.drawable.ic_widget_plus, "+500ml H₂O", water500Pending)
+      .addAction(R.drawable.ic_widget_flame, "Open HUD", contentIntent)
       .build()
 
     runCatching {
