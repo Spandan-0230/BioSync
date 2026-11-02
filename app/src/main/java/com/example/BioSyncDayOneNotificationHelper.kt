@@ -615,13 +615,24 @@ object BioSyncCircadianHydrationEngine {
         )
       }
       else -> {
-        val sipHalf = (recommendedMl / 2).coerceAtLeast(75)
-        Quadruple(
-          "💧 Hour $hourIndex/$totalHours Hydration • +$recommendedMl ml H₂O",
-          "Logged ${snap.loggedWaterMl}/${snap.targetWaterMl} ml • Drink $recommendedMl ml (~$sipHalf ml/30m).",
-          "$cleanName, stay on pace with your hydration target (${snap.loggedWaterMl}/${snap.targetWaterMl} ml logged): drink $recommendedMl ml this hour (capped at $maxSafeMl ml/hr).",
-          REQ_HOURLY_WATER_BASE + hourIndex,
-        )
+        if (snap.loggedWaterMl >= snap.targetWaterMl) {
+          Quadruple(
+            "💧 Hydration Goal Complete (${snap.loggedWaterMl}/${snap.targetWaterMl} ml) • Hour $hourIndex/$totalHours",
+            "100% of daily H₂O target locked in • Sip water only as needed for comfort.",
+            "$cleanName, your daily hydration pillar (${snap.loggedWaterMl}/${snap.targetWaterMl} ml) is 100% complete! Sip water only if thirsty.",
+            REQ_HOURLY_WATER_BASE + hourIndex,
+          )
+        } else {
+          val remainingMl = (snap.targetWaterMl - snap.loggedWaterMl).coerceAtLeast(50)
+          val effectiveDoseMl = minOf(recommendedMl, remainingMl.coerceAtLeast(100)).coerceAtMost(maxSafeMl)
+          val sipHalf = (effectiveDoseMl / 2).coerceAtLeast(60)
+          Quadruple(
+            "💧 Hour $hourIndex/$totalHours Hydration • +$effectiveDoseMl ml H₂O",
+            "Logged ${snap.loggedWaterMl}/${snap.targetWaterMl} ml • Drink $effectiveDoseMl ml (~$sipHalf ml/30m).",
+            "$cleanName, stay on pace with your hydration target (${snap.loggedWaterMl}/${snap.targetWaterMl} ml logged): drink $effectiveDoseMl ml this hour (capped at $maxSafeMl ml/hr).",
+            REQ_HOURLY_WATER_BASE + hourIndex,
+          )
+        }
       }
     }
 
@@ -689,3 +700,72 @@ class BioSyncCircadianAlarmReceiver : BroadcastReceiver() {
     )
   }
 }
+
+/**
+ * Background AlarmManager scheduler for periodic Auto-Backup file overwrites
+ * (Every 1 Hour, Every 24 Hours [Default], or Weekly).
+ */
+object BioSyncAutoBackupScheduler {
+  private const val REQ_AUTO_BACKUP_ALARM = 9450
+
+  fun scheduleOrCancelAutoBackupAlarm(context: Context) {
+    val appCtx = context.applicationContext
+    val alarmManager = appCtx.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+    val config = BioSyncBackupManager.loadAutoBackupConfig(appCtx)
+
+    val intent = Intent(appCtx, BioSyncAutoBackupAlarmReceiver::class.java)
+    val pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT or
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+    val pendingIntent = PendingIntent.getBroadcast(
+      appCtx,
+      REQ_AUTO_BACKUP_ALARM,
+      intent,
+      pendingFlags,
+    )
+
+    if (!config.enabled || config.frequency == AutoBackupFrequencyOption.EVERY_LOG) {
+      runCatching { alarmManager.cancel(pendingIntent) }
+      return
+    }
+
+    val intervalMs = config.frequency.intervalMillis.coerceAtLeast(60_000L)
+    val nowMs = System.currentTimeMillis()
+    val nextTriggerMs = if (config.lastAutoBackupEpochMs > 0L) {
+      val candidate = config.lastAutoBackupEpochMs + intervalMs
+      if (candidate > nowMs + 15_000L) candidate else nowMs + intervalMs
+    } else {
+      nowMs + intervalMs
+    }
+
+    runCatching {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        alarmManager.setAndAllowWhileIdle(
+          AlarmManager.RTC_WAKEUP,
+          nextTriggerMs,
+          pendingIntent,
+        )
+      } else {
+        alarmManager.set(
+          AlarmManager.RTC_WAKEUP,
+          nextTriggerMs,
+          pendingIntent,
+        )
+      }
+    }
+  }
+}
+
+class BioSyncAutoBackupAlarmReceiver : BroadcastReceiver() {
+  override fun onReceive(context: Context, intent: Intent?) {
+    val appCtx = context.applicationContext
+    val config = BioSyncBackupManager.loadAutoBackupConfig(appCtx)
+    if (config.enabled) {
+      BioSyncBackupManager.executeAutoBackupOverwrite(
+        context = appCtx,
+        triggerReason = config.frequency.shortBadge,
+      )
+      BioSyncAutoBackupScheduler.scheduleOrCancelAutoBackupAlarm(appCtx)
+    }
+  }
+}
+

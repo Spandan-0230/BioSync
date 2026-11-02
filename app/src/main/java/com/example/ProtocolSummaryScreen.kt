@@ -57,7 +57,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -375,9 +377,19 @@ fun ProtocolSummaryScreen(
     autoRequestPermissionsOnStart = false,
   )
 
+  var hasAttemptedPermissionConnect by rememberSaveable { mutableStateOf(false) }
+
   // Automatically complete lock-in if the user enables "Allow all" while the Health Connect modal is open
-  LaunchedEffect(stepSyncController.state.isAllPermissionsAllowed, showHealthConnectDialog) {
-    if (showHealthConnectDialog && stepSyncController.state.isAllPermissionsAllowed) {
+  LaunchedEffect(
+    stepSyncController.state.isAllPermissionsAllowed,
+    showHealthConnectDialog,
+    hasAttemptedPermissionConnect,
+  ) {
+    if (
+      showHealthConnectDialog &&
+      hasAttemptedPermissionConnect &&
+      stepSyncController.state.isAllPermissionsAllowed
+    ) {
       showHealthConnectDialog = false
       showAllowAllRequiredWarning = false
       haptics.confirm()
@@ -386,23 +398,23 @@ fun ProtocolSummaryScreen(
   }
 
   val attemptLockInWithHealthConnectGate: () -> Unit = {
-    if (isReturnToSettings || stepSyncController.state.isAllPermissionsAllowed) {
-      showHealthConnectDialog = false
-      showAllowAllRequiredWarning = false
-      haptics.confirm()
-      onLockInProtocol()
-    } else {
-      coroutineScope.launch {
-        val isAllAllowed = stepSyncController.verifyAllPermissionsAllowed()
-        if (isAllAllowed || stepSyncController.state.isAllPermissionsAllowed) {
-          showHealthConnectDialog = false
-          showAllowAllRequiredWarning = false
-          haptics.confirm()
-          onLockInProtocol()
-        } else {
-          showAllowAllRequiredWarning = false
-          showHealthConnectDialog = true
-        }
+    coroutineScope.launch {
+      val isAllAllowed = stepSyncController.verifyAllPermissionsAllowed()
+      val requiresMandatoryStep04Confirm =
+        (!protocolLockedIn || initialFocusSection == "step04_mandatory_permissions") &&
+          !hasAttemptedPermissionConnect
+      if (
+        isAllAllowed &&
+        stepSyncController.state.isAllPermissionsAllowed &&
+        !requiresMandatoryStep04Confirm
+      ) {
+        showHealthConnectDialog = false
+        showAllowAllRequiredWarning = false
+        haptics.confirm()
+        onLockInProtocol()
+      } else {
+        showAllowAllRequiredWarning = false
+        showHealthConnectDialog = true
       }
     }
   }
@@ -504,8 +516,16 @@ fun ProtocolSummaryScreen(
       val scrollState = rememberScrollState()
 
       LaunchedEffect(initialFocusSection) {
-        if (initialFocusSection == "step04_bodyfat") {
-          scrollState.animateScrollTo(460)
+        when (initialFocusSection) {
+          "step04_bodyfat" -> {
+            scrollState.animateScrollTo(460)
+          }
+          "step04_mandatory_permissions" -> {
+            delay(120)
+            scrollState.animateScrollTo(scrollState.maxValue)
+            showAllowAllRequiredWarning = false
+            showHealthConnectDialog = true
+          }
         }
       }
 
@@ -759,6 +779,22 @@ fun ProtocolSummaryScreen(
           Spacer(modifier = Modifier.height(metrics.sectionGap))
         }
 
+        // 5C. Mandatory Step 04 Telemetry & Background Sync Permission Gate Card
+        Step04MandatoryPermissionsGateCard(
+          isHealthConnectAllowAllGranted = stepSyncController.state.isHealthConnectAllowAllGranted,
+          hasActivityRecognitionPermission = stepSyncController.state.hasActivityRecognitionPermission,
+          isIgnoringBatteryOptimizations = stepSyncController.state.isIgnoringBatteryOptimizations,
+          isAllPermissionsAllowed = stepSyncController.state.isAllPermissionsAllowed && hasAttemptedPermissionConnect,
+          onInvokePermissionGate = {
+            haptics.confirm()
+            showAllowAllRequiredWarning = false
+            showHealthConnectDialog = true
+          },
+          metrics = metrics,
+        )
+
+        Spacer(modifier = Modifier.height(metrics.sectionGap))
+
         // 6. Primary Lock In Protocol Button & Encrypted Footer
         SummaryLockInFooterSection(
           protocolLockedIn = protocolLockedIn,
@@ -856,6 +892,7 @@ fun ProtocolSummaryScreen(
       showAllowAllRequiredWarning = showAllowAllRequiredWarning,
       onConfirmAndConnect = {
         haptics.confirm()
+        hasAttemptedPermissionConnect = true
         stepSyncController.requestAllowAllPermissions { allGranted ->
           if (allGranted) {
             showHealthConnectDialog = false
@@ -870,10 +907,12 @@ fun ProtocolSummaryScreen(
       },
       onOpenHealthConnectSettings = {
         haptics.selection()
+        hasAttemptedPermissionConnect = true
         stepSyncController.openHealthConnectAppOrSettings()
       },
       onRequestBatteryOptimizationExemption = {
         haptics.selection()
+        hasAttemptedPermissionConnect = true
         stepSyncController.requestBatteryOptimizationExemption()
       },
       onDismiss = {
@@ -4648,6 +4687,200 @@ private fun SummaryLockInFooterSection(
       fontSize = metrics.spScaled(10.8f, 9.5f, 12.5f),
       letterSpacing = 0.2.sp,
       textAlign = TextAlign.Center,
+    )
+  }
+}
+
+@Composable
+private fun Step04MandatoryPermissionsGateCard(
+  isHealthConnectAllowAllGranted: Boolean,
+  hasActivityRecognitionPermission: Boolean,
+  isIgnoringBatteryOptimizations: Boolean,
+  isAllPermissionsAllowed: Boolean,
+  onInvokePermissionGate: () -> Unit,
+  metrics: SummaryResponsiveMetrics,
+) {
+  val emerald = Color(0xFF10B981)
+  val amber = Color(0xFFFFD166)
+  val cardCorner = metrics.cardCornerRadius
+  val cardShape = RoundedCornerShape(cardCorner)
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(cardShape)
+      .background(
+        brush = Brush.verticalGradient(
+          colors = listOf(Color(0xFF15151A), Color(0xFF0A0A0E)),
+        ),
+      )
+      .border(
+        width = 1.1.dp,
+        brush = Brush.verticalGradient(
+          colors = listOf(
+            if (isAllPermissionsAllowed) emerald.copy(alpha = 0.65f) else PureWhite.copy(alpha = 0.45f),
+            Color(0xFF27272A),
+          ),
+        ),
+        shape = cardShape,
+      )
+      .padding(metrics.cardPadding)
+      .testTag("step_04_mandatory_permissions_card"),
+    verticalArrangement = Arrangement.spacedBy((10f * metrics.scale).coerceIn(8f, 13f).dp),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+      ) {
+        Box(
+          modifier = Modifier
+            .size(7.5.dp)
+            .clip(CircleShape)
+            .background(if (isAllPermissionsAllowed) emerald else amber),
+        )
+        Text(
+          text = "MANDATORY STEP 04 PERMISSION GATE",
+          color = if (isAllPermissionsAllowed) emerald else PureWhite,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = metrics.spScaled(10.0f, 8.8f, 11.4f),
+          letterSpacing = 0.9.sp,
+        )
+      }
+
+      Box(
+        modifier = Modifier
+          .clip(RoundedCornerShape(6.dp))
+          .background(if (isAllPermissionsAllowed) emerald.copy(alpha = 0.16f) else Color(0xFF1F1F24))
+          .border(
+            0.8.dp,
+            if (isAllPermissionsAllowed) emerald.copy(alpha = 0.6f) else Color(0xFF3F3F46),
+            RoundedCornerShape(6.dp),
+          )
+          .padding(horizontal = 8.dp, vertical = 3.dp),
+      ) {
+        Text(
+          text = if (isAllPermissionsAllowed) "READY" else "REQUIRED",
+          color = if (isAllPermissionsAllowed) emerald else amber,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = metrics.spScaled(8.6f, 7.6f, 9.8f),
+          letterSpacing = 0.6.sp,
+        )
+      }
+    }
+
+    Text(
+      text = "Required for both new and backup-restored profiles before unlocking the Live Dashboard:",
+      color = Zinc300,
+      fontFamily = InterFontFamily,
+      fontSize = metrics.spScaled(11.6f, 10.2f, 13.0f),
+      lineHeight = metrics.spScaled(16.4f, 14.5f, 18.5f),
+    )
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+      Step04PermissionPill(
+        label = "HEALTH CONNECT",
+        granted = isHealthConnectAllowAllGranted,
+        metrics = metrics,
+        modifier = Modifier.weight(1f),
+      )
+      Step04PermissionPill(
+        label = "STEP SENSORS",
+        granted = hasActivityRecognitionPermission,
+        metrics = metrics,
+        modifier = Modifier.weight(1f),
+      )
+      Step04PermissionPill(
+        label = "BATTERY SYNC",
+        granted = isIgnoringBatteryOptimizations,
+        metrics = metrics,
+        modifier = Modifier.weight(1f),
+      )
+    }
+
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .height((44f * metrics.scale).coerceIn(40f, 50f).dp)
+        .clip(RoundedCornerShape(10.dp))
+        .background(
+          brush = if (isAllPermissionsAllowed) {
+            Brush.verticalGradient(colors = listOf(Color(0xFF182620), Color(0xFF0E1713)))
+          } else {
+            Brush.verticalGradient(colors = listOf(PureWhite, Color(0xFFE4E4E7)))
+          },
+        )
+        .border(
+          width = 1.dp,
+          color = if (isAllPermissionsAllowed) emerald.copy(alpha = 0.7f) else PureWhite,
+          shape = RoundedCornerShape(10.dp),
+        )
+        .clickable(role = Role.Button, onClick = onInvokePermissionGate)
+        .testTag("step_04_permission_gate_button"),
+      contentAlignment = Alignment.Center,
+    ) {
+      Text(
+        text = if (isAllPermissionsAllowed) {
+          "PERMISSIONS VERIFIED • TAP TO REVIEW"
+        } else {
+          "GRANT MANDATORY PERMISSIONS & CONNECT"
+        },
+        color = if (isAllPermissionsAllowed) PureWhite else ObsidianBlack,
+        fontFamily = JetBrainsMonoFontFamily,
+        fontWeight = FontWeight.ExtraBold,
+        fontSize = metrics.spScaled(10.8f, 9.5f, 12.2f),
+        letterSpacing = 0.6.sp,
+      )
+    }
+  }
+}
+
+@Composable
+private fun Step04PermissionPill(
+  label: String,
+  granted: Boolean,
+  metrics: SummaryResponsiveMetrics,
+  modifier: Modifier = Modifier,
+) {
+  val emerald = Color(0xFF10B981)
+  Column(
+    modifier = modifier
+      .clip(RoundedCornerShape(8.dp))
+      .background(Color(0xFF09090C))
+      .border(
+        0.8.dp,
+        if (granted) emerald.copy(alpha = 0.55f) else Color(0xFF27272A),
+        RoundedCornerShape(8.dp),
+      )
+      .padding(horizontal = 6.dp, vertical = 6.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.spacedBy(2.dp),
+  ) {
+    Text(
+      text = label,
+      color = Zinc400,
+      fontFamily = JetBrainsMonoFontFamily,
+      fontWeight = FontWeight.Bold,
+      fontSize = metrics.spScaled(7.8f, 6.8f, 8.8f),
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
+    Text(
+      text = if (granted) "ALLOWED ✓" else "REQUIRED",
+      color = if (granted) emerald else PureWhite,
+      fontFamily = JetBrainsMonoFontFamily,
+      fontWeight = FontWeight.ExtraBold,
+      fontSize = metrics.spScaled(8.6f, 7.5f, 9.6f),
+      maxLines = 1,
     )
   }
 }

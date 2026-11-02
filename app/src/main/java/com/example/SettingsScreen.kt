@@ -3,6 +3,7 @@ package com.example
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.BlurMaskFilter
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -267,9 +268,24 @@ fun BioSyncSettingsScreen(
   var showFactoryResetModal by rememberSaveable { mutableStateOf(false) }
   var showImportBackupDialog by rememberSaveable { mutableStateOf(false) }
   var vaultMeta by remember { mutableStateOf(BioSyncBackupManager.getRecoveryVaultMeta(context)) }
+  var autoBackupConfig by remember { mutableStateOf(BioSyncBackupManager.loadAutoBackupConfig(context)) }
   var backupStatusBanner by remember { mutableStateOf<String?>(null) }
   var pendingExportJson by remember { mutableStateOf("") }
   var liveNowEpochMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+  val chooseAutoBackupFolderLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.OpenDocumentTree(),
+  ) { treeUri ->
+    if (treeUri != null) {
+      runCatching {
+        val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        context.contentResolver.takePersistableUriPermission(treeUri, takeFlags)
+      }
+      autoBackupConfig = BioSyncBackupManager.setCustomAutoBackupFolder(context, treeUri)
+      vaultMeta = BioSyncBackupManager.getRecoveryVaultMeta(context)
+      backupStatusBanner = "Auto-backup folder set & existing file overwritten: ${autoBackupConfig.activeTargetPathSummary}"
+    }
+  }
 
   val exportDocumentLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.CreateDocument("application/json"),
@@ -522,23 +538,68 @@ fun BioSyncSettingsScreen(
 
         Spacer(modifier = Modifier.height(metrics.sectionGap))
 
-        // 5. Data Backup & Import Recovery Vault Card
+        // 5. Data Backup, Auto-Backup Overwrite & Import Recovery Vault Card
         SettingsBackupVaultCard(
           subjectName = subjectName,
           subjectIdBadge = subjectIdBadge,
           vaultMeta = vaultMeta,
+          autoBackupConfig = autoBackupConfig,
           statusBanner = backupStatusBanner,
+          onToggleAutoBackup = { enabled ->
+            haptics.selection()
+            autoBackupConfig = BioSyncBackupManager.updateAutoBackupEnabled(context, enabled)
+            vaultMeta = BioSyncBackupManager.getRecoveryVaultMeta(context)
+            backupStatusBanner = if (enabled) {
+              "Auto-backup enabled (${autoBackupConfig.frequency.displayTitle}) • Overwrites ${autoBackupConfig.activeTargetPathSummary}"
+            } else {
+              "Auto-backup paused. Manual & Recovery Vault snapshots remain active."
+            }
+          },
+          onSelectAutoBackupFrequency = { freq ->
+            haptics.confirm()
+            autoBackupConfig = BioSyncBackupManager.updateAutoBackupFrequency(context, freq)
+            vaultMeta = BioSyncBackupManager.getRecoveryVaultMeta(context)
+            backupStatusBanner = "Auto-backup set to ${freq.displayTitle} • Overwrote ${autoBackupConfig.activeTargetPathSummary}"
+          },
+          onSelectDefaultAutoBackupFolder = {
+            haptics.confirm()
+            autoBackupConfig = BioSyncBackupManager.setDefaultAutoBackupFolder(context)
+            vaultMeta = BioSyncBackupManager.getRecoveryVaultMeta(context)
+            backupStatusBanner = "Default Folder active (${autoBackupConfig.lastBackupFileSizeFormatted}) • ${autoBackupConfig.defaultFolderAbsolutePath}"
+          },
+          onChooseCustomAutoBackupFolder = {
+            haptics.selection()
+            runCatching {
+              chooseAutoBackupFolderLauncher.launch(null)
+            }.onFailure {
+              backupStatusBanner = "System folder picker unavailable; using Default Folder."
+            }
+          },
+          onOverwriteAutoBackupNow = {
+            haptics.confirm()
+            autoBackupConfig = BioSyncBackupManager.executeAutoBackupOverwrite(
+              context = context,
+              triggerReason = "MANUAL OVERWRITE",
+            )
+            vaultMeta = BioSyncBackupManager.getRecoveryVaultMeta(context)
+            backupStatusBanner = "Existing backup file overwritten in ${autoBackupConfig.activeTargetPathSummary}"
+          },
           onCreateBackup = {
             haptics.confirm()
             val json = BioSyncBackupManager.exportFullBackupJson(context)
             val meta = BioSyncBackupManager.saveSnapshotToRecoveryVault(context)
+            autoBackupConfig = BioSyncBackupManager.executeAutoBackupOverwrite(
+              context = context,
+              triggerReason = "EXPORT OVERWRITE",
+              precomputedJson = json,
+            )
             vaultMeta = meta
             pendingExportJson = json
             runCatching {
               val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
               clipboard?.setPrimaryClip(ClipData.newPlainText("BioSync Backup JSON", json))
             }
-            backupStatusBanner = "Full database backup saved to Recovery Vault & copied to Clipboard."
+            backupStatusBanner = "Full database backup saved, existing auto-backup overwritten & copied to Clipboard."
             runCatching {
               exportDocumentLauncher.launch("biosync_backup_${subjectIdBadge.lowercase(Locale.US)}.json")
             }
@@ -2136,17 +2197,28 @@ private fun SettingsBackupVaultCard(
   subjectName: String,
   subjectIdBadge: String,
   vaultMeta: BioSyncBackupMeta?,
+  autoBackupConfig: AutoBackupConfigState,
   statusBanner: String?,
+  onToggleAutoBackup: (Boolean) -> Unit,
+  onSelectAutoBackupFrequency: (AutoBackupFrequencyOption) -> Unit,
+  onSelectDefaultAutoBackupFolder: () -> Unit,
+  onChooseCustomAutoBackupFolder: () -> Unit,
+  onOverwriteAutoBackupNow: () -> Unit,
   onCreateBackup: () -> Unit,
   onOpenImportDialog: () -> Unit,
   metrics: SettingsResponsiveMetrics,
 ) {
+  val context = LocalContext.current
   val cardShape = RoundedCornerShape(metrics.cardCornerRadius)
   val platinumLight = Color(0xFFF4F4F5)
   val platinumMid = Color(0xFFD4D4D8)
   val goldAccent = Color(0xFFFFD166)
   val emeraldAccent = Color(0xFF10B981)
+  val cyanAccent = Color(0xFF38BDF8)
   val dateFormat = remember { SimpleDateFormat("MMM dd, yyyy • HH:mm", Locale.US) }
+
+  var showDefaultLocationModal by remember { mutableStateOf(false) }
+  var localCopiedFeedback by remember { mutableStateOf<String?>(null) }
 
   Column(
     modifier = Modifier
@@ -2156,26 +2228,27 @@ private fun SettingsBackupVaultCard(
         val cornerPx = metrics.cardCornerRadius.toPx()
         val bodyBrush = Brush.verticalGradient(
           colorStops = arrayOf(
-            0.0f to Color(0xFF18181B),
-            0.42f to Color(0xFF101013),
-            1.0f to Color(0xFF070709),
+            0.0f to Color(0xFF191A22),
+            0.38f to Color(0xFF0E0F14),
+            1.0f to Color(0xFF060609),
           ),
         )
         val topRadialGlow = Brush.radialGradient(
           colors = listOf(
-            PureWhite.copy(alpha = 0.14f),
+            PureWhite.copy(alpha = 0.16f),
+            emeraldAccent.copy(alpha = 0.06f),
             goldAccent.copy(alpha = 0.05f),
             Color.Transparent,
           ),
-          center = Offset(size.width * 0.25f, 0f),
-          radius = size.width * 0.90f,
+          center = Offset(size.width * 0.28f, 0f),
+          radius = size.width * 0.92f,
         )
         val borderBrush = Brush.verticalGradient(
           colorStops = arrayOf(
-            0.0f to PureWhite.copy(alpha = 0.68f),
-            0.35f to platinumMid.copy(alpha = 0.38f),
-            0.75f to Color(0xFF27272A),
-            1.0f to Color(0xFF141417),
+            0.0f to PureWhite.copy(alpha = 0.74f),
+            0.35f to platinumMid.copy(alpha = 0.40f),
+            0.75f to Color(0xFF272832),
+            1.0f to Color(0xFF14151B),
           ),
         )
         onDrawBehind {
@@ -2190,29 +2263,30 @@ private fun SettingsBackupVaultCard(
           drawRoundRect(
             brush = borderBrush,
             cornerRadius = CornerRadius(cornerPx, cornerPx),
-            style = Stroke(width = 1.25.dp.toPx()),
+            style = Stroke(width = 1.3.dp.toPx()),
           )
           drawLine(
             brush = Brush.horizontalGradient(
               colors = listOf(
                 Color.Transparent,
-                PureWhite.copy(alpha = 0.92f),
-                goldAccent.copy(alpha = 0.65f),
-                PureWhite.copy(alpha = 0.85f),
+                PureWhite.copy(alpha = 0.94f),
+                emeraldAccent.copy(alpha = 0.72f),
+                goldAccent.copy(alpha = 0.68f),
+                PureWhite.copy(alpha = 0.88f),
                 Color.Transparent,
               ),
             ),
-            start = Offset(cornerPx * 0.85f, 1.dp.toPx()),
-            end = Offset(size.width - cornerPx * 0.85f, 1.dp.toPx()),
-            strokeWidth = 1.2.dp.toPx(),
+            start = Offset(cornerPx * 0.8f, 1.dp.toPx()),
+            end = Offset(size.width - cornerPx * 0.8f, 1.dp.toPx()),
+            strokeWidth = 1.3.dp.toPx(),
           )
         }
       }
       .padding(metrics.cardPadding)
       .testTag("settings_backup_vault_card"),
-    verticalArrangement = Arrangement.spacedBy(12.dp),
+    verticalArrangement = Arrangement.spacedBy(13.dp),
   ) {
-    // 1. Architectural Vault Header Row
+    // 1. Sculpted 3D Architectural Vault Header + File Size & Health Verification Badge
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
@@ -2223,38 +2297,37 @@ private fun SettingsBackupVaultCard(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
       ) {
-        // 3D Sculpted Brushed-Platinum Vault Crest
         Box(
           modifier = Modifier
-            .size(30.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .size(34.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(
               brush = Brush.linearGradient(
                 colors = listOf(PureWhite, platinumMid, Color(0xFFA1A1AA)),
               ),
             )
-            .border(1.dp, PureWhite, RoundedCornerShape(8.dp)),
+            .border(1.dp, PureWhite, RoundedCornerShape(10.dp)),
           contentAlignment = Alignment.Center,
         ) {
-          Canvas(modifier = Modifier.size(15.dp)) {
+          Canvas(modifier = Modifier.size(16.dp)) {
             val w = size.width
             val h = size.height
             drawRoundRect(
               color = ObsidianBlack,
-              topLeft = Offset(w * 0.12f, h * 0.14f),
-              size = Size(w * 0.76f, h * 0.72f),
-              cornerRadius = CornerRadius(2.5.dp.toPx(), 2.5.dp.toPx()),
-              style = Stroke(width = 1.6.dp.toPx()),
+              topLeft = Offset(w * 0.10f, h * 0.12f),
+              size = Size(w * 0.80f, h * 0.76f),
+              cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
+              style = Stroke(width = 1.7.dp.toPx()),
             )
             drawCircle(
               color = ObsidianBlack,
-              radius = w * 0.17f,
+              radius = w * 0.18f,
               center = Offset(w * 0.50f, h * 0.50f),
               style = Stroke(width = 1.5.dp.toPx()),
             )
             drawCircle(
               color = ObsidianBlack,
-              radius = w * 0.05f,
+              radius = w * 0.06f,
               center = Offset(w * 0.50f, h * 0.50f),
             )
           }
@@ -2262,62 +2335,335 @@ private fun SettingsBackupVaultCard(
 
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
           Text(
-            text = "CRYPTIC DATA VAULT & SNAPSHOTS",
+            text = "PROTOCOL BACKUP & AUTO-VAULT",
             color = PureWhite,
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.ExtraBold,
-            fontSize = metrics.spScaled(10.6f, 9.2f, 12.0f),
+            fontSize = metrics.spScaled(10.8f, 9.4f, 12.2f),
             letterSpacing = 0.8.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
           )
           Text(
-            text = "STEPS 01–04 • TIMELINE LOGS • CALENDAR • SAVED FOODS",
+            text = "SINGLE-FILE OVERWRITE ENGINE • STEPS 01–04 • HISTORY",
             color = SettingsZinc300,
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.SemiBold,
             fontSize = metrics.spScaled(7.5f, 6.6f, 8.5f),
-            letterSpacing = 0.5.sp,
+            letterSpacing = 0.4.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
           )
         }
       }
 
+      Spacer(modifier = Modifier.width(6.dp))
+
+      // Live Backup Health & File Size Badge
       Box(
         modifier = Modifier
-          .clip(RoundedCornerShape(7.dp))
-          .background(if (vaultMeta != null) Color(0xFF0A1F17) else Color(0xFF141418))
+          .clip(RoundedCornerShape(8.dp))
+          .background(
+            brush = Brush.horizontalGradient(
+              colors = listOf(Color(0xFF0B251B), Color(0xFF081913)),
+            ),
+          )
           .border(
             1.dp,
-            if (vaultMeta != null) emeraldAccent.copy(alpha = 0.75f) else SettingsZinc700,
-            RoundedCornerShape(7.dp),
+            emeraldAccent.copy(alpha = 0.82f),
+            RoundedCornerShape(8.dp),
           )
-          .padding(horizontal = 8.5.dp, vertical = 4.dp),
+          .padding(horizontal = 9.dp, vertical = 4.5.dp)
+          .testTag("settings_backup_health_badge"),
       ) {
         Text(
-          text = if (vaultMeta != null) "● VAULT ARMED" else "○ STANDBY",
-          color = if (vaultMeta != null) emeraldAccent else SettingsZinc300,
+          text = "● ${autoBackupConfig.backupHealthBadge}",
+          color = emeraldAccent,
           fontFamily = JetBrainsMonoFontFamily,
           fontWeight = FontWeight.ExtraBold,
           fontSize = metrics.spScaled(7.8f, 6.8f, 8.8f),
-          letterSpacing = 0.5.sp,
+          letterSpacing = 0.4.sp,
+          maxLines = 1,
         )
       }
     }
 
-    // 2. Sculpted 3D Snapshot Telemetry Deck
+    // 2. Sculpted 3-Pillar Vault Snapshot Telemetry Strip
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .clip(RoundedCornerShape(12.dp))
-        .background(Color(0xFF09090C))
-        .border(1.dp, Color(0xFF27272A), RoundedCornerShape(12.dp))
+        .clip(RoundedCornerShape(14.dp))
+        .background(
+          brush = Brush.verticalGradient(
+            colors = listOf(Color(0xFF101117), Color(0xFF08080C)),
+          ),
+        )
+        .border(1.dp, Color(0xFF282A36), RoundedCornerShape(14.dp))
         .padding(12.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+      verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-      if (vaultMeta != null) {
-        val vaultBadge = BioSyncLocalStore.computeSubjectIdBadge(vaultMeta.subjectName)
+      val vaultBadge = BioSyncLocalStore.computeSubjectIdBadge(vaultMeta?.subjectName ?: subjectName)
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          Box(
+            modifier = Modifier
+              .size(6.dp)
+              .clip(CircleShape)
+              .background(goldAccent),
+          )
+          Text(
+            text = "VAULT TELEMETRY • ${(vaultMeta?.subjectName ?: subjectName).uppercase(Locale.US)} ($vaultBadge)",
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(8.5f, 7.5f, 9.5f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+        Text(
+          text = if (vaultMeta != null) {
+            dateFormat.format(Date(vaultMeta.createdAtEpochMs))
+          } else {
+            autoBackupConfig.lastAutoBackupFormatted
+          },
+          color = goldAccent,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.Bold,
+          fontSize = metrics.spScaled(7.6f, 6.8f, 8.6f),
+        )
+      }
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        VaultTelemetryMetricChip(
+          label = "TIMELINE LOGS",
+          value = (vaultMeta?.totalTimelineLogsCount ?: 0).toString(),
+          accent = PureWhite,
+          modifier = Modifier.weight(1f),
+        )
+        VaultTelemetryMetricChip(
+          label = "CALENDAR DAYS",
+          value = (vaultMeta?.historicalDaysCount ?: 0).toString(),
+          accent = goldAccent,
+          modifier = Modifier.weight(1f),
+        )
+        VaultTelemetryMetricChip(
+          label = "SAVED FOODS",
+          value = (vaultMeta?.savedQuickItemsCount ?: 0).toString(),
+          accent = emeraldAccent,
+          modifier = Modifier.weight(1f),
+        )
+      }
+    }
+
+    // 3. Auto-Backup & Single-File Overwrite Engine Console (24h Default • Every Log • Hourly • Weekly)
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(14.dp))
+        .background(
+          brush = Brush.verticalGradient(
+            colors = listOf(Color(0xFF12131B), Color(0xFF090A0E)),
+          ),
+        )
+        .border(
+          width = 1.1.dp,
+          brush = Brush.verticalGradient(
+            colors = if (autoBackupConfig.enabled) {
+              listOf(emeraldAccent.copy(alpha = 0.65f), Color(0xFF252834), Color(0xFF161822))
+            } else {
+              listOf(PureWhite.copy(alpha = 0.25f), Color(0xFF252630), Color(0xFF14151C))
+            },
+          ),
+          shape = RoundedCornerShape(14.dp),
+        )
+        .padding(13.dp)
+        .testTag("settings_autobackup_section"),
+      verticalArrangement = Arrangement.spacedBy(11.dp),
+    ) {
+      // Top Row: Engine Title + Sculpted 3D Switch Pill
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Column(
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .width(3.dp)
+                .height(12.dp)
+                .clip(RoundedCornerShape(1.5.dp))
+                .background(if (autoBackupConfig.enabled) emeraldAccent else SettingsZinc500),
+            )
+            Text(
+              text = "AUTO-BACKUP OVERWRITE CADENCE",
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = metrics.spScaled(9.6f, 8.6f, 10.8f),
+              letterSpacing = 0.6.sp,
+            )
+          }
+          Text(
+            text = "Overwrites existing backup file in place • Default: 24 Hours",
+            color = SettingsZinc300,
+            fontFamily = InterFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = metrics.spScaled(9.4f, 8.4f, 10.4f),
+          )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(
+              if (autoBackupConfig.enabled) {
+                Brush.horizontalGradient(listOf(PureWhite, Color(0xFFE4E4E7)))
+              } else {
+                Brush.horizontalGradient(listOf(Color(0xFF181922), Color(0xFF12131A)))
+              },
+            )
+            .border(
+              1.dp,
+              if (autoBackupConfig.enabled) PureWhite else SettingsZinc700,
+              RoundedCornerShape(9.dp),
+            )
+            .clickable(role = Role.Switch) {
+              onToggleAutoBackup(!autoBackupConfig.enabled)
+            }
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .testTag("settings_autobackup_toggle"),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            text = if (autoBackupConfig.enabled) {
+              "● ${autoBackupConfig.frequency.shortBadge}"
+            } else {
+              "○ PAUSED"
+            },
+            color = if (autoBackupConfig.enabled) ObsidianBlack else SettingsZinc300,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(8.0f, 7.0f, 9.0f),
+            letterSpacing = 0.4.sp,
+          )
+        }
+      }
+
+      // 2x2 Sculpted 3D Cadence Matrix:
+      // 1) After Every Log, 2) After Each Hour, 3) Weekly, 4) 24 Hours (Default)
+      val cadenceRows = listOf(
+        listOf(
+          Triple(AutoBackupFrequencyOption.EVERY_LOG, "01 • EVERY LOG", "Instant on each log"),
+          Triple(AutoBackupFrequencyOption.HOURLY, "02 • EACH HOUR", "Every 60m cycle"),
+        ),
+        listOf(
+          Triple(AutoBackupFrequencyOption.WEEKLY, "03 • WEEKLY", "Every 7d cycle"),
+          Triple(AutoBackupFrequencyOption.DAILY_24H, "04 • 24 HOURS", "Default daily cycle"),
+        ),
+      )
+
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        cadenceRows.forEach { rowItems ->
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            rowItems.forEach { (option, titleText, subText) ->
+              val isSelected = autoBackupConfig.enabled && autoBackupConfig.frequency == option
+              Box(
+                modifier = Modifier
+                  .weight(1f)
+                  .clip(RoundedCornerShape(11.dp))
+                  .background(
+                    brush = if (isSelected) {
+                      Brush.verticalGradient(
+                        colors = listOf(Color(0xFF142E24), Color(0xFF0A1914)),
+                      )
+                    } else {
+                      Brush.verticalGradient(
+                        colors = listOf(Color(0xFF171822), Color(0xFF0E0F15)),
+                      )
+                    },
+                  )
+                  .border(
+                    width = if (isSelected) 1.3.dp else 1.dp,
+                    color = if (isSelected) emeraldAccent else Color(0xFF282A36),
+                    shape = RoundedCornerShape(11.dp),
+                  )
+                  .clickable(role = Role.RadioButton) {
+                    onSelectAutoBackupFrequency(option)
+                  }
+                  .padding(horizontal = 10.dp, vertical = 9.dp)
+                  .testTag("autobackup_freq_${option.code}"),
+              ) {
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                  ) {
+                    Text(
+                      text = titleText,
+                      color = if (isSelected) PureWhite else SettingsZinc300,
+                      fontFamily = JetBrainsMonoFontFamily,
+                      fontWeight = FontWeight.ExtraBold,
+                      fontSize = metrics.spScaled(8.3f, 7.3f, 9.3f),
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
+                    )
+                    Box(
+                      modifier = Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(if (isSelected) emeraldAccent else Color(0xFF323442)),
+                    )
+                  }
+                  Text(
+                    text = subText,
+                    color = if (isSelected) emeraldAccent else SettingsZinc400,
+                    fontFamily = InterFontFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = metrics.spScaled(8.0f, 7.1f, 8.9f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 4. Storage Destination Console & Default Folder Location Inspector
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(12.dp))
+          .background(Color(0xFF07080C))
+          .border(1.dp, Color(0xFF262836), RoundedCornerShape(12.dp))
+          .padding(11.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
+      ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
@@ -2331,84 +2677,304 @@ private fun SettingsBackupVaultCard(
               modifier = Modifier
                 .size(6.dp)
                 .clip(CircleShape)
-                .background(goldAccent),
+                .background(
+                  if (autoBackupConfig.folderMode == AutoBackupFolderMode.DEFAULT_FOLDER) emeraldAccent else goldAccent,
+                ),
             )
             Text(
-              text = "ACTIVE SNAPSHOT • ${vaultMeta.subjectName.uppercase()} ($vaultBadge)",
+              text = "STORAGE DESTINATION • ${autoBackupConfig.folderMode.shortBadge}",
               color = PureWhite,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.ExtraBold,
-              fontSize = metrics.spScaled(8.6f, 7.6f, 9.6f),
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
+              fontSize = metrics.spScaled(8.2f, 7.2f, 9.2f),
             )
           }
+
           Text(
-            text = dateFormat.format(Date(vaultMeta.createdAtEpochMs)),
+            text = "${autoBackupConfig.totalOverwritesCount}x OVERWRITTEN",
             color = goldAccent,
             fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = metrics.spScaled(7.8f, 6.9f, 8.8f),
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = metrics.spScaled(7.6f, 6.7f, 8.5f),
           )
         }
 
-        // 3 Architectural Metric Pills
+        // Folder Mode Selector Buttons: [✓ DEFAULT FOLDER (Shows Location)] vs [CHOOSE OWN FOLDER]
         Row(
           modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(7.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-          VaultTelemetryMetricChip(
-            label = "TIMELINE LOGS",
-            value = vaultMeta.totalTimelineLogsCount.toString(),
-            accent = PureWhite,
-            modifier = Modifier.weight(1f),
-          )
-          VaultTelemetryMetricChip(
-            label = "CALENDAR DAYS",
-            value = vaultMeta.historicalDaysCount.toString(),
-            accent = goldAccent,
-            modifier = Modifier.weight(1f),
-          )
-          VaultTelemetryMetricChip(
-            label = "SAVED FOODS",
-            value = vaultMeta.savedQuickItemsCount.toString(),
-            accent = emeraldAccent,
-            modifier = Modifier.weight(1f),
-          )
-        }
-      } else {
-        Text(
-          text = "Create an encrypted local JSON snapshot of your entire BioSync database (Steps 01–04 calibration, custom targets, timeline entries, and calendar history) for instant 1-tap recovery.",
-          color = SettingsZinc300,
-          fontFamily = InterFontFamily,
-          fontSize = metrics.spScaled(10.8f, 9.6f, 12.0f),
-          lineHeight = metrics.spScaled(15.2f, 13.5f, 16.8f),
-        )
-      }
+          val isDefaultFolder = autoBackupConfig.folderMode == AutoBackupFolderMode.DEFAULT_FOLDER
+          Box(
+            modifier = Modifier
+              .weight(1f)
+              .heightIn(min = 42.dp)
+              .clip(RoundedCornerShape(9.dp))
+              .background(
+                if (isDefaultFolder) {
+                  Brush.verticalGradient(listOf(Color(0xFF143025), Color(0xFF0B1C15)))
+                } else {
+                  Brush.verticalGradient(listOf(Color(0xFF171822), Color(0xFF101118)))
+                },
+              )
+              .border(
+                width = if (isDefaultFolder) 1.2.dp else 1.dp,
+                color = if (isDefaultFolder) emeraldAccent else Color(0xFF2E303E),
+                shape = RoundedCornerShape(9.dp),
+              )
+              .clickable(role = Role.Button) {
+                onSelectDefaultAutoBackupFolder()
+                showDefaultLocationModal = true
+              }
+              .padding(horizontal = 8.dp, vertical = 8.dp)
+              .testTag("autobackup_folder_default_btn"),
+            contentAlignment = Alignment.Center,
+          ) {
+            Column(
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+              Text(
+                text = if (isDefaultFolder) "✓ DEFAULT FOLDER" else "USE DEFAULT FOLDER",
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = metrics.spScaled(8.0f, 7.0f, 9.0f),
+                letterSpacing = 0.4.sp,
+                maxLines = 1,
+              )
+              Text(
+                text = "Tap to view default path",
+                color = if (isDefaultFolder) emeraldAccent else SettingsZinc400,
+                fontFamily = InterFontFamily,
+                fontSize = metrics.spScaled(7.0f, 6.2f, 7.9f),
+                maxLines = 1,
+              )
+            }
+          }
 
-      if (!statusBanner.isNullOrBlank()) {
-        Row(
+          val isCustomFolder = autoBackupConfig.folderMode == AutoBackupFolderMode.CUSTOM_FOLDER
+          Box(
+            modifier = Modifier
+              .weight(1f)
+              .heightIn(min = 42.dp)
+              .clip(RoundedCornerShape(9.dp))
+              .background(
+                if (isCustomFolder) {
+                  Brush.verticalGradient(listOf(Color(0xFF2B2210), Color(0xFF181308)))
+                } else {
+                  Brush.verticalGradient(listOf(Color(0xFF171822), Color(0xFF101118)))
+                },
+              )
+              .border(
+                width = if (isCustomFolder) 1.2.dp else 1.dp,
+                color = if (isCustomFolder) goldAccent else PureWhite.copy(alpha = 0.42f),
+                shape = RoundedCornerShape(9.dp),
+              )
+              .clickable(role = Role.Button, onClick = onChooseCustomAutoBackupFolder)
+              .padding(horizontal = 8.dp, vertical = 8.dp)
+              .testTag("autobackup_folder_custom_btn"),
+            contentAlignment = Alignment.Center,
+          ) {
+            Column(
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+              Text(
+                text = if (isCustomFolder) "✓ CUSTOM FOLDER" else "CHOOSE OWN FOLDER",
+                color = if (isCustomFolder) goldAccent else PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = metrics.spScaled(8.0f, 7.0f, 9.0f),
+                letterSpacing = 0.4.sp,
+                maxLines = 1,
+              )
+              Text(
+                text = if (isCustomFolder && autoBackupConfig.customFolderDisplayName.isNotBlank()) {
+                  autoBackupConfig.customFolderDisplayName
+                } else {
+                  "Pick any device directory"
+                },
+                color = if (isCustomFolder) goldAccent.copy(alpha = 0.9f) else SettingsZinc400,
+                fontFamily = InterFontFamily,
+                fontSize = metrics.spScaled(7.0f, 6.2f, 7.9f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+              )
+            }
+          }
+        }
+
+        // Copyable Default / Active Location Path Readout Box
+        val displayedFullPath = if (autoBackupConfig.folderMode == AutoBackupFolderMode.CUSTOM_FOLDER &&
+          autoBackupConfig.customFolderDisplayName.isNotBlank()
+        ) {
+          "${autoBackupConfig.customFolderDisplayName}/${BioSyncBackupManager.AUTO_BACKUP_FILE_NAME} (+ Default Mirror)"
+        } else {
+          autoBackupConfig.defaultFolderAbsolutePath
+        }
+
+        Column(
           modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF071A12))
-            .border(1.dp, emeraldAccent.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-            .padding(horizontal = 9.dp, vertical = 6.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .clip(RoundedCornerShape(9.dp))
+            .background(Color(0xFF0D0E14))
+            .border(1.dp, Color(0xFF232533), RoundedCornerShape(9.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+            .testTag("autobackup_default_location_readout"),
+          verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Text(
+              text = if (autoBackupConfig.folderMode == AutoBackupFolderMode.DEFAULT_FOLDER) {
+                "DEFAULT VAULT LOCATION PATH"
+              } else {
+                "ACTIVE OVERWRITE PATH & DEFAULT MIRROR"
+              },
+              color = cyanAccent,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = metrics.spScaled(7.5f, 6.6f, 8.4f),
+              letterSpacing = 0.4.sp,
+            )
+
+            Row(
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Box(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(5.dp))
+                  .background(Color(0xFF171924))
+                  .border(1.dp, cyanAccent.copy(alpha = 0.55f), RoundedCornerShape(5.dp))
+                  .clickable(role = Role.Button) {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    clipboard?.setPrimaryClip(
+                      ClipData.newPlainText("BioSync Default Backup Path", autoBackupConfig.defaultFolderAbsolutePath),
+                    )
+                    localCopiedFeedback = "Default folder path copied to clipboard!"
+                  }
+                  .padding(horizontal = 7.dp, vertical = 2.5.dp)
+                  .testTag("autobackup_copy_default_path_btn"),
+              ) {
+                Text(
+                  text = "COPY PATH",
+                  color = PureWhite,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = metrics.spScaled(7.0f, 6.2f, 7.9f),
+                )
+              }
+
+              Box(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(5.dp))
+                  .background(Color(0xFF171924))
+                  .border(1.dp, PureWhite.copy(alpha = 0.35f), RoundedCornerShape(5.dp))
+                  .clickable(role = Role.Button) {
+                    showDefaultLocationModal = true
+                  }
+                  .padding(horizontal = 7.dp, vertical = 2.5.dp)
+                  .testTag("autobackup_inspect_default_path_btn"),
+              ) {
+                Text(
+                  text = "INSPECT",
+                  color = goldAccent,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = metrics.spScaled(7.0f, 6.2f, 7.9f),
+                )
+              }
+            }
+          }
+
+          Text(
+            text = displayedFullPath,
+            color = PureWhite,
+            fontFamily = JetBrainsMonoFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = metrics.spScaled(7.6f, 6.8f, 8.5f),
+            lineHeight = metrics.spScaled(11.2f, 10.0f, 12.4f),
+          )
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Text(
+              text = "LAST OVERWRITE: ${autoBackupConfig.lastAutoBackupFormatted}",
+              color = SettingsZinc400,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Medium,
+              fontSize = metrics.spScaled(7.1f, 6.3f, 8.0f),
+            )
+            Text(
+              text = "SIZE: ${autoBackupConfig.lastBackupFileSizeFormatted}",
+              color = emeraldAccent,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = metrics.spScaled(7.2f, 6.4f, 8.1f),
+            )
+          }
+        }
+
+        // Tactile Manual Overwrite Now Button
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 40.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(
+              brush = Brush.horizontalGradient(
+                colors = listOf(Color(0xFF1A1B26), Color(0xFF12131C)),
+              ),
+            )
+            .border(1.dp, PureWhite.copy(alpha = 0.42f), RoundedCornerShape(9.dp))
+            .clickable(role = Role.Button, onClick = onOverwriteAutoBackupNow)
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+            .testTag("autobackup_overwrite_now_btn"),
+          contentAlignment = Alignment.Center,
         ) {
           Text(
-            text = "✓ $statusBanner",
-            color = emeraldAccent,
+            text = "↻ OVERWRITE EXISTING BACKUP FILE NOW (${autoBackupConfig.lastBackupFileSizeFormatted})",
+            color = PureWhite,
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.ExtraBold,
-            fontSize = metrics.spScaled(8.6f, 7.6f, 9.6f),
+            fontSize = metrics.spScaled(8.0f, 7.1f, 9.0f),
+            letterSpacing = 0.5.sp,
           )
         }
       }
     }
 
-    // 3. High-Contrast Dual Action Buttons: BACKUP DATA (Pure White 3D) & IMPORT BACKUP (Obsidian + Platinum)
+    val effectiveBanner = localCopiedFeedback ?: statusBanner
+    if (!effectiveBanner.isNullOrBlank()) {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(9.dp))
+          .background(Color(0xFF081B13))
+          .border(1.dp, emeraldAccent.copy(alpha = 0.65f), RoundedCornerShape(9.dp))
+          .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        Text(
+          text = "✓ $effectiveBanner",
+          color = emeraldAccent,
+          fontFamily = JetBrainsMonoFontFamily,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = metrics.spScaled(8.3f, 7.4f, 9.2f),
+        )
+      }
+    }
+
+    // 5. High-Contrast Dual Action Buttons: EXPORT BACKUP (Pure White 3D) & IMPORT BACKUP (Obsidian + Platinum)
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -2457,10 +3023,10 @@ private fun SettingsBackupVaultCard(
           .clip(RoundedCornerShape(11.dp))
           .background(
             brush = Brush.verticalGradient(
-              colors = listOf(Color(0xFF1F1F24), Color(0xFF121216)),
+              colors = listOf(Color(0xFF20212A), Color(0xFF111218)),
             ),
           )
-          .border(1.2.dp, PureWhite.copy(alpha = 0.55f), RoundedCornerShape(11.dp))
+          .border(1.2.dp, PureWhite.copy(alpha = 0.58f), RoundedCornerShape(11.dp))
           .clickable(role = Role.Button, onClick = onOpenImportDialog)
           .testTag("settings_import_backup_button"),
         contentAlignment = Alignment.Center,
@@ -2488,6 +3054,231 @@ private fun SettingsBackupVaultCard(
       }
     }
   }
+
+  // Interactive Default Folder Location Inspector Modal (Opened when clicking Default Folder or Inspect)
+  if (showDefaultLocationModal) {
+    Dialog(
+      onDismissRequest = { showDefaultLocationModal = false },
+      properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 20.dp),
+        contentAlignment = Alignment.Center,
+      ) {
+        Column(
+          modifier = Modifier
+            .widthIn(max = 440.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+              brush = Brush.verticalGradient(
+                colors = listOf(Color(0xFF191A22), Color(0xFF0D0E14), Color(0xFF060609)),
+              ),
+            )
+            .border(1.3.dp, PureWhite.copy(alpha = 0.72f), RoundedCornerShape(20.dp))
+            .padding(20.dp)
+            .testTag("default_folder_location_modal"),
+          verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(8.dp)
+                  .clip(CircleShape)
+                  .background(emeraldAccent),
+              )
+              Text(
+                text = "DEFAULT VAULT STORAGE LOCATION",
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 10.2.sp,
+                letterSpacing = 0.7.sp,
+              )
+            }
+
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color(0xFF15161E))
+                .border(1.dp, SettingsZinc700, RoundedCornerShape(6.dp))
+                .clickable { showDefaultLocationModal = false }
+                .padding(horizontal = 8.dp, vertical = 3.dp),
+            ) {
+              Text(
+                text = "ESC",
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 8.6.sp,
+              )
+            }
+          }
+
+          Text(
+            text = "Default Auto-Backup File Path",
+            color = PureWhite,
+            fontFamily = InterFontFamily,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 18.sp,
+          )
+
+          Text(
+            text = "BioSync automatically overwrites the existing single JSON vault file at both of these locations so your data survives app updates and resets without creating duplicate files:",
+            color = SettingsZinc300,
+            fontFamily = InterFontFamily,
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+          )
+
+          // Primary External App-Specific Default Folder Path
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(11.dp))
+              .background(Color(0xFF0A0B10))
+              .border(1.dp, emeraldAccent.copy(alpha = 0.65f), RoundedCornerShape(11.dp))
+              .padding(11.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            Text(
+              text = "01 • PRIMARY DEFAULT FOLDER LOCATION",
+              color = emeraldAccent,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 8.2.sp,
+              letterSpacing = 0.5.sp,
+            )
+            Text(
+              text = autoBackupConfig.defaultFolderAbsolutePath,
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.SemiBold,
+              fontSize = 10.2.sp,
+              lineHeight = 14.5.sp,
+            )
+          }
+
+          // Secondary Internal Protected Mirror Path
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(11.dp))
+              .background(Color(0xFF0A0B10))
+              .border(1.dp, goldAccent.copy(alpha = 0.55f), RoundedCornerShape(11.dp))
+              .padding(11.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            Text(
+              text = "02 • INTERNAL PROTECTED MIRROR",
+              color = goldAccent,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 8.2.sp,
+              letterSpacing = 0.5.sp,
+            )
+            Text(
+              text = autoBackupConfig.defaultInternalMirrorPath,
+              color = PureWhite,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.SemiBold,
+              fontSize = 10.2.sp,
+              lineHeight = 14.5.sp,
+            )
+          }
+
+          // File Size & Health Verification Row
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(9.dp))
+              .background(Color(0xFF10121A))
+              .border(1.dp, Color(0xFF262836), RoundedCornerShape(9.dp))
+              .padding(horizontal = 11.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Text(
+              text = "STATUS: ${autoBackupConfig.backupHealthBadge}",
+              color = emeraldAccent,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 9.0.sp,
+            )
+            Text(
+              text = "${autoBackupConfig.totalOverwritesCount}x OVERWRITTEN",
+              color = goldAccent,
+              fontFamily = JetBrainsMonoFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 8.8.sp,
+            )
+          }
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Box(
+              modifier = Modifier
+                .weight(1f)
+                .height(44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(PureWhite)
+                .clickable(role = Role.Button) {
+                  val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                  clipboard?.setPrimaryClip(
+                    ClipData.newPlainText("BioSync Default Backup Path", autoBackupConfig.defaultFolderAbsolutePath),
+                  )
+                  localCopiedFeedback = "Default folder path copied: ${autoBackupConfig.defaultFolderAbsolutePath}"
+                  showDefaultLocationModal = false
+                }
+                .testTag("modal_copy_default_path_btn"),
+              contentAlignment = Alignment.Center,
+            ) {
+              Text(
+                text = "COPY DEFAULT PATH",
+                color = ObsidianBlack,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 10.sp,
+              )
+            }
+
+            Box(
+              modifier = Modifier
+                .weight(1f)
+                .height(44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFF171822))
+                .border(1.dp, PureWhite.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                .clickable(role = Role.Button) {
+                  showDefaultLocationModal = false
+                },
+              contentAlignment = Alignment.Center,
+            ) {
+              Text(
+                text = "DONE",
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 10.sp,
+              )
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 @Composable
@@ -2499,10 +3290,14 @@ private fun VaultTelemetryMetricChip(
 ) {
   Column(
     modifier = modifier
-      .clip(RoundedCornerShape(8.dp))
-      .background(Color(0xFF121216))
-      .border(1.dp, Color(0xFF27272A), RoundedCornerShape(8.dp))
-      .padding(horizontal = 8.dp, vertical = 6.dp),
+      .clip(RoundedCornerShape(10.dp))
+      .background(
+        brush = Brush.verticalGradient(
+          colors = listOf(Color(0xFF171822), Color(0xFF0E0F15)),
+        ),
+      )
+      .border(1.dp, accent.copy(alpha = 0.38f), RoundedCornerShape(10.dp))
+      .padding(horizontal = 8.dp, vertical = 7.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
     verticalArrangement = Arrangement.spacedBy(2.dp),
   ) {
@@ -2511,14 +3306,14 @@ private fun VaultTelemetryMetricChip(
       color = accent,
       fontFamily = JetBrainsMonoFontFamily,
       fontWeight = FontWeight.ExtraBold,
-      fontSize = 12.5.sp,
+      fontSize = 13.5.sp,
     )
     Text(
       text = label,
-      color = SettingsZinc400,
+      color = SettingsZinc300,
       fontFamily = JetBrainsMonoFontFamily,
       fontWeight = FontWeight.Bold,
-      fontSize = 7.0.sp,
+      fontSize = 7.2.sp,
       letterSpacing = 0.4.sp,
       maxLines = 1,
     )
@@ -3193,14 +3988,15 @@ internal fun BioSyncBackupImportDialog(
           }
 
           Text(
-            text = "Select your launch destination:",
+            text = "Select your launch destination (Step 04 permission verification is mandatory before entering Dashboard):",
             color = PureWhite,
             fontFamily = InterFontFamily,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 13.5.sp,
+            fontSize = 13.0.sp,
+            lineHeight = 18.0.sp,
           )
 
-          // Option 1: Jump Directly to Dashboard
+          // Option 1: Proceed to Step 04 Mandatory Permission Gate & Launch Dashboard
           Box(
             modifier = Modifier
               .fillMaxWidth()
@@ -3220,12 +4016,12 @@ internal fun BioSyncBackupImportDialog(
             contentAlignment = Alignment.Center,
           ) {
             Text(
-              text = "JUMP DIRECTLY TO DASHBOARD",
+              text = "VERIFY STEP 04 PERMISSIONS & LAUNCH DASHBOARD",
               color = ObsidianBlack,
               fontFamily = JetBrainsMonoFontFamily,
               fontWeight = FontWeight.ExtraBold,
-              fontSize = 11.6.sp,
-              letterSpacing = 0.7.sp,
+              fontSize = 10.8.sp,
+              letterSpacing = 0.5.sp,
             )
           }
 

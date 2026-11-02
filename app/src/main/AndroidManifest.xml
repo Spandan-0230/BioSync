@@ -123,6 +123,12 @@
             android:enabled="true"
             android:exported="false" />
 
+        <!-- Periodic Auto-Backup overwrite receiver (Hourly / 24h Default / Weekly) -->
+        <receiver
+            android:name=".BioSyncAutoBackupAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <!-- Auto-Resizable 6-Pillar Obsidian Home Screen Widget Provider -->
         <receiver
             android:name=".BioSyncHomeWidgetProvider"
@@ -145,6 +151,9 @@
             <intent-filter>
                 <action android:name="com.example.action.WIDGET_LOG_WATER_250" />
                 <action android:name="com.example.action.WIDGET_LOG_WATER_500" />
+                <action android:name="com.example.action.WIDGET_LOG_STEPS_250" />
+                <action android:name="com.example.action.WIDGET_LOG_STEPS_500" />
+                <action android:name="com.example.action.WIDGET_LOG_STEPS_1000" />
                 <action android:name="com.example.action.WIDGET_SYNC_TELEMETRY" />
             </intent-filter>
         </receiver>

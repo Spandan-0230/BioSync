@@ -53,6 +53,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -613,8 +614,16 @@ fun BioSyncStatsScreen(
   val numberFormat = remember { NumberFormat.getIntegerInstance(Locale.US) }
 
   var dashboardData by remember { mutableStateOf(DashboardLocalStore.load(context)) }
+  val storeRevision by DashboardLocalStore.storeRevisionFlow.collectAsState()
   var showTopRightSettingsMenu by remember { mutableStateOf(false) }
   var lastStatsQuickLogEpochMs by remember { mutableLongStateOf(0L) }
+
+  LaunchedEffect(storeRevision) {
+    val latestFromDisk = DashboardLocalStore.load(context)
+    if (latestFromDisk != dashboardData) {
+      dashboardData = latestFromDisk
+    }
+  }
 
   val targetCalories = targetCaloriesKcal.coerceAtLeast(1000)
   val targetProtein = targetProteinGrams.coerceAtLeast(30)
@@ -635,7 +644,7 @@ fun BioSyncStatsScreen(
   )
   val liveSteps = (stepSyncController.state.liveTodaySteps.coerceAtLeast(0) + dashboardData.manualStepsToday.coerceAtLeast(0))
 
-  val isTodayWorkoutDay = remember(activityLevel, selectedWorkoutDays) {
+  val isTodayWorkoutDay = remember(activityLevel, selectedWorkoutDays, dashboardData.dayKey) {
     isCalendarWorkoutDay(Calendar.getInstance(), activityLevel, selectedWorkoutDays)
   }
   val todayEffectiveWaterTarget = if (isTodayWorkoutDay) trainingWaterTargetMl else restWaterTargetMl
@@ -1097,13 +1106,15 @@ fun BioSyncStatsScreen(
                     timelineEntries = updatedEntries,
                     updatedAtEpochMs = nowMs,
                   )
-                  val streakEval = BioSyncStreakEngine.evaluateStreak(
-                    storedBaseStreak = dashboardData.baseStreakDays,
-                    lastCompletedDayKey = dashboardData.lastCompletedStreakDayKey,
+                  val updatedWithDay = DashboardLocalStore.withUpdatedDayRecord(dashboardData, updatedRec)
+                  val streakEval = BioSyncStreakEngine.recalculateStreakFromHistory(
+                    historyMap = updatedWithDay.dailyHistoryMap,
                     todayKey = todayKey,
                     todayQualified = allMet,
+                    fallbackBaseStreak = dashboardData.baseStreakDays,
+                    fallbackLastCompletedKey = dashboardData.lastCompletedStreakDayKey,
                   )
-                  val updatedStore = DashboardLocalStore.withUpdatedDayRecord(dashboardData, updatedRec).copy(
+                  val updatedStore = updatedWithDay.copy(
                     baseStreakDays = streakEval.streakDays,
                     lastCompletedStreakDayKey = streakEval.lastCompletedDayKey,
                   )
@@ -1141,20 +1152,17 @@ fun BioSyncStatsScreen(
                   timelineEntries = updatedEntries,
                   updatedAtEpochMs = System.currentTimeMillis(),
                 )
-                val streakEval = BioSyncStreakEngine.evaluateStreak(
-                  storedBaseStreak = dashboardData.baseStreakDays,
-                  lastCompletedDayKey = dashboardData.lastCompletedStreakDayKey,
+                val updatedWithDay = DashboardLocalStore.withUpdatedDayRecord(dashboardData, updatedRec)
+                val streakEval = BioSyncStreakEngine.recalculateStreakFromHistory(
+                  historyMap = updatedWithDay.dailyHistoryMap,
                   todayKey = todayKey,
                   todayQualified = allMet,
+                  fallbackBaseStreak = dashboardData.baseStreakDays,
+                  fallbackLastCompletedKey = dashboardData.lastCompletedStreakDayKey,
                 )
-                val fallbackLastKey = if (!allMet && streakEval.lastCompletedDayKey.isBlank()) {
-                  BioSyncStreakEngine.findLatestHistoricalCompletedDay(dashboardData.dailyHistoryMap, todayKey)
-                } else {
-                  streakEval.lastCompletedDayKey
-                }
-                val updatedStore = DashboardLocalStore.withUpdatedDayRecord(dashboardData, updatedRec).copy(
+                val updatedStore = updatedWithDay.copy(
                   baseStreakDays = streakEval.streakDays,
-                  lastCompletedStreakDayKey = fallbackLastKey,
+                  lastCompletedStreakDayKey = streakEval.lastCompletedDayKey,
                 )
                 dashboardData = updatedStore
                 DashboardLocalStore.save(context, updatedStore)

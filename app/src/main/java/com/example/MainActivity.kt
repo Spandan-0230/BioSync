@@ -172,6 +172,10 @@ fun BioSyncApp(
   val context = LocalContext.current
   val initialStored = remember { BioSyncLocalStore.load(context) }
 
+  val hasPendingRestoredBackup = remember {
+    BioSyncLocalStore.hasRestoredDataPendingLockIn(context)
+  }
+
   // 0 = Welcome, 1 = Profile (Step 01 of 04), 2 = Personal Details (Step 02 of 04),
   // 3 = Blueprint (Step 03 of 04), 4 = Protocol Summary (Step 04 of 04),
   // 5 = Live Dashboard, 6 = Settings & Dossier Command Page
@@ -179,13 +183,21 @@ fun BioSyncApp(
     mutableIntStateOf(
       when {
         initialStored.protocolLockedIn -> 5
-        launchedFromHealthConnect -> 4
+        launchedFromHealthConnect || hasPendingRestoredBackup -> 4
         else -> 0
       },
     )
   }
   var isQuickEditMode by rememberSaveable { mutableStateOf(false) }
-  var quickEditFocusSection by rememberSaveable { mutableStateOf<String?>(null) }
+  var quickEditFocusSection by rememberSaveable {
+    mutableStateOf<String?>(
+      if (hasPendingRestoredBackup && !initialStored.protocolLockedIn) {
+        "step04_mandatory_permissions"
+      } else {
+        null
+      },
+    )
+  }
   // 4 = Protocol Summary, 6 = Settings Page
   var quickEditReturnStep by rememberSaveable { mutableIntStateOf(4) }
 
@@ -421,7 +433,8 @@ fun BioSyncApp(
     customFatsGrams = restored.customFatsGrams
     customHydrationMl = restored.customHydrationMl
     customStepsCount = restored.customStepsCount
-    protocolLockedIn = if (jumpDirectlyToDashboard) true else restored.protocolLockedIn
+    // Mandatory Step 04 Permission Gate: never bypass Step 04 permissions when importing a backup file!
+    protocolLockedIn = false
     protocolLockedAtEpochMillis = if (restored.protocolLockedAtEpochMillis > 0L) {
       restored.protocolLockedAtEpochMillis
     } else {
@@ -431,9 +444,9 @@ fun BioSyncApp(
     dayOneInitialCountdownCompleted = if (jumpDirectlyToDashboard) true else restored.dayOneInitialCountdownCompleted
     dayOneStartNotificationSent = if (jumpDirectlyToDashboard) true else restored.dayOneStartNotificationSent
     isQuickEditMode = false
-    quickEditFocusSection = null
+    quickEditFocusSection = if (jumpDirectlyToDashboard) "step04_mandatory_permissions" else null
     quickEditReturnStep = 4
-    currentStep = if (jumpDirectlyToDashboard) 5 else 1
+    currentStep = if (jumpDirectlyToDashboard) 4 else 1
   }
 
   // Automatically persist all collected data locally inside the user's device only
@@ -542,6 +555,7 @@ fun BioSyncApp(
         selectedSex = selectedSex,
         weightKg = weightKg,
       )
+      BioSyncAutoBackupScheduler.scheduleOrCancelAutoBackupAlarm(context)
     }
   }
 
@@ -857,7 +871,9 @@ fun BioSyncApp(
           initialFocusSection = quickEditFocusSection,
           onLockInProtocol = {
             val nowMs = System.currentTimeMillis()
-            val isVeryFirstLockIn = !protocolLockedIn && !dayOneInitialCountdownCompleted
+            val isVeryFirstLockIn = !protocolLockedIn &&
+              !dayOneInitialCountdownCompleted &&
+              protocolLockedAtEpochMillis <= 0L
             protocolLockedIn = true
             if (isVeryFirstLockIn) {
               protocolLockedAtEpochMillis = nowMs

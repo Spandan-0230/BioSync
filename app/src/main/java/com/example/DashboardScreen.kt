@@ -55,6 +55,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -473,6 +474,7 @@ fun BioSyncDashboardScreen(
   val numberFormat = remember { NumberFormat.getIntegerInstance(Locale.US) }
 
   var dashboardData by remember { mutableStateOf(DashboardLocalStore.load(context)) }
+  val storeRevision by DashboardLocalStore.storeRevisionFlow.collectAsState()
   var pendingDeletedItem by remember {
     mutableStateOf<PendingDeletedTimelineItem?>(null)
   }
@@ -480,12 +482,20 @@ fun BioSyncDashboardScreen(
   var showTopRightSettingsMenu by remember { mutableStateOf(false) }
   var lastQuickLogEpochMs by remember { mutableLongStateOf(0L) }
 
+  // Immediately sync when external Widget or Notification action buttons mutate DashboardLocalStore
+  LaunchedEffect(storeRevision) {
+    val latestFromDisk = DashboardLocalStore.load(context)
+    if (latestFromDisk != dashboardData) {
+      dashboardData = latestFromDisk
+    }
+  }
+
   fun persistDashboardData(updated: DashboardStoredData) {
     dashboardData = updated
     DashboardLocalStore.save(context, updated)
   }
 
-  val isActiveWorkoutDay = remember(activityLevel, selectedWorkoutDays) {
+  val isActiveWorkoutDay = remember(activityLevel, selectedWorkoutDays, dashboardData.dayKey) {
     if (activityLevel == ActivityLevelOption.SEDENTARY) {
       false
     } else {
@@ -590,7 +600,12 @@ fun BioSyncDashboardScreen(
       if (allSixMet && eval.streakDays > dashboardData.baseStreakDays) {
         haptics.confirm()
       }
-      val fallbackLastKey = if (!allSixMet && eval.lastCompletedDayKey.isBlank()) {
+      val fallbackLastKey = if (
+        !allSixMet &&
+        eval.lastCompletedDayKey.isBlank() &&
+        eval.streakDays > 0 &&
+        !eval.isBufferExpired
+      ) {
         BioSyncStreakEngine.findLatestHistoricalCompletedDay(dashboardData.dailyHistoryMap, todayKey)
       } else {
         eval.lastCompletedDayKey
@@ -840,14 +855,16 @@ fun BioSyncDashboardScreen(
           val liveStreakEval = remember(
             dashboardData.baseStreakDays,
             dashboardData.lastCompletedStreakDayKey,
+            dashboardData.dailyHistoryMap,
             dashboardData.dayKey,
             allSixMet,
           ) {
-            BioSyncStreakEngine.evaluateStreak(
-              storedBaseStreak = dashboardData.baseStreakDays,
-              lastCompletedDayKey = dashboardData.lastCompletedStreakDayKey,
+            BioSyncStreakEngine.recalculateStreakFromHistory(
+              historyMap = dashboardData.dailyHistoryMap,
               todayKey = dashboardData.dayKey,
               todayQualified = allSixMet,
+              fallbackBaseStreak = dashboardData.baseStreakDays,
+              fallbackLastCompletedKey = dashboardData.lastCompletedStreakDayKey,
             )
           }
 

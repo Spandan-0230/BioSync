@@ -2,10 +2,13 @@ package com.example
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -14,6 +17,9 @@ import java.util.UUID
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -355,7 +361,14 @@ object FairNutrientEstimator {
           anchorCalories.coerceAtLeast(25)
         }
       }
-      else -> 0
+      else -> {
+        val computedFromMacros = 4 * resolvedP + 4 * resolvedC + 9 * resolvedF
+        if (computedFromMacros > 0) {
+          ((computedFromMacros / 5f).roundToInt() * 5).coerceAtLeast(10)
+        } else {
+          0
+        }
+      }
     }
 
     return ResolvedNutrientDraft(
@@ -529,18 +542,19 @@ object BioSyncStreakEngine {
     } else {
       // Today is NOT yet qualified
       return if (daysElapsed <= BUFFER_DAYS_ALLOWED) {
-        // Still within the 2-day buffer! Streak is preserved.
-        val bufferUsed = (daysElapsed - 1).coerceAtLeast(0)
-        val remaining = (BUFFER_DAYS_ALLOWED - bufferUsed).coerceAtLeast(0)
+        // Within the 2-day buffer window:
+        // daysElapsed == 1 -> Buffer Day 1 of 2 (2 days remaining including today & tomorrow)
+        // daysElapsed == 2 -> Buffer Day 2 of 2 (1 final day remaining today before reset tomorrow)
+        val remaining = (BUFFER_DAYS_ALLOWED - daysElapsed + 1).coerceIn(1, BUFFER_DAYS_ALLOWED)
         StreakEvaluation(
           streakDays = storedBaseStreak,
           lastCompletedDayKey = lastCompletedDayKey,
-          isInBufferGrace = bufferUsed > 0,
+          isInBufferGrace = storedBaseStreak > 0,
           bufferDaysRemaining = remaining,
           isBufferExpired = false,
         )
       } else {
-        // Buffer has been exceeded! Streak resets to 0.
+        // Both buffer days have elapsed without achieving goal -> Streak resets to 0!
         StreakEvaluation(
           streakDays = 0,
           lastCompletedDayKey = "",
@@ -560,6 +574,77 @@ object BioSyncStreakEngine {
       .filter { it.streakQualified && it.dayKey != excludingDayKey }
       .maxByOrNull { it.dayKey }
       ?.dayKey ?: ""
+  }
+
+  /**
+   * Reconstructs the streak chain across chronological `dailyHistoryMap` records up to `todayKey`
+   * applying the exact 2-day buffer rule (`daysBetween <= BUFFER_DAYS_ALLOWED` preserves and increments;
+   * `daysBetween > BUFFER_DAYS_ALLOWED` resets to 0).
+   */
+  fun recalculateStreakFromHistory(
+    historyMap: Map<String, DailyHistoricalRecord>,
+    todayKey: String,
+    todayQualified: Boolean,
+    fallbackBaseStreak: Int = 0,
+    fallbackLastCompletedKey: String = "",
+  ): StreakEvaluation {
+    val qualifiedPastDays = historyMap.values
+      .filter { it.dayKey < todayKey && it.streakQualified }
+      .map { it.dayKey }
+      .distinct()
+      .sorted()
+
+    if (qualifiedPastDays.isEmpty()) {
+      val effectiveBase = if (fallbackLastCompletedKey.isNotBlank() && fallbackLastCompletedKey < todayKey) {
+        fallbackBaseStreak
+      } else if (todayQualified) {
+        1
+      } else {
+        0
+      }
+      val effectiveLastKey = if (fallbackLastCompletedKey.isNotBlank() && fallbackLastCompletedKey < todayKey) {
+        fallbackLastCompletedKey
+      } else if (todayQualified) {
+        todayKey
+      } else {
+        ""
+      }
+      return evaluateStreak(
+        storedBaseStreak = effectiveBase,
+        lastCompletedDayKey = effectiveLastKey,
+        todayKey = todayKey,
+        todayQualified = todayQualified,
+      )
+    }
+
+    var chainStreak = 0
+    var lastQualKey = ""
+    for (dayKey in qualifiedPastDays) {
+      if (lastQualKey.isEmpty()) {
+        chainStreak = 1
+        lastQualKey = dayKey
+      } else {
+        val gap = daysBetween(lastQualKey, dayKey)
+        chainStreak = if (gap in 1..BUFFER_DAYS_ALLOWED) {
+          chainStreak + 1
+        } else {
+          1
+        }
+        lastQualKey = dayKey
+      }
+    }
+
+    // Preserve higher base streak if user started with pre-existing streak anchor on the same lastQualKey
+    if (fallbackLastCompletedKey == lastQualKey && fallbackBaseStreak > chainStreak) {
+      chainStreak = fallbackBaseStreak
+    }
+
+    return evaluateStreak(
+      storedBaseStreak = chainStreak,
+      lastCompletedDayKey = lastQualKey,
+      todayKey = todayKey,
+      todayQualified = todayQualified,
+    )
   }
 }
 
@@ -589,6 +674,9 @@ object DashboardLocalStore {
   private const val KEY_SAVED_QUICK_ITEMS_JSON = "dashboard_saved_quick_items_json"
   private const val KEY_TIMELINE_ENTRIES_JSON = "dashboard_timeline_entries_json"
   private const val KEY_DAILY_HISTORY_MAP_JSON = "dashboard_daily_history_map_json"
+
+  private val _storeRevisionFlow = MutableStateFlow(0L)
+  val storeRevisionFlow: StateFlow<Long> = _storeRevisionFlow.asStateFlow()
 
   private fun prefs(context: Context): SharedPreferences =
     context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -715,7 +803,9 @@ object DashboardLocalStore {
     if (mirrorToVault && hasMeaningfulData && !isRestoringDashboardGuard) {
       BioSyncBackupManager.autoMirrorCurrentDatabase(context)
     }
+    _storeRevisionFlow.value = System.currentTimeMillis()
     BioSyncWidgetAndNotificationEngine.refreshAllWidgets(context)
+    BioSyncWidgetAndNotificationEngine.refreshLiveTelemetryNotificationIfActive(context)
   }
 
   /**
@@ -743,7 +833,11 @@ object DashboardLocalStore {
     val loggedFat = entries.sumOf { it.fatsGrams }.coerceAtLeast(0)
     val loggedWater = entries.sumOf { it.hydrationMl }.coerceAtLeast(0)
     val existingToday = data.dailyHistoryMap[todayKey]
-    val resolvedSteps = max(liveSteps.coerceAtLeast(0), existingToday?.stepsCount ?: 0)
+    val resolvedSteps = if (liveSteps > 0) {
+      liveSteps
+    } else {
+      (existingToday?.stepsCount ?: 0).coerceAtLeast(0)
+    }
 
     val updatedRecord = DailyHistoricalRecord(
       dayKey = todayKey,
@@ -768,6 +862,74 @@ object DashboardLocalStore {
     val updatedMap = data.dailyHistoryMap.toMutableMap()
     updatedMap[todayKey] = updatedRecord
     return data.copy(dailyHistoryMap = updatedMap)
+  }
+
+  /**
+   * Synchronizes live step telemetry from Google Fit / Health Connect or hardware pedometer
+   * directly into today's `DailyHistoricalRecord` in the background even when the app UI is closed.
+   */
+  fun syncLiveStepsInBackground(context: Context, liveSensorSteps: Int) {
+    runCatching {
+      val appCtx = context.applicationContext
+      val storedProfile = BioSyncLocalStore.load(appCtx)
+      val currentData = load(appCtx)
+      val todayKey = currentData.dayKey.ifBlank { DashboardTimeFormatter.currentDayKey() }
+      val totalLiveSteps = (liveSensorSteps.coerceAtLeast(0) + currentData.manualStepsToday.coerceAtLeast(0)).coerceAtLeast(0)
+      val existingToday = currentData.dailyHistoryMap[todayKey]
+      if (existingToday != null && existingToday.stepsCount == totalLiveSteps) {
+        return
+      }
+
+      val entries = currentData.todayTimelineEntries
+      val loggedCal = entries.sumOf { it.caloriesKcal }.coerceAtLeast(0)
+      val loggedPro = entries.sumOf { it.proteinGrams }.coerceAtLeast(0)
+      val loggedCarb = entries.sumOf { it.carbsGrams }.coerceAtLeast(0)
+      val loggedFat = entries.sumOf { it.fatsGrams }.coerceAtLeast(0)
+      val loggedWater = entries.sumOf { it.hydrationMl }.coerceAtLeast(0)
+
+      val targetCal = storedProfile.customCaloriesKcal.coerceAtLeast(1000)
+      val targetPro = storedProfile.customProteinGrams.coerceAtLeast(30)
+      val targetCarb = storedProfile.customCarbsGrams.coerceAtLeast(40)
+      val targetFat = storedProfile.customFatsGrams.coerceAtLeast(20)
+      val targetSteps = storedProfile.customStepsCount.coerceAtLeast(1000)
+      val isWorkoutToday = BioSyncLocalStore.isActiveWorkoutDay(storedProfile)
+      val targetWater = existingToday?.targetHydrationMl?.takeIf { it >= 500 }
+        ?: storedProfile.customHydrationMl.coerceAtLeast(500)
+
+      val thresholdPct = storedProfile.streakThreshold.percentage
+      val calMet = ((loggedCal * 100f) / targetCal).roundToInt() >= thresholdPct
+      val proMet = ((loggedPro * 100f) / targetPro).roundToInt() >= thresholdPct
+      val stepsMet = ((totalLiveSteps * 100f) / targetSteps).roundToInt() >= thresholdPct
+      val carbMet = ((loggedCarb * 100f) / targetCarb).roundToInt() >= thresholdPct
+      val fatMet = ((loggedFat * 100f) / targetFat).roundToInt() >= thresholdPct
+      val waterMet = ((loggedWater * 100f) / targetWater).roundToInt() >= thresholdPct
+      val allSixMet = calMet && proMet && stepsMet && carbMet && fatMet && waterMet
+
+      val streakEval = BioSyncStreakEngine.evaluateStreak(
+        storedBaseStreak = currentData.baseStreakDays,
+        lastCompletedDayKey = currentData.lastCompletedStreakDayKey,
+        todayKey = todayKey,
+        todayQualified = allSixMet,
+      )
+
+      val synced = withSyncedTodayRecord(
+        data = currentData.copy(
+          baseStreakDays = streakEval.streakDays,
+          lastCompletedStreakDayKey = streakEval.lastCompletedDayKey,
+        ),
+        liveSteps = totalLiveSteps,
+        targetSteps = targetSteps,
+        targetCalories = targetCal,
+        targetProtein = targetPro,
+        targetCarbs = targetCarb,
+        targetFats = targetFat,
+        targetWaterMl = targetWater,
+        streakThresholdPercent = thresholdPct,
+        streakQualified = allSixMet,
+        isWorkoutDay = isWorkoutToday,
+      )
+      save(appCtx, synced, mirrorToVault = false)
+    }
   }
 
   /**
@@ -796,6 +958,7 @@ object DashboardLocalStore {
   fun clearAll(context: Context) {
     prefs(context).edit().clear().commit()
     BioSyncBackupManager.clearAutoMirrorFiles(context)
+    _storeRevisionFlow.value = System.currentTimeMillis()
     BioSyncWidgetAndNotificationEngine.refreshAllWidgets(context)
   }
 
@@ -1031,10 +1194,112 @@ data class BioSyncFullBackupBundle(
   val dashboardData: DashboardStoredData,
 )
 
+enum class AutoBackupFrequencyOption(
+  val code: String,
+  val displayTitle: String,
+  val shortBadge: String,
+  val subtitle: String,
+  val intervalMillis: Long,
+) {
+  EVERY_LOG(
+    code = "EVERY_LOG",
+    displayTitle = "After Every Log",
+    shortBadge = "EVERY LOG",
+    subtitle = "Instant overwrite after each food, water, or step log",
+    intervalMillis = 0L,
+  ),
+  HOURLY(
+    code = "HOURLY",
+    displayTitle = "After Each Hour",
+    shortBadge = "1 HOUR",
+    subtitle = "Automatically overwrites backup file every 60 minutes",
+    intervalMillis = 60L * 60L * 1000L,
+  ),
+  WEEKLY(
+    code = "WEEKLY",
+    displayTitle = "Weekly",
+    shortBadge = "WEEKLY",
+    subtitle = "Automatically overwrites backup file every 7 days",
+    intervalMillis = 7L * 24L * 60L * 60L * 1000L,
+  ),
+  DAILY_24H(
+    code = "DAILY_24H",
+    displayTitle = "Every 24 Hours (Default)",
+    shortBadge = "24 HOURS",
+    subtitle = "Default 24-hour auto-backup overwrite cycle",
+    intervalMillis = 24L * 60L * 60L * 1000L,
+  );
+
+  companion object {
+    fun fromCode(code: String?): AutoBackupFrequencyOption {
+      return entries.firstOrNull { it.code.equals(code, ignoreCase = true) } ?: DAILY_24H
+    }
+  }
+}
+
+enum class AutoBackupFolderMode(
+  val code: String,
+  val displayTitle: String,
+  val shortBadge: String,
+  val subtitle: String,
+) {
+  DEFAULT_FOLDER(
+    code = "DEFAULT_FOLDER",
+    displayTitle = "Default BioSync Folder",
+    shortBadge = "DEFAULT FOLDER",
+    subtitle = "Overwrites biosync_autobackup_vault.json inside Default Vault Folder",
+  ),
+  CUSTOM_FOLDER(
+    code = "CUSTOM_FOLDER",
+    displayTitle = "Custom Chosen Folder",
+    shortBadge = "CUSTOM FOLDER",
+    subtitle = "Overwrites biosync_autobackup_vault.json inside your selected folder",
+  );
+
+  companion object {
+    fun fromCode(code: String?): AutoBackupFolderMode {
+      return entries.firstOrNull { it.code.equals(code, ignoreCase = true) } ?: DEFAULT_FOLDER
+    }
+  }
+}
+
+@Immutable
+data class AutoBackupConfigState(
+  val enabled: Boolean = true,
+  val frequency: AutoBackupFrequencyOption = AutoBackupFrequencyOption.DAILY_24H,
+  val folderMode: AutoBackupFolderMode = AutoBackupFolderMode.DEFAULT_FOLDER,
+  val customFolderTreeUri: String = "",
+  val customFolderDisplayName: String = "",
+  val customDocumentUri: String = "",
+  val lastAutoBackupEpochMs: Long = 0L,
+  val lastAutoBackupFormatted: String = "Pending initial overwrite",
+  val lastAutoBackupTriggerReason: String = "24 HOURS",
+  val activeTargetPathSummary: String = "BioSyncBackups/biosync_autobackup_vault.json",
+  val defaultFolderAbsolutePath: String = "Android/data/com.example/files/BioSyncBackups/biosync_autobackup_vault.json",
+  val defaultInternalMirrorPath: String = "files/BioSyncBackups/biosync_autobackup_vault.json",
+  val lastBackupFileSizeBytes: Long = 0L,
+  val lastBackupFileSizeFormatted: String = "0.0 KB",
+  val backupHealthBadge: String = "VERIFIED • READY",
+  val totalOverwritesCount: Int = 0,
+)
+
 object BioSyncBackupManager {
   private const val VAULT_PREFS_NAME = "biosync_recovery_vault_v1"
   private const val KEY_VAULT_BACKUP_JSON = "vault_full_backup_json"
   private const val KEY_VAULT_CREATED_AT_MS = "vault_created_at_epoch_ms"
+
+  // Auto-Backup Configuration Keys (stored inside durable vault prefs)
+  const val AUTO_BACKUP_FILE_NAME = "biosync_autobackup_vault.json"
+  const val DEFAULT_AUTO_BACKUP_DIR_NAME = "BioSyncBackups"
+  private const val KEY_AUTO_BACKUP_ENABLED = "auto_backup_enabled"
+  private const val KEY_AUTO_BACKUP_FREQUENCY = "auto_backup_frequency_code"
+  private const val KEY_AUTO_BACKUP_FOLDER_MODE = "auto_backup_folder_mode_code"
+  private const val KEY_AUTO_BACKUP_CUSTOM_TREE_URI = "auto_backup_custom_tree_uri"
+  private const val KEY_AUTO_BACKUP_CUSTOM_FOLDER_NAME = "auto_backup_custom_folder_name"
+  private const val KEY_AUTO_BACKUP_CUSTOM_DOC_URI = "auto_backup_custom_doc_uri"
+  private const val KEY_AUTO_BACKUP_LAST_EPOCH_MS = "auto_backup_last_epoch_ms"
+  private const val KEY_AUTO_BACKUP_LAST_REASON = "auto_backup_last_reason"
+  private const val KEY_AUTO_BACKUP_TOTAL_COUNT = "auto_backup_total_overwrites_count"
 
   private fun vaultPrefs(context: Context): SharedPreferences =
     context.applicationContext.getSharedPreferences(VAULT_PREFS_NAME, Context.MODE_PRIVATE)
@@ -1042,6 +1307,373 @@ object BioSyncBackupManager {
   fun formatBackupTimestamp(epochMs: Long): String {
     val sdf = SimpleDateFormat("MMM dd, yyyy • hh:mm a", Locale.US)
     return sdf.format(Date(epochMs))
+  }
+
+  fun formatFileSizeKb(bytes: Long): String {
+    if (bytes <= 0L) return "0.0 KB"
+    val kb = bytes.toDouble() / 1024.0
+    return String.format(Locale.US, "%.1f KB", kb.coerceAtLeast(0.1))
+  }
+
+  fun getDefaultAutoBackupFolder(context: Context): File {
+    val appCtx = context.applicationContext
+    val baseDir = runCatching { appCtx.getExternalFilesDir(null) }.getOrNull() ?: appCtx.filesDir
+    val dir = File(baseDir, DEFAULT_AUTO_BACKUP_DIR_NAME)
+    if (!dir.exists()) {
+      runCatching { dir.mkdirs() }
+    }
+    return dir
+  }
+
+  fun getDefaultAutoBackupFile(context: Context): File {
+    return File(getDefaultAutoBackupFolder(context), AUTO_BACKUP_FILE_NAME)
+  }
+
+  fun getInternalAutoBackupMirrorFile(context: Context): File {
+    val appCtx = context.applicationContext
+    val dir = File(appCtx.filesDir, DEFAULT_AUTO_BACKUP_DIR_NAME)
+    if (!dir.exists()) {
+      runCatching { dir.mkdirs() }
+    }
+    return File(dir, AUTO_BACKUP_FILE_NAME)
+  }
+
+  fun loadAutoBackupConfig(context: Context): AutoBackupConfigState {
+    val appCtx = context.applicationContext
+    val p = vaultPrefs(appCtx)
+    val enabled = p.getBoolean(KEY_AUTO_BACKUP_ENABLED, true)
+    val frequency = AutoBackupFrequencyOption.fromCode(
+      p.getString(KEY_AUTO_BACKUP_FREQUENCY, AutoBackupFrequencyOption.DAILY_24H.code),
+    )
+    val rawTreeUri = p.getString(KEY_AUTO_BACKUP_CUSTOM_TREE_URI, "").orEmpty()
+    val rawFolderMode = AutoBackupFolderMode.fromCode(
+      p.getString(KEY_AUTO_BACKUP_FOLDER_MODE, AutoBackupFolderMode.DEFAULT_FOLDER.code),
+    )
+    val effectiveFolderMode = if (rawFolderMode == AutoBackupFolderMode.CUSTOM_FOLDER && rawTreeUri.isBlank()) {
+      AutoBackupFolderMode.DEFAULT_FOLDER
+    } else {
+      rawFolderMode
+    }
+    val customFolderName = p.getString(KEY_AUTO_BACKUP_CUSTOM_FOLDER_NAME, "").orEmpty()
+      .ifBlank { if (rawTreeUri.isNotBlank()) extractReadableFolderName(rawTreeUri) else "" }
+    val customDocUri = p.getString(KEY_AUTO_BACKUP_CUSTOM_DOC_URI, "").orEmpty()
+    val lastEpochMs = p.getLong(KEY_AUTO_BACKUP_LAST_EPOCH_MS, 0L)
+    val lastReason = p.getString(KEY_AUTO_BACKUP_LAST_REASON, frequency.shortBadge).orEmpty()
+      .ifBlank { frequency.shortBadge }
+    val totalCount = p.getInt(KEY_AUTO_BACKUP_TOTAL_COUNT, 0).coerceAtLeast(0)
+
+    val defaultFile = runCatching { getDefaultAutoBackupFile(appCtx) }.getOrNull()
+    val internalFile = runCatching { getInternalAutoBackupMirrorFile(appCtx) }.getOrNull()
+    val defaultAbsPath = defaultFile?.absolutePath
+      ?: "${appCtx.filesDir.absolutePath}/$DEFAULT_AUTO_BACKUP_DIR_NAME/$AUTO_BACKUP_FILE_NAME"
+    val internalAbsPath = internalFile?.absolutePath
+      ?: "${appCtx.filesDir.absolutePath}/$DEFAULT_AUTO_BACKUP_DIR_NAME/$AUTO_BACKUP_FILE_NAME"
+
+    val measuredBytes = listOfNotNull(
+      defaultFile?.takeIf { it.exists() }?.length(),
+      internalFile?.takeIf { it.exists() }?.length(),
+      p.getString(KEY_VAULT_BACKUP_JSON, null)?.toByteArray(Charsets.UTF_8)?.size?.toLong(),
+    ).maxOrNull()?.coerceAtLeast(0L) ?: 0L
+
+    val formattedSize = formatFileSizeKb(measuredBytes)
+    val healthBadge = if (measuredBytes > 20L) {
+      "VERIFIED • $formattedSize"
+    } else {
+      "STANDBY • 0.0 KB"
+    }
+
+    val pathSummary = if (effectiveFolderMode == AutoBackupFolderMode.CUSTOM_FOLDER && customFolderName.isNotBlank()) {
+      "$customFolderName/$AUTO_BACKUP_FILE_NAME"
+    } else {
+      "$DEFAULT_AUTO_BACKUP_DIR_NAME/$AUTO_BACKUP_FILE_NAME"
+    }
+
+    return AutoBackupConfigState(
+      enabled = enabled,
+      frequency = frequency,
+      folderMode = effectiveFolderMode,
+      customFolderTreeUri = rawTreeUri,
+      customFolderDisplayName = customFolderName,
+      customDocumentUri = customDocUri,
+      lastAutoBackupEpochMs = lastEpochMs,
+      lastAutoBackupFormatted = if (lastEpochMs > 0L) formatBackupTimestamp(lastEpochMs) else "Pending first run",
+      lastAutoBackupTriggerReason = lastReason,
+      activeTargetPathSummary = pathSummary,
+      defaultFolderAbsolutePath = defaultAbsPath,
+      defaultInternalMirrorPath = internalAbsPath,
+      lastBackupFileSizeBytes = measuredBytes,
+      lastBackupFileSizeFormatted = formattedSize,
+      backupHealthBadge = healthBadge,
+      totalOverwritesCount = totalCount,
+    )
+  }
+
+  private fun extractReadableFolderName(treeUriString: String): String {
+    return runCatching {
+      val uri = Uri.parse(treeUriString)
+      val docId = DocumentsContract.getTreeDocumentId(uri)
+      val cleaned = docId.substringAfter(":", docId).trim('/')
+      if (cleaned.isNotBlank()) cleaned else "Selected Folder"
+    }.getOrDefault("Selected Folder")
+  }
+
+  fun updateAutoBackupEnabled(context: Context, enabled: Boolean): AutoBackupConfigState {
+    vaultPrefs(context).edit()
+      .putBoolean(KEY_AUTO_BACKUP_ENABLED, enabled)
+      .apply()
+    if (enabled) {
+      checkAndRunScheduledAutoBackupIfDue(context, forceIfNeverRun = true)
+    }
+    runCatching { BioSyncAutoBackupScheduler.scheduleOrCancelAutoBackupAlarm(context) }
+    return loadAutoBackupConfig(context)
+  }
+
+  fun updateAutoBackupFrequency(
+    context: Context,
+    frequency: AutoBackupFrequencyOption,
+  ): AutoBackupConfigState {
+    vaultPrefs(context).edit()
+      .putBoolean(KEY_AUTO_BACKUP_ENABLED, true)
+      .putString(KEY_AUTO_BACKUP_FREQUENCY, frequency.code)
+      .apply()
+    if (frequency == AutoBackupFrequencyOption.EVERY_LOG) {
+      executeAutoBackupOverwrite(context, triggerReason = "EVERY LOG")
+    } else {
+      checkAndRunScheduledAutoBackupIfDue(context, forceIfNeverRun = true)
+    }
+    runCatching { BioSyncAutoBackupScheduler.scheduleOrCancelAutoBackupAlarm(context) }
+    return loadAutoBackupConfig(context)
+  }
+
+  fun setDefaultAutoBackupFolder(context: Context): AutoBackupConfigState {
+    vaultPrefs(context).edit()
+      .putString(KEY_AUTO_BACKUP_FOLDER_MODE, AutoBackupFolderMode.DEFAULT_FOLDER.code)
+      .apply()
+    executeAutoBackupOverwrite(context, triggerReason = "DEFAULT FOLDER")
+    return loadAutoBackupConfig(context)
+  }
+
+  fun setCustomAutoBackupFolder(
+    context: Context,
+    treeUri: Uri,
+  ): AutoBackupConfigState {
+    val readableName = extractReadableFolderName(treeUri.toString())
+    vaultPrefs(context).edit()
+      .putString(KEY_AUTO_BACKUP_FOLDER_MODE, AutoBackupFolderMode.CUSTOM_FOLDER.code)
+      .putString(KEY_AUTO_BACKUP_CUSTOM_TREE_URI, treeUri.toString())
+      .putString(KEY_AUTO_BACKUP_CUSTOM_FOLDER_NAME, readableName)
+      .putString(KEY_AUTO_BACKUP_CUSTOM_DOC_URI, "")
+      .apply()
+    executeAutoBackupOverwrite(context, triggerReason = "CUSTOM FOLDER")
+    return loadAutoBackupConfig(context)
+  }
+
+  /**
+   * Overwrites the existing `biosync_autobackup_vault.json` inside the user's chosen SAF folder
+   * (or creates it once if not yet present in that folder, then overwrites it on every subsequent run).
+   */
+  private fun overwriteFileInCustomFolder(
+    context: Context,
+    treeUriString: String,
+    cachedDocUriString: String,
+    json: String,
+  ): Boolean {
+    if (treeUriString.isBlank()) return false
+    return runCatching {
+      val appCtx = context.applicationContext
+      val resolver = appCtx.contentResolver
+      val treeUri = Uri.parse(treeUriString)
+      val treeDocId = DocumentsContract.getTreeDocumentId(treeUri)
+      val parentDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, treeDocId)
+
+      var targetDocUri: Uri? = if (cachedDocUriString.isNotBlank()) {
+        runCatching { Uri.parse(cachedDocUriString) }.getOrNull()
+      } else {
+        null
+      }
+
+      // Verify whether cachedDocUri still exists; if not, search the folder for existing AUTO_BACKUP_FILE_NAME
+      if (targetDocUri != null) {
+        val exists = runCatching {
+          resolver.query(
+            targetDocUri!!,
+            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID),
+            null,
+            null,
+            null,
+          )?.use { it.moveToFirst() } ?: false
+        }.getOrDefault(false)
+        if (!exists) {
+          targetDocUri = null
+        }
+      }
+
+      if (targetDocUri == null) {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, treeDocId)
+        runCatching {
+          resolver.query(
+            childrenUri,
+            arrayOf(
+              DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+              DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            ),
+            null,
+            null,
+            null,
+          )?.use { cursor ->
+            val idIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            while (cursor.moveToNext()) {
+              val name = if (nameIdx >= 0) cursor.getString(nameIdx) else ""
+              if (name.equals(AUTO_BACKUP_FILE_NAME, ignoreCase = true) && idIdx >= 0) {
+                val foundDocId = cursor.getString(idIdx)
+                targetDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, foundDocId)
+                break
+              }
+            }
+          }
+        }
+      }
+
+      if (targetDocUri == null) {
+        targetDocUri = DocumentsContract.createDocument(
+          resolver,
+          parentDocUri,
+          "application/json",
+          AUTO_BACKUP_FILE_NAME,
+        )
+      }
+
+      val finalUri = targetDocUri ?: return false
+      val bytes = json.toByteArray(Charsets.UTF_8)
+      var written = false
+
+      // Truncate to 0 bytes first so existing file is cleanly overwritten in place without leftover tail bytes
+      runCatching {
+        resolver.openFileDescriptor(finalUri, "rw")?.use { pfd ->
+          FileOutputStream(pfd.fileDescriptor).use { fos ->
+            fos.channel.truncate(0L)
+            fos.write(bytes)
+            fos.flush()
+            written = true
+          }
+        }
+      }
+      if (!written) {
+        runCatching {
+          resolver.openOutputStream(finalUri, "wt")?.use { out ->
+            out.write(bytes)
+            out.flush()
+            written = true
+          }
+        }
+      }
+      if (!written) {
+        resolver.openOutputStream(finalUri)?.use { out ->
+          out.write(bytes)
+          out.flush()
+          written = true
+        }
+      }
+
+      if (written) {
+        vaultPrefs(appCtx).edit()
+          .putString(KEY_AUTO_BACKUP_CUSTOM_DOC_URI, finalUri.toString())
+          .apply()
+      }
+      written
+    }.getOrDefault(false)
+  }
+
+  /**
+   * Executes an immediate auto-backup that OVERWRITES the existing backup file in place
+   * (either in the user's Custom Folder or the Default Folder, plus internal Recovery Vault).
+   */
+  @Synchronized
+  fun executeAutoBackupOverwrite(
+    context: Context,
+    triggerReason: String = "AUTO",
+    precomputedJson: String? = null,
+  ): AutoBackupConfigState {
+    val appCtx = context.applicationContext
+    val json = precomputedJson ?: exportFullBackupJson(appCtx)
+    val nowMs = System.currentTimeMillis()
+    val config = loadAutoBackupConfig(appCtx)
+
+    // 1. Always overwrite the Default Folder file (`BioSyncBackups/biosync_autobackup_vault.json`)
+    runCatching {
+      val defaultFile = getDefaultAutoBackupFile(appCtx)
+      defaultFile.writeText(json, Charsets.UTF_8)
+    }
+    runCatching {
+      val internalBackupDir = File(appCtx.filesDir, DEFAULT_AUTO_BACKUP_DIR_NAME)
+      if (!internalBackupDir.exists()) internalBackupDir.mkdirs()
+      File(internalBackupDir, AUTO_BACKUP_FILE_NAME).writeText(json, Charsets.UTF_8)
+    }
+
+    // 2. If user chose a Custom Folder, also overwrite `biosync_autobackup_vault.json` inside that folder
+    if (config.folderMode == AutoBackupFolderMode.CUSTOM_FOLDER && config.customFolderTreeUri.isNotBlank()) {
+      overwriteFileInCustomFolder(
+        context = appCtx,
+        treeUriString = config.customFolderTreeUri,
+        cachedDocUriString = config.customDocumentUri,
+        json = json,
+      )
+    }
+
+    // 3. Also keep the Recovery Vault and durable mirror synchronized with the latest overwrite
+    val newTotal = config.totalOverwritesCount + 1
+    vaultPrefs(appCtx).edit()
+      .putString(KEY_VAULT_BACKUP_JSON, json)
+      .putString(KEY_AUTO_MIRROR_JSON, json)
+      .putLong(KEY_VAULT_CREATED_AT_MS, nowMs)
+      .putLong(KEY_AUTO_BACKUP_LAST_EPOCH_MS, nowMs)
+      .putString(KEY_AUTO_BACKUP_LAST_REASON, triggerReason)
+      .putInt(KEY_AUTO_BACKUP_TOTAL_COUNT, newTotal)
+      .apply()
+
+    return loadAutoBackupConfig(appCtx)
+  }
+
+  /**
+   * Checks whether a scheduled auto-backup (`HOURLY`, `DAILY_24H`, `WEEKLY`, or `EVERY_LOG`) is due
+   * and executes the file overwrite if due.
+   */
+  fun checkAndRunScheduledAutoBackupIfDue(
+    context: Context,
+    forceIfNeverRun: Boolean = false,
+    precomputedJson: String? = null,
+  ): Boolean {
+    val appCtx = context.applicationContext
+    val config = loadAutoBackupConfig(appCtx)
+    if (!config.enabled) return false
+
+    val nowMs = System.currentTimeMillis()
+    val elapsedMs = if (config.lastAutoBackupEpochMs > 0L) {
+      (nowMs - config.lastAutoBackupEpochMs).coerceAtLeast(0L)
+    } else {
+      Long.MAX_VALUE
+    }
+
+    val shouldRun = when (config.frequency) {
+      AutoBackupFrequencyOption.EVERY_LOG -> true
+      AutoBackupFrequencyOption.HOURLY,
+      AutoBackupFrequencyOption.DAILY_24H,
+      AutoBackupFrequencyOption.WEEKLY -> {
+        (forceIfNeverRun && config.lastAutoBackupEpochMs <= 0L) ||
+          elapsedMs >= config.frequency.intervalMillis
+      }
+    }
+
+    if (shouldRun) {
+      executeAutoBackupOverwrite(
+        context = appCtx,
+        triggerReason = config.frequency.shortBadge,
+        precomputedJson = precomputedJson,
+      )
+      return true
+    }
+    return false
   }
 
   /**
@@ -1129,6 +1761,7 @@ object BioSyncBackupManager {
    * Automatically mirrors the active database to durable internal storage (`filesDir`, `noBackupFilesDir`,
    * and `biosync_recovery_vault_v1`) so app updates (`MY_PACKAGE_REPLACED`), process restarts, or
    * OS cache cleanups never wipe out the user's profile, streaks, quick actions, or daily logs.
+   * Also executes the user's configured Auto-Backup file overwrite (`EVERY_LOG`, `HOURLY`, `DAILY_24H`, `WEEKLY`).
    */
   fun autoMirrorCurrentDatabase(context: Context) {
     if (isMirroringGuard) return
@@ -1151,6 +1784,14 @@ object BioSyncBackupManager {
       }
       runCatching {
         File(appCtx.noBackupFilesDir, AUTO_MIRROR_FILE_NAME).writeText(json, Charsets.UTF_8)
+      }
+      // Trigger Auto-Backup file overwrite if configured for "After Every Log" or if the scheduled interval (1h/24h/7d) is due
+      runCatching {
+        checkAndRunScheduledAutoBackupIfDue(
+          context = appCtx,
+          forceIfNeverRun = true,
+          precomputedJson = json,
+        )
       }
     } finally {
       isMirroringGuard = false
@@ -1255,6 +1896,14 @@ object BioSyncBackupManager {
     val raw = vaultPrefs(appCtx).getString(KEY_VAULT_BACKUP_JSON, null)
       ?.takeIf { it.isNotBlank() }
       ?: vaultPrefs(appCtx).getString(KEY_AUTO_MIRROR_JSON, null)?.takeIf { it.isNotBlank() }
+      ?: runCatching {
+        val defaultBackupFile = getDefaultAutoBackupFile(appCtx)
+        if (defaultBackupFile.exists() && defaultBackupFile.length() > 20L) {
+          defaultBackupFile.readText(Charsets.UTF_8)
+        } else {
+          null
+        }
+      }.getOrNull()
       ?: runCatching {
         val f = File(appCtx.filesDir, AUTO_MIRROR_FILE_NAME)
         if (f.exists() && f.length() > 20L) f.readText(Charsets.UTF_8) else null
@@ -1456,14 +2105,27 @@ object BioSyncBackupManager {
       } else {
         bundle.dashboardData
       }
-      BioSyncLocalStore.save(context, bundle.storedState)
-      DashboardLocalStore.save(context, finalDash)
+      val pendingPermissionState = bundle.storedState.copy(
+        protocolLockedIn = false,
+        healthConnectPermissionsGranted = false,
+        activityRecognitionGranted = false,
+      )
+      BioSyncLocalStore.save(context, pendingPermissionState, mirrorToVault = false)
+      BioSyncLocalStore.saveStepTelemetrySnapshot(
+        context = context,
+        healthConnectPermissionsGranted = false,
+        activityRecognitionGranted = false,
+      )
+      DashboardLocalStore.save(context, finalDash, mirrorToVault = false)
       vaultPrefs(context).edit()
         .putString(KEY_VAULT_BACKUP_JSON, rawJson)
         .putString(KEY_AUTO_MIRROR_JSON, rawJson)
         .putLong(KEY_VAULT_CREATED_AT_MS, bundle.meta.createdAtEpochMs)
         .apply()
-      bundle.copy(dashboardData = finalDash)
+      bundle.copy(
+        storedState = pendingPermissionState,
+        dashboardData = finalDash,
+      )
     }
   }
 }

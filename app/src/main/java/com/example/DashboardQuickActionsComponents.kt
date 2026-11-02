@@ -196,9 +196,9 @@ fun DashboardQuickActionsHubCard(
   var showSearchAndSortBar by remember { mutableStateOf(false) }
   var activeSmartSort by remember { mutableStateOf(QuickMacroSmartSort.RECENT) }
 
-  // Separate Manual Expand/Collapse for Meals & Single Items (Collapsed by default)
-  var isMealsExpanded by remember { mutableStateOf(false) }
-  var isSinglesExpanded by remember { mutableStateOf(false) }
+  // Separate Manual Expand/Collapse for Meals & Single Items (Open by default so saved items are immediately visible)
+  var isMealsExpanded by remember { mutableStateOf(true) }
+  var isSinglesExpanded by remember { mutableStateOf(true) }
 
   // Reset category filter if a category becomes empty
   LaunchedEffect(savedMeals.size, savedSingles.size) {
@@ -398,84 +398,55 @@ fun DashboardQuickActionsHubCard(
     // 2. Empty State Console vs Categorized Vault Console
     if (savedQuickItems.isEmpty()) {
       // =======================================================================
-      // EXECUTIVE 2-CHAMBER LAUNCH CONSOLE (When 0 Saved — Crisp, Balanced, Pro)
+      // SCULPTED 3D OBSIDIAN DUAL-ACTUATOR LAUNCH DECK (When 0 Saved)
       // =======================================================================
       Column(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(13.dp))
-          .background(Color(0xFF0A0A0E))
-          .border(1.dp, Color(0xFF25252E), RoundedCornerShape(13.dp))
-          .padding(12.dp),
+        modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
       ) {
-        // Top Specification Strip
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF060608))
-            .border(1.dp, Color(0xFF1E1E26), RoundedCornerShape(8.dp))
-            .padding(horizontal = 10.dp, vertical = 6.5.dp),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-          ) {
-            Box(
-              modifier = Modifier
-                .width(3.dp)
-                .height(11.dp)
-                .clip(RoundedCornerShape(1.5.dp))
-                .background(PureWhite),
-            )
-            Text(
-              text = "NUTRITION VAULT & MEAL ARCHITECT",
-              color = PureWhite,
-              fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.Bold,
-              fontSize = 9.2.sp,
-              letterSpacing = 0.6.sp,
-            )
-          }
-
-          Text(
-            text = "READY",
-            color = warmTitanium,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = 8.6.sp,
-            letterSpacing = 0.5.sp,
-          )
-        }
-
-        // Symmetrical 2-Chamber Tactile Launch Buttons: [+ SINGLE ITEM] & [+ CREATE MEAL]
         Row(
           modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(9.dp),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
           // Chamber 01: + SINGLE ITEM (Retains primary testTag for "+" button compatibility)
           Column(
             modifier = Modifier
               .weight(1f)
-              .clip(RoundedCornerShape(11.dp))
-              .background(
-                brush = Brush.verticalGradient(
-                  colors = listOf(Color(0xFF15151C), Color(0xFF0C0C10)),
-                ),
-              )
-              .border(1.dp, Color(0xFF2E2E3A), RoundedCornerShape(11.dp))
+              .clip(RoundedCornerShape(14.dp))
+              .drawWithCache {
+                val r = 14.dp.toPx()
+                val body = Brush.verticalGradient(
+                  colors = listOf(Color(0xFF191A22), Color(0xFF0E0F15), Color(0xFF08080C)),
+                )
+                val border = Brush.verticalGradient(
+                  colors = listOf(PureWhite.copy(alpha = 0.62f), Color(0xFF2B2D3A), Color(0xFF171820)),
+                )
+                onDrawBehind {
+                  drawRoundRect(brush = body, cornerRadius = CornerRadius(r, r))
+                  drawRoundRect(
+                    brush = border,
+                    cornerRadius = CornerRadius(r, r),
+                    style = Stroke(width = 1.15.dp.toPx()),
+                  )
+                  drawLine(
+                    brush = Brush.horizontalGradient(
+                      colors = listOf(Color.Transparent, PureWhite.copy(alpha = 0.85f), Color.Transparent),
+                    ),
+                    start = Offset(r * 0.7f, 1.dp.toPx()),
+                    end = Offset(size.width - r * 0.7f, 1.dp.toPx()),
+                    strokeWidth = 1.1.dp.toPx(),
+                  )
+                }
+              }
               .clickable(role = Role.Button) {
                 haptics.confirm()
                 popupPreselectedPair = null
                 popupInitialIsMealTab = false
                 showQuickActionPopup = true
               }
-              .padding(11.dp)
+              .padding(13.dp)
               .testTag("quick_actions_plus_button"),
-            verticalArrangement = Arrangement.spacedBy(7.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
           ) {
             Row(
               modifier = Modifier.fillMaxWidth(),
@@ -484,10 +455,14 @@ fun DashboardQuickActionsHubCard(
             ) {
               Box(
                 modifier = Modifier
-                  .size(28.dp)
-                  .clip(RoundedCornerShape(7.dp))
-                  .background(PureWhite)
-                  .border(1.dp, PureWhite, RoundedCornerShape(7.dp)),
+                  .size(32.dp)
+                  .clip(RoundedCornerShape(9.dp))
+                  .background(
+                    brush = Brush.linearGradient(
+                      colors = listOf(PureWhite, Color(0xFFD4D4D8)),
+                    ),
+                  )
+                  .border(1.dp, PureWhite, RoundedCornerShape(9.dp)),
                 contentAlignment = Alignment.Center,
               ) {
                 Text(
@@ -495,16 +470,16 @@ fun DashboardQuickActionsHubCard(
                   color = ObsidianBlack,
                   fontFamily = JetBrainsMonoFontFamily,
                   fontWeight = FontWeight.ExtraBold,
-                  fontSize = 16.sp,
+                  fontSize = 17.sp,
                 )
               }
 
               Box(
                 modifier = Modifier
-                  .clip(RoundedCornerShape(5.dp))
-                  .background(Color(0xFF070709))
-                  .border(1.dp, Color(0xFF272730), RoundedCornerShape(5.dp))
-                  .padding(horizontal = 6.dp, vertical = 2.dp),
+                  .clip(RoundedCornerShape(6.dp))
+                  .background(Color(0xFF090A0F))
+                  .border(1.dp, PureWhite.copy(alpha = 0.28f), RoundedCornerShape(6.dp))
+                  .padding(horizontal = 7.dp, vertical = 2.5.dp),
               ) {
                 Text(
                   text = "01 • ITEM",
@@ -517,20 +492,20 @@ fun DashboardQuickActionsHubCard(
               }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
               Text(
-                text = "Log Single Item",
+                text = "Add Single Item",
                 color = PureWhite,
                 fontFamily = InterFontFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 13.8.sp,
               )
               Text(
-                text = "Pin individual food with custom color ID",
+                text = "Pin food with custom color ID & 1-tap macro logging",
                 color = Zinc300,
                 fontFamily = InterFontFamily,
-                fontSize = 10.5.sp,
-                lineHeight = 14.sp,
+                fontSize = 10.6.sp,
+                lineHeight = 14.2.sp,
               )
             }
           }
@@ -539,21 +514,40 @@ fun DashboardQuickActionsHubCard(
           Column(
             modifier = Modifier
               .weight(1f)
-              .clip(RoundedCornerShape(11.dp))
-              .background(
-                brush = Brush.verticalGradient(
-                  colors = listOf(Color(0xFF15151C), Color(0xFF0C0C10)),
-                ),
-              )
-              .border(1.dp, Color(0xFF2E2E3A), RoundedCornerShape(11.dp))
+              .clip(RoundedCornerShape(14.dp))
+              .drawWithCache {
+                val r = 14.dp.toPx()
+                val body = Brush.verticalGradient(
+                  colors = listOf(Color(0xFF1B1914), Color(0xFF100F0D), Color(0xFF08080A)),
+                )
+                val border = Brush.verticalGradient(
+                  colors = listOf(warmTitanium.copy(alpha = 0.72f), Color(0xFF332E24), Color(0xFF191713)),
+                )
+                onDrawBehind {
+                  drawRoundRect(brush = body, cornerRadius = CornerRadius(r, r))
+                  drawRoundRect(
+                    brush = border,
+                    cornerRadius = CornerRadius(r, r),
+                    style = Stroke(width = 1.15.dp.toPx()),
+                  )
+                  drawLine(
+                    brush = Brush.horizontalGradient(
+                      colors = listOf(Color.Transparent, warmTitanium.copy(alpha = 0.85f), Color.Transparent),
+                    ),
+                    start = Offset(r * 0.7f, 1.dp.toPx()),
+                    end = Offset(size.width - r * 0.7f, 1.dp.toPx()),
+                    strokeWidth = 1.1.dp.toPx(),
+                  )
+                }
+              }
               .clickable(role = Role.Button) {
                 haptics.confirm()
                 popupPreselectedPair = null
                 popupInitialIsMealTab = true
                 showQuickActionPopup = true
               }
-              .padding(11.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp),
+              .padding(13.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
           ) {
             Row(
               modifier = Modifier.fillMaxWidth(),
@@ -562,10 +556,14 @@ fun DashboardQuickActionsHubCard(
             ) {
               Box(
                 modifier = Modifier
-                  .size(28.dp)
-                  .clip(RoundedCornerShape(7.dp))
-                  .background(warmTitanium)
-                  .border(1.dp, PureWhite, RoundedCornerShape(7.dp)),
+                  .size(32.dp)
+                  .clip(RoundedCornerShape(9.dp))
+                  .background(
+                    brush = Brush.linearGradient(
+                      colors = listOf(PureWhite, warmTitanium),
+                    ),
+                  )
+                  .border(1.dp, PureWhite, RoundedCornerShape(9.dp)),
                 contentAlignment = Alignment.Center,
               ) {
                 Text(
@@ -573,16 +571,16 @@ fun DashboardQuickActionsHubCard(
                   color = ObsidianBlack,
                   fontFamily = JetBrainsMonoFontFamily,
                   fontWeight = FontWeight.ExtraBold,
-                  fontSize = 16.sp,
+                  fontSize = 17.sp,
                 )
               }
 
               Box(
                 modifier = Modifier
-                  .clip(RoundedCornerShape(5.dp))
-                  .background(Color(0xFF070709))
-                  .border(1.dp, Color(0xFF272730), RoundedCornerShape(5.dp))
-                  .padding(horizontal = 6.dp, vertical = 2.dp),
+                  .clip(RoundedCornerShape(6.dp))
+                  .background(Color(0xFF12100B))
+                  .border(1.dp, warmTitanium.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
+                  .padding(horizontal = 7.dp, vertical = 2.5.dp),
               ) {
                 Text(
                   text = "02 • MEAL",
@@ -595,229 +593,195 @@ fun DashboardQuickActionsHubCard(
               }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
               Text(
                 text = "Create Meal",
                 color = PureWhite,
                 fontFamily = InterFontFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 13.8.sp,
               )
               Text(
-                text = "Combine single items & fuse colors",
+                text = "Combine single items or hold 2.0s to fuse colors",
                 color = Zinc300,
                 fontFamily = InterFontFamily,
-                fontSize = 10.5.sp,
-                lineHeight = 14.sp,
+                fontSize = 10.6.sp,
+                lineHeight = 14.2.sp,
               )
             }
           }
-        }
-
-        // Bottom 3-Pillar Architecture Specification Bar
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF060608))
-            .border(1.dp, Color(0xFF1D1D24), RoundedCornerShape(8.dp))
-            .padding(vertical = 7.dp, horizontal = 8.dp),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Text(
-            text = "CATEGORIZED VAULT",
-            color = Zinc200,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = 8.0.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.weight(1f),
-          )
-          Box(
-            modifier = Modifier
-              .width(1.dp)
-              .height(10.dp)
-              .background(Zinc800),
-          )
-          Text(
-            text = "2.0S HOLD OVERLAP",
-            color = PureWhite,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = 8.0.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.weight(1f),
-          )
-          Box(
-            modifier = Modifier
-              .width(1.dp)
-              .height(10.dp)
-              .background(Zinc800),
-          )
-          Text(
-            text = "COLOR MIX ALCHEMY",
-            color = warmTitanium,
-            fontFamily = JetBrainsMonoFontFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = 8.0.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.weight(1f),
-          )
         }
       }
     } else {
-      // Dynamic Categorized Control Bar when user has saved items
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        QuickActionPlusActuatorButton(
-          compact = true,
-          onClick = {
-            haptics.confirm()
-            popupPreselectedPair = null
-            popupInitialIsMealTab = activeCategory == QuickShelfCategoryFilter.MEALS
-            showQuickActionPopup = true
-          },
-        )
-
-        // Dynamic Category Selector Tabs (ALL / MEALS / SINGLE ITEMS)
-        Row(
-          modifier = Modifier
-            .weight(1f)
-            .clip(RoundedCornerShape(11.dp))
-            .background(Color(0xFF07070A))
-            .border(1.dp, Color(0xFF25252E), RoundedCornerShape(11.dp))
-            .padding(4.dp),
-          horizontalArrangement = Arrangement.spacedBy(4.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          val categoriesToShow = buildList {
-            add(QuickShelfCategoryFilter.ALL to "ALL (${savedQuickItems.size})")
-            if (savedMeals.isNotEmpty()) {
-              add(QuickShelfCategoryFilter.MEALS to "MEALS (${savedMeals.size})")
-            }
-            if (savedSingles.isNotEmpty()) {
-              add(QuickShelfCategoryFilter.SINGLE_ITEMS to "ITEMS (${savedSingles.size})")
-            }
-          }
-
-          categoriesToShow.forEach { (cat, label) ->
-            val selected = activeCategory == cat
-            Box(
-              modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(8.dp))
-                .background(if (selected) PureWhite else Color.Transparent)
-                .clickable(role = Role.Tab) {
-                  haptics.selection()
-                  activeCategory = cat
-                  if (cat == QuickShelfCategoryFilter.MEALS) {
-                    isMealsExpanded = true
-                  } else if (cat == QuickShelfCategoryFilter.SINGLE_ITEMS) {
-                    isSinglesExpanded = true
-                  }
-                }
-                .padding(vertical = 8.dp, horizontal = 4.dp)
-                .testTag("quick_actions_cat_${cat.name.lowercase()}"),
-              contentAlignment = Alignment.Center,
-            ) {
-              Text(
-                text = label,
-                color = if (selected) ObsidianBlack else PureWhite,
-                fontFamily = JetBrainsMonoFontFamily,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 8.8.sp,
-                letterSpacing = 0.4.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-              )
-            }
-          }
-        }
-      }
-
-      Spacer(modifier = Modifier.height(8.dp))
-
-      // =========================================================================
-      // SEPARATE MANUAL COLLAPSE / OPEN COMMAND BAR (Collapsed by Default)
-      // Allows opening or collapsing all Meals and all Single Items separately.
-      // =========================================================================
-      Row(
+      // Unified Sculpted 3D Command Deck when user has saved items
+      Column(
         modifier = Modifier
           .fillMaxWidth()
-          .clip(RoundedCornerShape(10.dp))
-          .background(Color(0xFF07070A))
-          .border(1.dp, Color(0xFF23232D), RoundedCornerShape(10.dp))
-          .padding(horizontal = 8.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+          .clip(RoundedCornerShape(13.dp))
+          .background(
+            brush = Brush.verticalGradient(
+              colors = listOf(Color(0xFF13141C), Color(0xFF090A0E)),
+            ),
+          )
+          .border(1.dp, Color(0xFF272936), RoundedCornerShape(13.dp))
+          .padding(9.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        // 1. Separate Manual Open / Collapse Button for ALL MEALS
-        if (savedMeals.isNotEmpty()) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          QuickActionPlusActuatorButton(
+            compact = true,
+            onClick = {
+              haptics.confirm()
+              popupPreselectedPair = null
+              popupInitialIsMealTab = activeCategory == QuickShelfCategoryFilter.MEALS
+              showQuickActionPopup = true
+            },
+          )
+
+          // Dynamic Category Selector Tabs (ALL / MEALS / SINGLE ITEMS)
           Row(
             modifier = Modifier
               .weight(1f)
-              .clip(RoundedCornerShape(6.dp))
-              .background(if (isMealsExpanded) PureWhite else Color(0xFF13131A))
-              .border(
-                width = 1.dp,
-                color = if (isMealsExpanded) PureWhite else Color(0xFF2D2D3A),
-                shape = RoundedCornerShape(6.dp),
-              )
-              .clickable(role = Role.Button) {
-                haptics.selection()
-                isMealsExpanded = !isMealsExpanded
-              }
-              .padding(horizontal = 8.dp, vertical = 5.dp)
-              .testTag("quick_actions_toggle_meals_collapse"),
-            horizontalArrangement = Arrangement.Center,
+              .clip(RoundedCornerShape(10.dp))
+              .background(Color(0xFF060609))
+              .border(1.dp, Color(0xFF232532), RoundedCornerShape(10.dp))
+              .padding(3.5.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
           ) {
-            Text(
-              text = if (isMealsExpanded) "MEALS (${savedMeals.size}): OPEN ▲" else "MEALS (${savedMeals.size}): COLLAPSED ▼",
-              color = if (isMealsExpanded) ObsidianBlack else PureWhite,
-              fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.ExtraBold,
-              fontSize = 8.0.sp,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
-            )
+            val categoriesToShow = buildList {
+              add(QuickShelfCategoryFilter.ALL to "ALL (${savedQuickItems.size})")
+              if (savedMeals.isNotEmpty()) {
+                add(QuickShelfCategoryFilter.MEALS to "MEALS (${savedMeals.size})")
+              }
+              if (savedSingles.isNotEmpty()) {
+                add(QuickShelfCategoryFilter.SINGLE_ITEMS to "ITEMS (${savedSingles.size})")
+              }
+            }
+
+            categoriesToShow.forEach { (cat, label) ->
+              val selected = activeCategory == cat
+              Box(
+                modifier = Modifier
+                  .weight(1f)
+                  .clip(RoundedCornerShape(7.dp))
+                  .background(
+                    if (selected) {
+                      Brush.verticalGradient(listOf(PureWhite, Color(0xFFE4E4E7)))
+                    } else {
+                      Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
+                    },
+                  )
+                  .clickable(role = Role.Tab) {
+                    haptics.selection()
+                    activeCategory = cat
+                    if (cat == QuickShelfCategoryFilter.MEALS) {
+                      isMealsExpanded = true
+                    } else if (cat == QuickShelfCategoryFilter.SINGLE_ITEMS) {
+                      isSinglesExpanded = true
+                    }
+                  }
+                  .padding(vertical = 7.5.dp, horizontal = 4.dp)
+                  .testTag("quick_actions_cat_${cat.name.lowercase()}"),
+                contentAlignment = Alignment.Center,
+              ) {
+                Text(
+                  text = label,
+                  color = if (selected) ObsidianBlack else PureWhite,
+                  fontFamily = JetBrainsMonoFontFamily,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 8.6.sp,
+                  letterSpacing = 0.4.sp,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                )
+              }
+            }
           }
         }
 
-        // 2. Separate Manual Open / Collapse Button for ALL SINGLE ITEMS
-        if (savedSingles.isNotEmpty()) {
-          Row(
-            modifier = Modifier
-              .weight(1f)
-              .clip(RoundedCornerShape(6.dp))
-              .background(if (isSinglesExpanded) PureWhite else Color(0xFF13131A))
-              .border(
-                width = 1.dp,
-                color = if (isSinglesExpanded) PureWhite else Color(0xFF2D2D3A),
-                shape = RoundedCornerShape(6.dp),
+        // Sleek Inline Section Fold Bar (Preserves testTags while eliminating boxy clutter)
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          if (savedMeals.isNotEmpty()) {
+            Row(
+              modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(7.dp))
+                .background(if (isMealsExpanded) Color(0xFF1A1915) else Color(0xFF0E0F14))
+                .border(
+                  width = 1.dp,
+                  color = if (isMealsExpanded) warmTitanium.copy(alpha = 0.65f) else Color(0xFF252632),
+                  shape = RoundedCornerShape(7.dp),
+                )
+                .clickable(role = Role.Button) {
+                  haptics.selection()
+                  isMealsExpanded = !isMealsExpanded
+                }
+                .padding(horizontal = 8.dp, vertical = 5.dp)
+                .testTag("quick_actions_toggle_meals_collapse"),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Text(
+                text = "MEALS (${savedMeals.size})",
+                color = if (isMealsExpanded) warmTitanium else Zinc300,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 7.9.sp,
               )
-              .clickable(role = Role.Button) {
-                haptics.selection()
-                isSinglesExpanded = !isSinglesExpanded
-              }
-              .padding(horizontal = 8.dp, vertical = 5.dp)
-              .testTag("quick_actions_toggle_singles_collapse"),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            Text(
-              text = if (isSinglesExpanded) "ITEMS (${savedSingles.size}): OPEN ▲" else "ITEMS (${savedSingles.size}): COLLAPSED ▼",
-              color = if (isSinglesExpanded) ObsidianBlack else PureWhite,
-              fontFamily = JetBrainsMonoFontFamily,
-              fontWeight = FontWeight.ExtraBold,
-              fontSize = 8.0.sp,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
-            )
+              Text(
+                text = if (isMealsExpanded) "OPEN ▲" else "FOLDED ▼",
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = 7.6.sp,
+              )
+            }
+          }
+
+          if (savedSingles.isNotEmpty()) {
+            Row(
+              modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(7.dp))
+                .background(if (isSinglesExpanded) Color(0xFF171922) else Color(0xFF0E0F14))
+                .border(
+                  width = 1.dp,
+                  color = if (isSinglesExpanded) PureWhite.copy(alpha = 0.55f) else Color(0xFF252632),
+                  shape = RoundedCornerShape(7.dp),
+                )
+                .clickable(role = Role.Button) {
+                  haptics.selection()
+                  isSinglesExpanded = !isSinglesExpanded
+                }
+                .padding(horizontal = 8.dp, vertical = 5.dp)
+                .testTag("quick_actions_toggle_singles_collapse"),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Text(
+                text = "ITEMS (${savedSingles.size})",
+                color = PureWhite,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 7.9.sp,
+              )
+              Text(
+                text = if (isSinglesExpanded) "OPEN ▲" else "FOLDED ▼",
+                color = if (isSinglesExpanded) PureWhite else Zinc300,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = 7.6.sp,
+              )
+            }
           }
         }
       }
@@ -2212,20 +2176,20 @@ private fun SavedQuickActionItemCard(
           )
         }
 
-        // Tactile Crimson Delete Button
+        // Refined Obsidian-Crimson Delete Button
         Box(
           modifier = Modifier
             .size(23.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(SolidDangerRed)
-            .border(1.dp, SolidDangerRedBorder, RoundedCornerShape(6.dp))
+            .background(Color(0xFF221216))
+            .border(1.dp, SolidDangerRedBorder.copy(alpha = 0.72f), RoundedCornerShape(6.dp))
             .clickable(role = Role.Button, onClick = onDelete)
             .testTag("delete_saved_quick_item_${item.id}"),
           contentAlignment = Alignment.Center,
         ) {
           Text(
             text = "×",
-            color = PureWhite,
+            color = SolidDangerRedBorder,
             fontFamily = JetBrainsMonoFontFamily,
             fontWeight = FontWeight.ExtraBold,
             fontSize = 13.sp,

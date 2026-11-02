@@ -184,6 +184,7 @@ data class BioSyncStoredState(
   val stepSensorBaselineCounter: Float = -1f,
   val stepSensorLastRawCounter: Float = -1f,
   val lastHealthConnectWrittenSteps: Int = 0,
+  val lastHcRecordEndEpochMillis: Long = 0L,
 )
 
 object BioSyncLocalStore {
@@ -245,6 +246,7 @@ object BioSyncLocalStore {
   private const val KEY_STEP_SENSOR_BASELINE = "step_sensor_baseline_counter_v5"
   private const val KEY_STEP_SENSOR_LAST_RAW = "step_sensor_last_raw_counter_v5"
   private const val KEY_LAST_HC_WRITTEN_STEPS = "last_hc_written_steps_v5"
+  private const val KEY_LAST_HC_RECORD_END_EPOCH_MS = "last_hc_record_end_epoch_ms_v5"
 
 
   private fun prefs(context: Context): SharedPreferences =
@@ -394,8 +396,8 @@ object BioSyncLocalStore {
     val p = prefs(context)
     migrateLegacyPrefsIfNeeded(context, p)
 
-    // Self-heal from durable mirror file / Recovery Vault if primary prefs were wiped during an APK update
-    if (!isRestoringMirrorGuard && !p.getBoolean(KEY_PROTOCOL_LOCKED, false)) {
+    // Self-heal from durable mirror file / Recovery Vault ONLY if primary prefs were wiped during an APK update
+    if (!isRestoringMirrorGuard && !p.contains(KEY_PROTOCOL_LOCKED) && !p.contains(KEY_SUBJECT_NAME)) {
       isRestoringMirrorGuard = true
       try {
         BioSyncBackupManager.restoreFromAutoMirrorIfPrimaryMissing(context)
@@ -427,7 +429,11 @@ object BioSyncLocalStore {
       hist.length > 4 || quick.length > 4 || tl.length > 4
     }.getOrDefault(false)
 
-    val lockedIn = p.getBoolean(KEY_PROTOCOL_LOCKED, defaults.protocolLockedIn) || hasExistingDashboardHistory
+    val lockedIn = if (p.contains(KEY_PROTOCOL_LOCKED)) {
+      p.getBoolean(KEY_PROTOCOL_LOCKED, defaults.protocolLockedIn)
+    } else {
+      hasExistingDashboardHistory
+    }
     val lockedAtMs = p.getLong(KEY_PROTOCOL_LOCKED_AT_EPOCH_MS, defaults.protocolLockedAtEpochMillis)
     val storedAnchorMs = p.getLong(KEY_DAY_ONE_ANCHOR_START_EPOCH_MS, defaults.dayOneAnchorStartEpochMillis)
     val effectiveAnchorMs = if (lockedIn && storedAnchorMs <= 0L) {
@@ -491,6 +497,7 @@ object BioSyncLocalStore {
       stepSensorBaselineCounter = p.getFloat(KEY_STEP_SENSOR_BASELINE, defaults.stepSensorBaselineCounter),
       stepSensorLastRawCounter = p.getFloat(KEY_STEP_SENSOR_LAST_RAW, defaults.stepSensorLastRawCounter),
       lastHealthConnectWrittenSteps = p.getInt(KEY_LAST_HC_WRITTEN_STEPS, defaults.lastHealthConnectWrittenSteps),
+      lastHcRecordEndEpochMillis = p.getLong(KEY_LAST_HC_RECORD_END_EPOCH_MS, defaults.lastHcRecordEndEpochMillis),
     )
   }
 
@@ -571,6 +578,7 @@ object BioSyncLocalStore {
     stepSensorBaselineCounter: Float? = null,
     stepSensorLastRawCounter: Float? = null,
     lastHealthConnectWrittenSteps: Int? = null,
+    lastHcRecordEndEpochMillis: Long? = null,
   ) {
     prefs(context).edit().apply {
       decidedDailyStepsGoal?.let { putInt(KEY_DECIDED_DAILY_STEPS_GOAL, it) }
@@ -583,6 +591,7 @@ object BioSyncLocalStore {
       stepSensorBaselineCounter?.let { putFloat(KEY_STEP_SENSOR_BASELINE, it) }
       stepSensorLastRawCounter?.let { putFloat(KEY_STEP_SENSOR_LAST_RAW, it) }
       lastHealthConnectWrittenSteps?.let { putInt(KEY_LAST_HC_WRITTEN_STEPS, it) }
+      lastHcRecordEndEpochMillis?.let { putLong(KEY_LAST_HC_RECORD_END_EPOCH_MS, it) }
       apply()
     }
   }
@@ -647,6 +656,24 @@ object BioSyncLocalStore {
       parts.size == 1 -> "${parts[0].first().uppercaseChar()}•"
       else -> "ID"
     }
+  }
+
+  /**
+   * Returns true if a backup was imported (so profile/dashboard data exists in SharedPreferences)
+   * while `protocol_locked` is explicitly false awaiting Step 04 mandatory permission lock-in.
+   */
+  fun hasRestoredDataPendingLockIn(context: Context): Boolean {
+    val p = prefs(context)
+    if (!p.contains(KEY_PROTOCOL_LOCKED)) return false
+    if (p.getBoolean(KEY_PROTOCOL_LOCKED, false)) return false
+    val hasHistory = runCatching {
+      val dashPrefs = context.applicationContext.getSharedPreferences("biosync_dashboard_telemetry_v1", Context.MODE_PRIVATE)
+      val hist = dashPrefs.getString("dashboard_daily_history_map_json", "{}") ?: "{}"
+      val quick = dashPrefs.getString("dashboard_saved_quick_items_json", "[]") ?: "[]"
+      val tl = dashPrefs.getString("dashboard_timeline_entries_json", "[]") ?: "[]"
+      hist.length > 4 || quick.length > 4 || tl.length > 4
+    }.getOrDefault(false)
+    return hasHistory || p.getLong(KEY_PROTOCOL_LOCKED_AT_EPOCH_MS, 0L) > 0L
   }
 
   /**

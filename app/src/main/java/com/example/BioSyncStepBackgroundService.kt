@@ -1,19 +1,16 @@
 package com.example
 
 import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
-import java.text.NumberFormat
-import java.util.Locale
+import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,12 +19,15 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
  * Real-time background health service that keeps Google Fit & Health Connect
- * telemetry (Total Steps and Distance) lively synchronized even when BioSync is in the background.
+ * telemetry (Total Steps, Distance, Hydration, Macros, and 6-Pillar Readiness)
+ * lively synchronized in the unified 6-Pillar Native XML Telemetry HUD Notification
+ * and Home Screen Widgets.
  */
 class BioSyncStepBackgroundService : Service() {
   private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -35,26 +35,86 @@ class BioSyncStepBackgroundService : Service() {
   private var notificationUpdateJob: Job? = null
   private var lastNotifiedSteps: Int = -1
   private var lastNotifiedDistanceHundredthsKm: Int = -1
+  private var lastStoreRevision: Long = -1L
+  private var isScreenWakeReceiverRegistered = false
+
+  private val screenWakeReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+      val action = intent?.action ?: return
+      if (action == Intent.ACTION_SCREEN_ON || action == Intent.ACTION_USER_PRESENT) {
+        val appCtx = applicationContext
+        BioSyncHealthStepManager.startLiveStepSensorTracking(appCtx)
+        BioSyncHealthStepManager.flushHardwareStepSensorNow(appCtx)
+        serviceScope.launch {
+          runCatching {
+            BioSyncHealthStepManager.syncWithHealthConnect(appCtx, force = false)
+          }
+        }
+      }
+    }
+  }
 
   override fun onCreate() {
     super.onCreate()
+    cancelLegacyDuplicateNotification()
     promoteToForegroundSafely()
+    registerScreenWakeReceiverSafely()
     BioSyncHealthStepManager.startLiveStepSensorTracking(applicationContext)
     startBackgroundSyncLoop()
     startLiveNotificationObserver()
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    cancelLegacyDuplicateNotification()
     promoteToForegroundSafely()
+    registerScreenWakeReceiverSafely()
     BioSyncHealthStepManager.startLiveStepSensorTracking(applicationContext)
     BioSyncHealthStepManager.flushHardwareStepSensorNow(applicationContext)
     if (syncLoopJob?.isActive != true) {
       startBackgroundSyncLoop()
+    } else {
+      serviceScope.launch {
+        runCatching {
+          BioSyncHealthStepManager.syncWithHealthConnect(applicationContext, force = false)
+        }
+      }
     }
     if (notificationUpdateJob?.isActive != true) {
       startLiveNotificationObserver()
     }
     return START_STICKY
+  }
+
+  private fun registerScreenWakeReceiverSafely() {
+    if (isScreenWakeReceiverRegistered) return
+    runCatching {
+      val filter = IntentFilter().apply {
+        addAction(Intent.ACTION_SCREEN_ON)
+        addAction(Intent.ACTION_USER_PRESENT)
+      }
+      ContextCompat.registerReceiver(
+        this,
+        screenWakeReceiver,
+        filter,
+        ContextCompat.RECEIVER_NOT_EXPORTED,
+      )
+      isScreenWakeReceiverRegistered = true
+    }
+  }
+
+  private fun unregisterScreenWakeReceiverSafely() {
+    if (!isScreenWakeReceiverRegistered) return
+    runCatching {
+      unregisterReceiver(screenWakeReceiver)
+    }
+    isScreenWakeReceiverRegistered = false
+  }
+
+  private fun cancelLegacyDuplicateNotification() {
+    runCatching {
+      val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+      nm?.cancel(LEGACY_NOTIFICATION_ID)
+    }
   }
 
   private fun startBackgroundSyncLoop() {
@@ -67,9 +127,10 @@ class BioSyncStepBackgroundService : Service() {
       )
       while (isActive) {
         runCatching {
+          BioSyncHealthStepManager.flushHardwareStepSensorNow(applicationContext)
           BioSyncHealthStepManager.syncWithHealthConnect(applicationContext)
         }
-        delay(30_000L)
+        delay(10_000L)
       }
     }
   }
@@ -77,21 +138,32 @@ class BioSyncStepBackgroundService : Service() {
   private fun startLiveNotificationObserver() {
     notificationUpdateJob?.cancel()
     notificationUpdateJob = serviceScope.launch {
-      val channelId = ensureNotificationChannel()
       val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-      BioSyncHealthStepManager.syncState.collectLatest { state ->
+      combine(
+        BioSyncHealthStepManager.syncState,
+        DashboardLocalStore.storeRevisionFlow,
+      ) { stepState, revision ->
+        stepState to revision
+      }.collectLatest { (state, revision) ->
         val distHundredthsKm = (state.liveDistanceKm * 100f).roundToInt()
         if (
           state.liveTodaySteps != lastNotifiedSteps ||
-          distHundredthsKm != lastNotifiedDistanceHundredthsKm
+          distHundredthsKm != lastNotifiedDistanceHundredthsKm ||
+          revision != lastStoreRevision
         ) {
           lastNotifiedSteps = state.liveTodaySteps
           lastNotifiedDistanceHundredthsKm = distHundredthsKm
+          lastStoreRevision = revision
           runCatching {
-            nm?.notify(NOTIFICATION_ID, buildSilentTelemetryNotification(channelId))
+            if (BioSyncWidgetAndNotificationEngine.hasNotificationPermission(this@BioSyncStepBackgroundService)) {
+              nm?.notify(
+                NOTIFICATION_ID,
+                buildUnified6PillarTelemetryNotification(),
+              )
+            }
             BioSyncWidgetAndNotificationEngine.refreshAllWidgets(this@BioSyncStepBackgroundService)
           }
-          delay(300L)
+          delay(250L)
         }
       }
     }
@@ -99,8 +171,7 @@ class BioSyncStepBackgroundService : Service() {
 
   private fun promoteToForegroundSafely() {
     runCatching {
-      val channelId = ensureNotificationChannel()
-      val notification = buildSilentTelemetryNotification(channelId)
+      val notification = buildUnified6PillarTelemetryNotification()
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
         startForeground(
           NOTIFICATION_ID,
@@ -113,83 +184,16 @@ class BioSyncStepBackgroundService : Service() {
     }
   }
 
-  private fun ensureNotificationChannel(): String {
-    val channelId = "biosync_live_step_telemetry_channel"
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-      val existing = nm?.getNotificationChannel(channelId)
-      if (existing == null && nm != null) {
-        val channel = NotificationChannel(
-          channelId,
-          "BioSync Live Step & Health Sync",
-          NotificationManager.IMPORTANCE_LOW,
-        ).apply {
-          description = "Real-time Google Fit and Health Connect background telemetry sync"
-          setShowBadge(false)
-          enableVibration(false)
-          setSound(null, null)
-        }
-        nm.createNotificationChannel(channel)
-      }
-    }
-    return channelId
-  }
-
-  private fun buildSilentTelemetryNotification(channelId: String): Notification {
-    val openAppIntent = Intent(this, MainActivity::class.java).apply {
-      flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-    }
-    val pendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    } else {
-      PendingIntent.FLAG_UPDATE_CURRENT
-    }
-    val pendingIntent = PendingIntent.getActivity(this, 0, openAppIntent, pendingFlags)
-    val water250Pending = PendingIntent.getBroadcast(
-      this,
-      4109,
-      Intent(this, BioSyncWidgetActionReceiver::class.java).apply {
-        action = BioSyncWidgetAndNotificationEngine.ACTION_WIDGET_LOG_WATER_250
-      },
-      pendingFlags,
+  private fun buildUnified6PillarTelemetryNotification(): Notification {
+    return BioSyncWidgetAndNotificationEngine.buildLiveTelemetryHudNotification(
+      context = this,
+      ongoing = true,
+      channelId = BioSyncWidgetAndNotificationEngine.LIVE_TELEMETRY_CHANNEL_ID,
     )
-    val state = BioSyncHealthStepManager.syncState.value
-    val snap = runCatching { BioSyncWidgetAndNotificationEngine.collectSnapshot(this) }.getOrNull()
-    val fmt = NumberFormat.getIntegerInstance(Locale.US)
-    val stepsFormatted = fmt.format(snap?.liveSteps ?: state.liveTodaySteps)
-    val distKmFormatted = String.format(Locale.US, "%.2f km", state.liveDistanceKm.coerceAtLeast(0f))
-    val summaryLine = if (snap != null) {
-      "$stepsFormatted/${fmt.format(snap.targetSteps)} steps ($distKmFormatted) • " +
-        "${fmt.format(snap.loggedCalories)} kcal • ${fmt.format(snap.loggedWaterMl)}ml H₂O"
-    } else {
-      "$stepsFormatted steps • $distKmFormatted"
-    }
-    val titleText = if (snap != null) {
-      "BioSync HUD • 🔥 ${snap.streakDays}d Streak • ${snap.overallReadinessPercent}% Ready"
-    } else {
-      "BioSync • Synced with Google Fit"
-    }
-
-    return NotificationCompat.Builder(this, channelId)
-      .setSmallIcon(R.drawable.ic_widget_pulse)
-      .setColor(0xFF10B981.toInt())
-      .setContentTitle(titleText)
-      .setContentText(summaryLine)
-      .setSubText("LIVE TELEMETRY")
-      .setStyle(NotificationCompat.BigTextStyle().bigText(summaryLine))
-      .setOngoing(true)
-      .setSilent(true)
-      .setOnlyAlertOnce(true)
-      .setPriority(NotificationCompat.PRIORITY_LOW)
-      .setCategory(NotificationCompat.CATEGORY_SERVICE)
-      .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-      .setContentIntent(pendingIntent)
-      .addAction(R.drawable.ic_widget_plus, "+250ml H₂O", water250Pending)
-      .addAction(R.drawable.ic_widget_flame, "Open HUD", pendingIntent)
-      .build()
   }
 
   override fun onDestroy() {
+    unregisterScreenWakeReceiverSafely()
     syncLoopJob?.cancel()
     notificationUpdateJob?.cancel()
     serviceScope.cancel()
@@ -199,11 +203,18 @@ class BioSyncStepBackgroundService : Service() {
   override fun onBind(intent: Intent?): IBinder? = null
 
   companion object {
-    private const val NOTIFICATION_ID = 4108
+    private const val LEGACY_NOTIFICATION_ID = 4108
+    private const val NOTIFICATION_ID = BioSyncWidgetAndNotificationEngine.LIVE_TELEMETRY_NOTIFICATION_ID
 
     fun startIfAuthorized(context: Context) {
       val appContext = context.applicationContext
-      if (!BioSyncHealthStepManager.hasActivityRecognitionPermission(appContext)) return
+      val hasActivityPerm = BioSyncHealthStepManager.hasActivityRecognitionPermission(appContext)
+      val hasHcPerm = BioSyncLocalStore.load(appContext).healthConnectPermissionsGranted
+      if (!hasActivityPerm && !hasHcPerm) {
+        // Still refresh the 6-Pillar notification even if background health service cannot start
+        BioSyncWidgetAndNotificationEngine.refreshLiveTelemetryNotificationIfActive(appContext)
+        return
+      }
       runCatching {
         val serviceIntent = Intent(appContext, BioSyncStepBackgroundService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -211,6 +222,8 @@ class BioSyncStepBackgroundService : Service() {
         } else {
           appContext.startService(serviceIntent)
         }
+      }.onFailure {
+        BioSyncWidgetAndNotificationEngine.refreshLiveTelemetryNotificationIfActive(appContext)
       }
     }
 
@@ -226,7 +239,8 @@ class BioSyncStepBackgroundService : Service() {
 
 /**
  * Restores background step sensor, Health Connect synchronization, durable user database mirror,
- * Home Screen widgets, and Circadian notifications automatically after a device reboot or app version update.
+ * Auto-Backup AlarmManager schedule, Home Screen widgets, and Circadian notifications automatically
+ * after a device reboot or app version update.
  */
 class BioSyncBootReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context?, intent: Intent?) {
@@ -242,8 +256,10 @@ class BioSyncBootReceiver : BroadcastReceiver() {
       val dash = DashboardLocalStore.load(appContext)
       if (stored.protocolLockedIn || dash.dailyHistoryMap.isNotEmpty() || dash.todayTimelineEntries.isNotEmpty()) {
         BioSyncBackupManager.autoMirrorCurrentDatabase(appContext)
+        BioSyncAutoBackupScheduler.scheduleOrCancelAutoBackupAlarm(appContext)
       }
       BioSyncWidgetAndNotificationEngine.refreshAllWidgets(appContext)
+      BioSyncWidgetAndNotificationEngine.refreshLiveTelemetryNotificationIfActive(appContext)
       if (stored.protocolLockedIn && stored.dayOneInitialCountdownCompleted) {
         BioSyncCircadianHydrationEngine.scheduleCircadianNotifications(
           context = appContext,
