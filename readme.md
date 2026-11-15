@@ -210,20 +210,7 @@ BioSync/
 - Widget <br>
 <img width="1080" height="825" alt="image" src="https://github.com/user-attachments/assets/81672d47-36f3-465b-ab2a-0ad7033f7f72" />
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+- Many moreee........
 
 ## 🛠️ Building from Source
 
