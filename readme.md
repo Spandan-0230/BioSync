@@ -201,7 +201,7 @@ BioSync/
 
 ---
 
-## UI
+## 🖥️ UI
 <img width="540" height="1155" alt="image" src="https://github.com/user-attachments/assets/d392300a-eb4a-449a-91c6-51691012deb9" /><img width="540" height="1158" alt="image" src="https://github.com/user-attachments/assets/fa3531c9-0be1-4326-8a32-1e1c7901fce0" /><img width="540" height="1152" alt="image" src="https://github.com/user-attachments/assets/a1d9c67f-be60-4424-885d-3d4dae510e63" /><img width="540" height="1115" alt="image" src="https://github.com/user-attachments/assets/3a24be3f-5540-4ef8-8ce6-dfef88cbb19d" /><img width="813" height="1280" alt="image" src="https://github.com/user-attachments/assets/a220fc8d-7b00-4000-bced-2a235930f990" /><img width="693" height="1280" alt="image" src="https://github.com/user-attachments/assets/855a7b9d-c888-45be-85ed-7f71e524af45" /><img width="540" height="1110" alt="image" src="https://github.com/user-attachments/assets/f174b1be-6395-41cb-9472-18a319b15239" /><img width="778" height="1280" alt="image" src="https://github.com/user-attachments/assets/cb2754c1-c798-4054-a6d4-b80e2ffaa4be" /><br>
 - Notification <br><br>
 <img width="1080" height="752" alt="image" src="https://github.com/user-attachments/assets/f58cf7d8-3786-4524-b63d-9b8902cbae94" /><br>
